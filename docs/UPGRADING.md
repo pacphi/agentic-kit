@@ -53,11 +53,17 @@ They go into the `env` of `.claude/settings.local.json`, the `agentic-qe` entry 
 (only when it starts AQE's own server), and two tables of the project's `.codex/config.toml`:
 `[mcp_servers.agentic-qe.env]` and `[shell_environment_policy.set]` (the environment Codex gives
 the commands and hooks it runs; pinned when the table exists or AQE is registered in that file).
-Your user-level `~/.codex/config.toml` is never pinned. Each file gets a receipt beside it
+Your user-level `~/.codex/config.toml` is never pinned, and neither is a `.mcp.json` or project
+`.codex/config.toml` that git tracks: a committed absolute path would point your teammates' AQE at a
+path that does not exist on their machines. `ak status` names such a file in an `aqe-pin` hand fix;
+keep it out of git (`git rm --cached`, then `.gitignore`) and run `ak sync` if you want it pinned.
+`.claude/settings.local.json` is always pinned. Each file gets a receipt beside it
 (`<file>.agentic-kit-aqe-pin.json`; the shell table's is
 `.codex/config.toml.agentic-kit-aqe-shell-pin.json`), and `ak uninstall` puts back what was there
-before. AQE's relative `AQE_MEMORY_PATH = ".agentic-qe/memory.db"` in either Codex table is
-replaced, and restored on uninstall. The relative value AQE writes into
+before, removing a table or a `settings.local.json` that ak created and left empty. ak keeps its
+newest backup of each file (`<file>.ak-aqe-pin-backup.<id>`). AQE's relative
+`AQE_MEMORY_PATH = ".agentic-qe/memory.db"` in either Codex table is replaced, also after
+`aqe init` writes it back, and restored on uninstall. The relative value AQE writes into
 `.claude/settings.json` stays: Claude Code gives `settings.local.json` precedence.
 
 A value you set yourself is kept. `ak status` then shows an `aqe-pin` row that names the file for
@@ -73,7 +79,12 @@ Stores AQE already created in subfolders stay where they are until you merge the
 
 `ak status` now shows stray AQE stores (a `.agentic-qe` folder with a `memory.db` below the project
 root) as a hand fix. `ak x aqe-store status`, or `ak x aqe-store merge` without `--yes`, previews
-what a merge would do. It works on copies and opens no store in place.
+what a merge would do. It opens no store in place, but it is not free: it copies the whole project
+store and every stray store into ak's state folder, and runs `aqe init --auto --minimal` and
+`aqe learning stats` in a scratch folder there to find AQE's starter patterns (the init runs
+`npm exec ruflo --version`, which may reach the npm registry). It removes the copies when it
+finishes. It also reports a project store that already fails SQLite's integrity or foreign-key
+check, and an earlier merge that was interrupted during its import.
 
 With every Claude Code, Codex and OpenCode session in the project closed,
 `ak x aqe-store merge --yes`:
@@ -85,9 +96,11 @@ With every Claude Code, Codex and OpenCode session in the project closed,
   (`%LOCALAPPDATA%\agentic-kit\aqe-store-merge\` on Windows), beside the backup and a
   `receipt.json`.
 
-It needs agentic-qe 3.14.4 or later and refuses while any process holds a store; there is no
-`--force`. Audit-trail rows and AQE's starter patterns are not imported; they stay in the
-archive. To identify the starter patterns, the merge builds a fresh AQE store in its scratch
+It needs agentic-qe 3.14.4 or later and refuses while any process holds a store, or when it
+cannot tell; there is no `--force`. A store that changes after the merge copied it stops the merge
+before its import, or, during the import, stays in place. A nested repository or a worktree inside
+the checkout keeps its own store and is skipped. Audit-trail rows and the AQE starter patterns the
+project store lacks are not imported; they stay in the archive. To identify the starter patterns, the merge builds a fresh AQE store in its scratch
 folder with your project's AQE embedder, so the embedder must be reachable (for Ollama, start it
 first). ak keeps the archive until you delete it; see
 [TROUBLESHOOTING](TROUBLESHOOTING.md#restore-an-aqe-store-from-the-merge-archive) to restore one.

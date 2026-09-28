@@ -20,18 +20,26 @@ project root; the project's hosts never read it.
 Usage: ak x aqe-store [status|merge] [options]
 
   status   preview: patterns and experiences per stray, how many the root
-           already has, how many are AQE starter patterns (left out), the
-           root's counts after a merge, and which processes
-           hold the stores (read from copies; no store is opened in place)
+           already has, how many are AQE starter patterns, the root's counts
+           after a merge, and which processes hold the stores. No store is
+           opened in place, but it is not free: it copies the whole root
+           store and every stray store into ak's state folder and runs
+           aqe init --auto --minimal and aqe learning stats --json in a
+           scratch folder there (the init runs npm exec ruflo --version),
+           then removes the copies. It also reports a root that already fails
+           its integrity or foreign-key check and an interrupted earlier merge.
+           A nested repository or worktree keeps its own store (skipped).
   merge    the same preview (a dry run) unless --yes; with --yes:
-           1. refuses while any process holds the root or a stray store
-              (close the Claude Code, Codex and OpenCode sessions in this
-              project first); there is no --force
+           1. refuses while any process holds the root or a stray store, or
+              when that cannot be checked (close the Claude Code, Codex and
+              OpenCode sessions in this project first); there is no --force
            2. backs up the root store (VACUUM INTO)
            3. rehearses AQE's own brain export/import on copies and checks the
               counts, integrity and foreign keys
-           4. imports into the root store and checks the counts again
-           5. moves each whole stray folder into the archive
+           4. stops if a store changed since its copy; records the run as
+              applying, imports into the root store, checks the counts again
+           5. moves each whole stray folder into the archive; one that
+              changed during the import stays in place
            Audit-trail (witness_chain) rows are not imported; they stay in the
            archive. A folder without memory.db is skipped and reported.
            AQE's starter patterns the root lacks are not imported either: ak

@@ -72,7 +72,7 @@ ak sync             # apply it
 | `status` says an external `agent-browser` is outside Ruflo's range | You installed a newer `agent-browser` yourself. ak never replaces a user-managed install, so `sync` cannot clear this, and Ruflo's browser tools may not work with that version | Install a Ruflo-compatible `agent-browser` 0.27.x yourself, or set `agentBrowser: false` in `~/.config/agentic-kit/kit.json` to stop ak managing the executor (Ruflo MCP then no longer gets ak's trusted browser config or readiness checks) |
 | `status` lists a stray memory store | A tool wrote a store where this project's hosts do not read it, usually because it ran in another folder. ak only reports it | Nothing breaks. To keep its rows, inspect it read-only first; see [Stray memory stores](#stray-memory-stores) |
 | `status` shows a `memory-pin` warning | `CLAUDE_FLOW_DB_PATH` is pinned to a dead or foreign path, so every memory op targets the wrong DB ("Database not initialized" beside a healthy in-repo DB). The pin may be deliberate, so `sync` never touches it | repoint (or remove) the pin in `.claude/settings.local.json` `env` |
-| `status` shows an `aqe-pin` warning | AQE is not pinned to this project's root yet, a pin names another checkout's root (a copied `.claude/settings.local.json`), or a file holds an `AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH` or `AQE_STORAGE_PATH` value ak did not write. Without the pin, a command, hook or MCP server started in a subfolder creates its own `.agentic-qe` there | Not pinned: `ak sync`. Another root or a value you set: edit the named file by hand (remove the three keys), then run `ak sync` in this checkout; see [UPGRADING](UPGRADING.md#2026-09-27-aqe-is-pinned-to-the-project-root) |
+| `status` shows an `aqe-pin` warning | AQE is not pinned to this project's root yet, a pin names another checkout's root (a copied `.claude/settings.local.json`), a file holds an `AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH` or `AQE_STORAGE_PATH` value ak did not write, or git tracks `.mcp.json` or `.codex/config.toml` (ak never writes a machine path into a committed file). Without the pin, a command, hook or MCP server started in a subfolder creates its own `.agentic-qe` there | Not pinned: `ak sync`. Another root or a value you set: edit the named file by hand (remove the three keys), then run `ak sync` in this checkout. A tracked file: untrack it (`git rm --cached`, then `.gitignore`) and run `ak sync`, or start sessions from the project root; see [UPGRADING](UPGRADING.md#2026-09-27-aqe-is-pinned-to-the-project-root) |
 | MCP tool governance stays `unknown` | No Ruflo MCP tool call was audited in the last 24 hours. Ruflo below 3.46.0 does not route stdio MCP tool calls through its policy enforcer, so no audit records are written there even though ak wrote the policy file and set `RUFLO_MCP_ENFORCE_POLICY=1` | Use a Ruflo MCP tool in the project; on Ruflo below 3.46.0 run `ak sync` to upgrade. A project whose `.harness/mcp-policy.json` is invalid shows `mcpGovernance: blocked` instead: restore a valid, ak-written file and run `ak sync`, which also removes the enforcement variable for that project until the file is fixed |
 | A [ruflo component](MANAGED-TOOLS.md#managed-ruflo-components) stays `applied, not verified` | Claude Code, Codex, and OpenCode read their environment only at process start-up, so a change setup or sync just made has not reached a running session yet | Restart Claude Code, Codex, and OpenCode, then run `ak status --refresh` to re-collect evidence with the new environment in effect |
 | Want to run `ak sync` but Claude/Codex/OpenCode sessions are open in other terminals | Upgrade-bearing syncs stop **all** ruflo daemons machine-wide and swap the global npm trees live sessions execute hooks/statusline/MCP calls from; even a no-upgrade sync can repair configuration or missing dependencies | `ak sync --dry-run` first; a `versions` row means idle the other sessions or use `ak sync --no-upgrade` (or `ak sync --skip versions` to hold back only the package upgrades); see [Running `ak sync` while sessions are live](UPGRADING.md#running-ak-sync-while-sessions-are-live) |
@@ -369,18 +369,25 @@ as described above. It may hold rows that exist nowhere else.
 ### Merge stray AQE stores
 
 `ak x aqe-store status` shows, for each stray AQE store, its patterns and captured experiences,
-how many patterns the project store already has, how many are AQE's starter patterns (never
-imported), and which processes hold a store. Close every Claude Code, Codex and OpenCode session
+how many patterns and experiences the project store already has (AQE skips those), how many are
+AQE's starter patterns (imported only when the project store holds them already, so their usage
+is kept), and which processes hold a store. Building the preview copies every store into ak's
+state folder and starts AQE there twice. Close every Claude Code, Codex and OpenCode session
 in the project (their AQE MCP servers and hooks write the store), then run
 `ak x aqe-store merge --yes`.
 
 | The merge says | Why | Fix |
 |---|---|---|
 | `refused: N process(es) hold the AQE stores: PID …` | A session's AQE MCP server or hook has a store open. AQE takes no lock a merge could wait on | Close the named processes' sessions and run it again. There is no `--force` |
-| `could not check which processes hold the AQE stores` | `lsof` is missing or failed (macOS, Linux) | Install `lsof`, or run it where it works |
+| `could not check which processes hold the AQE stores` | `lsof` is missing, failed, or timed out (macOS, Linux) | Install `lsof`, or run it again when the machine is less busy |
+| `refused: … changed since …` | A store was written after the merge copied it: a hook, a manual `aqe` run or a session in a subfolder | Close that writer and run the merge again |
+| `the project store … already fails integrity_check` or `foreign_key_check` | The project store was damaged before any merge; nothing was written | Repair the store with AQE first, or restore an earlier backup |
+| `an earlier merge (…) was interrupted during its import` | A merge stopped between its imports; its receipt still says `applying` | Run the merge again to finish it, or restore that run's backup (steps below) |
+| `…: partially moved: …` | Across filesystems the archive copy is complete, but removing the stray failed part-way | Close what holds it, then delete what is left of the stray by hand |
 | `could not build AQE's starter pattern set` | The fresh AQE store the merge builds in its scratch folder holds no patterns, usually because the project's AQE embedder is unreachable | Start the embedder (for Ollama, `ollama serve`) and run it again |
 | `merge failed: … count mismatch …` | The project store changed during the merge, or AQE imported fewer rows than the rehearsal | The strays stay in place. Restore the project store from the backup the message names (steps below) if you want the state before the merge |
 | `left in place: … EBUSY` (Windows) | A process still held that folder | Close it and run the merge again |
+| `left in place: … changed since it was copied` | The stray was written during the import; its data may be newer than the copy | Run the merge again to merge what it gained |
 
 #### Restore an AQE store from the merge archive
 

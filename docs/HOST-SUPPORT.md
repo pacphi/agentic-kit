@@ -156,7 +156,8 @@ The dated upstream risk inventory includes:
 
 Agentic-kit pins `AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH` and `AQE_STORAGE_PATH` to the project root,
 so an AQE command, hook or MCP server started in a subfolder uses the project's store instead of
-creating its own. `ak x aqe-store merge` merges stores AQE made in subfolders before the pin
+creating its own. A `.mcp.json` or project `.codex/config.toml` that git tracks is not pinned,
+because a committed absolute path would not exist on a teammate's machine. `ak x aqe-store merge` merges stores AQE made in subfolders before the pin
 ([ADR-0062](adr/0062-aqe-project-store-integrity.md)).
 
 The OpenCode boundary is precise: AQE can provision OpenCode agents, skills, MCP,
