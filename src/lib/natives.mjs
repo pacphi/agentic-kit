@@ -8,6 +8,9 @@ import path from 'node:path';
 import { rufloRoot, rufloNodeModules, rufloCliDist, aqeRoot } from './paths.mjs';
 import { run } from './exec.mjs';
 import { readJson } from './settings.mjs';
+import { readEvidence, writeEvidence, stableInputsKey } from './evidence.mjs';
+
+const RUNTIME_EVIDENCE_MAX_AGE_MS = 6 * 3600_000;
 
 /** agentdb locations under the global ruflo tree (mirrors ruflo-patch-native). */
 export function agentdbLocations() {
@@ -238,16 +241,54 @@ export async function probeBsq3Runtime(dir, { runner = run, timeoutMs = PROBE_TI
  *  when ruflo is absent (EC-1: status/pre-flight skip, never crash). Probes run in
  *  parallel to stay inside the status time budget. `bindingPresent` says whether
  *  the resolved package has a build/Release binding file at all — what sync's heal
- *  keys on — so status can say which repair applies. */
-export async function rufloRuntimeNatives({ runner = run } = {}) {
+ *  keys on — so status can say which repair applies.
+ *
+ *  `refresh` (default true) controls whether a plain `ak status` may skip the
+ *  spawn: `refresh: false` reuses cached evidence when it is still within
+ *  `RUNTIME_EVIDENCE_MAX_AGE_MS` and its inputs (the dir and whether a binding
+ *  file is present) still match, spawning nothing; otherwise (no cached
+ *  evidence, it is stale/invalidated, or `refresh: true`) it probes as before
+ *  and records the result for the next `refresh: false` read. */
+export async function rufloRuntimeNatives({ runner = run, refresh = true, source = 'status-refresh' } = {}) {
   let installed;
   try { installed = fs.existsSync(rufloRoot()); } catch { installed = false; }
   if (!installed) return { installed: false, contexts: [] };
   const contexts = await Promise.all(rufloMemoryContexts().map(async ({ context, dir }) => {
+    const inputsKey = stableInputsKey({ dir, native: bsq3IsNative(dir) });
+    if (!refresh) {
+      const record = readEvidence('native-runtime', context, { inputsKey, maxAgeMs: RUNTIME_EVIDENCE_MAX_AGE_MS });
+      if (record && !record.stale && !record.invalidated) {
+        const cached = /** @type {{ok: boolean, state: string, attempts: number, reason: string|null, bindingPresent: boolean}} */ (record.result);
+        return {
+          context, dir,
+          ok: cached.ok,
+          state: cached.state,
+          attempts: cached.attempts,
+          reason: cached.reason,
+          bindingPresent: cached.bindingPresent,
+        };
+      }
+    }
     const res = await probeBsq3Runtime(dir, { runner });
-    return { context, dir, ...res, bindingPresent: bsq3IsNative(dir) };
+    const result = { context, dir, ...res, bindingPresent: bsq3IsNative(dir) };
+    writeEvidence('native-runtime', context, {
+      source, inputsKey, inputs: { dir, native: bsq3IsNative(dir) },
+      result: { ok: res.ok, state: res.state, attempts: res.attempts, reason: res.reason ?? null, bindingPresent: bsq3IsNative(dir) },
+    });
+    return result;
   }));
   return { installed: true, contexts };
+}
+
+/** Record evidence for one ruflo memory-runtime context after a repair, so a
+ *  plain `ak status` right after `ak sync` shows the repaired state without a
+ *  second `--refresh`. */
+export function recordNativeRuntimeEvidence(context, dir, result, { source = 'sync' } = {}) {
+  const inputsKey = stableInputsKey({ dir, native: bsq3IsNative(dir) });
+  writeEvidence('native-runtime', context, {
+    source, inputsKey, inputs: { dir, native: bsq3IsNative(dir) },
+    result: { ok: result.ok, state: result.state, attempts: result.attempts, reason: result.reason ?? null, bindingPresent: bsq3IsNative(dir) },
+  });
 }
 
 /** Drift for a CLAUDE_FLOW_DB_PATH pin in .claude/settings.local.json `env`: warn

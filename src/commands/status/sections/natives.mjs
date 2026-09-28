@@ -91,7 +91,7 @@ export function agentdbLocationRow(locations, rufloInstalled) {
 
 export default {
   id: 'natives',
-  async collect() {
+  async collect({ refresh = false } = {}) {
     const rows = [];
     try {
       const n = nativesStatus();
@@ -102,7 +102,7 @@ export default {
       // #45: the agentdb copies above are NOT what `npx ruflo memory` loads — probe
       // the binding as resolved from ruflo's own memory runtime (@claude-flow/memory
       // + /cli), or the row reads ✓ while memory store runs on the WASM fallback.
-      rows.push(...runtimeNativeRows(await rufloRuntimeNatives()));
+      rows.push(...runtimeNativeRows(await rufloRuntimeNatives({ refresh })));
       rows.push(...receiptRows());
     } catch (e) {
       rows.push(row('natives', 'warn', `native check unavailable: ${e.message}`));
