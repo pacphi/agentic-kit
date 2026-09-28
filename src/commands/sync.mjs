@@ -12,6 +12,7 @@ import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale, runHelperRefresh, bakedVersionManualFix } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
+import { migrateStaleAgentsPointer } from '../lib/project-guidance.mjs';
 import {
   register as mcpRegister, applyExclusions, codexMcpTopology, codexMcpRepairPlan,
   repairCodexMcpTopology, legacyRufloRemovalCommands,
@@ -581,6 +582,16 @@ export const SYNC_STEPS = [
         // stay quiet on the agents targets unless they actually changed
         // (single-host leaves them unmanaged); always report the claude target.
         if (t.name === 'claude' || t.changed) ok(`blocks(${t.label}): ${t.changed || 'in sync'}`);
+      }
+      // Already-set-up projects only pass through ak setup --project once;
+      // this is the only chance a project stuck with the old unreliable
+      // prose AGENTS.md pointer (predates project-guidance.mjs's sentineled
+      // @AGENTS.md import) gets migrated without the user re-running setup.
+      // Additive-only and idempotent — see project-guidance.mjs.
+      const migrated = migrateStaleAgentsPointer(ctx.cwd);
+      if (migrated.action !== 'unchanged') {
+        ok(`project guidance: added a reliable @AGENTS.md import alongside the existing CLAUDE.md pointer `
+          + `(${migrated.bytes} bytes) — the old sentence is preserved; remove it by hand once you've checked the import works`);
       }
     },
   },

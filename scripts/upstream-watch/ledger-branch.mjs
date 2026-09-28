@@ -44,6 +44,13 @@ export function runWithInput(command, args, { input = null, cwd, env } = {}) {
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
     child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+    // A command that exits before reading all of stdin (e.g. `git hash-object`
+    // on an empty blob) closes its end of the pipe first; the parent's write
+    // then fails with EPIPE. Without this listener that's an unhandled error
+    // on the stdin stream — an uncaughtException that can surface async,
+    // after this promise (and its test) already settled. The real outcome is
+    // still `close`, so a stdin write failure is silently ignored here.
+    child.stdin.on('error', () => {});
     child.on('error', (error) => resolve({ status: null, stdout, stderr, error }));
     child.on('close', (status) => resolve({ status, stdout, stderr, error: null }));
     child.stdin.end(input ?? '');
