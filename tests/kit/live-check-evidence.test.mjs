@@ -28,7 +28,7 @@ const reset = () => rmrf(evidence.liveCheckDir());
 
 test('the store lives under the kit state directory, one file per check', () => {
   assert.ok(evidence.liveCheckDir().startsWith(HOME), 'evidence must never escape the state base');
-  assert.equal(path.basename(path.dirname(evidence.liveCheckDir())), 'agentic-kit');
+  assert.equal(evidence.liveCheckDir(), path.join(paths.evidenceDir(), 'live-check'));
   assert.deepEqual([...evidence.LIVE_CHECK_IDS].sort(),
     ['aqe-embedding', 'deja-vu', 'mcp', 'memory', 'providers', 'security']);
   assert.equal(evidence.LIVE_CHECK_TTL_MS, 24 * 3600_000);
@@ -44,6 +44,9 @@ test('a recorded result reads back with its source and age', () => {
     checkedAt: new Date(NOW).toISOString(), ageMs: 5 * MINUTE, stale: false, invalidated: false,
   });
   assert.ok(fs.existsSync(path.join(evidence.liveCheckDir(), 'aqe-embedding.json')));
+  const evidencePath = path.join(paths.evidenceDir(), 'live-check', 'aqe-embedding.json');
+  assert.ok(fs.existsSync(evidencePath), 'the record lands under the shared evidence store, not the old live-checks/ path');
+  assert.equal(fs.existsSync(path.join(path.dirname(paths.evidenceDir()), 'live-checks', 'aqe-embedding.json')), false);
 });
 
 test('no recorded result reads as null, and a corrupt file never throws', () => {

@@ -4,8 +4,8 @@
 // which renders status rows) read it and show each result with its age.
 // Status never probes to fill it.
 //
-// One small JSON file per check id under `<stateBase>/agentic-kit/live-checks/`,
-// next to ADR-0058's ruflo-components evidence cache. Per-id files mean two
+// One small JSON file per check id under `<stateBase>/agentic-kit/evidence/live-check/`,
+// via the shared evidence envelope (evidence.mjs). Per-id files mean two
 // processes recording different checks at once (a sync and a verify, or the
 // parallel checks of `ak status --live`) cannot lose each other's results.
 //
@@ -18,7 +18,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as paths from './paths.mjs';
-import { writePrivateFileAtomic } from './file-write.mjs';
+import { writeEvidence, readEvidence } from './evidence.mjs';
 import { stripUnsafeChars } from './text-safety.mjs';
 import { resolveAqeEmbedding } from './aqe-embedding-config.mjs';
 import { warn } from './output.mjs';
@@ -31,9 +31,9 @@ const SOURCES = new Set(['sync', 'verify', 'status-live']);
 export const LIVE_CHECK_TTL_MS = 24 * 3600_000;
 const REASON_MAX = 200;
 
-/** `<stateBase>/agentic-kit/live-checks` — derived like ADR-0058's evidence file (apply.mjs). */
-export const liveCheckDir = () => path.join(path.dirname(paths.maintenanceControlDir()), 'live-checks');
-const fileFor = (id) => path.join(liveCheckDir(), `${id}.json`);
+/** `<stateBase>/agentic-kit/evidence/live-check` — the shared evidence envelope's directory
+ *  for this kind (evidence.mjs). */
+export const liveCheckDir = () => path.join(paths.evidenceDir(), 'live-check');
 
 function assertKnownId(id) {
   if (!LIVE_CHECK_IDS.includes(id)) throw new TypeError(`unknown live check id: ${String(id).slice(0, 40)}`);
@@ -62,12 +62,8 @@ export function recordLiveCheck({ id, status, reason = null, source, inputsKey }
   if (!STATUSES.has(status)) throw new TypeError(`unknown live check status: ${String(status).slice(0, 40)}`);
   if (!SOURCES.has(source)) throw new TypeError(`unknown live check source: ${String(source).slice(0, 40)}`);
   if (typeof inputsKey !== 'string' || !inputsKey) throw new TypeError('live check inputsKey is required');
-  const record = { version: 1, id, status, reason: cleanReason(reason), source,
-    checkedAt: new Date(now).toISOString(), inputsKey };
-  try {
-    writePrivateFileAtomic(fileFor(id), `${JSON.stringify(record)}\n`);
-    return true;
-  } catch { return false; }
+  return writeEvidence('live-check', id,
+    { source, inputsKey, inputs: null, result: { status, reason: cleanReason(reason) } }, { now });
 }
 
 /**
@@ -79,18 +75,18 @@ export function recordLiveCheck({ id, status, reason = null, source, inputsKey }
  */
 export function readLiveCheck(id, { inputsKey, now = Date.now(), ttlMs = LIVE_CHECK_TTL_MS } = {}) {
   assertKnownId(id);
-  let record;
-  try { record = JSON.parse(fs.readFileSync(fileFor(id), 'utf8')); } catch { return null; }
-  const checkedAtMs = Date.parse(record?.checkedAt);
-  if (!STATUSES.has(record?.status) || !SOURCES.has(record?.source) || !Number.isFinite(checkedAtMs)) return null;
-  const ageMs = Math.max(0, now - checkedAtMs);
+  const record = readEvidence('live-check', id, { inputsKey, maxAgeMs: ttlMs, now });
+  if (!record) return null;
+  const result = /** @type {{status?: string, reason?: string|null}} */ (record.result) ?? {};
+  const status = result.status;
+  if (!STATUSES.has(status) || !SOURCES.has(record.source)) return null;
   return {
-    status: record.status,
-    reason: typeof record.reason === 'string' ? cleanReason(record.reason) : null,
+    status,
+    reason: typeof result.reason === 'string' ? cleanReason(result.reason) : null,
     source: record.source,
-    checkedAt: new Date(checkedAtMs).toISOString(),
-    ageMs,
-    stale: ageMs > ttlMs,
+    checkedAt: new Date(Date.parse(record.checkedAt)).toISOString(),
+    ageMs: record.ageMs,
+    stale: record.stale,
     invalidated: inputsKey !== undefined && record.inputsKey !== inputsKey,
   };
 }
