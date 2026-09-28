@@ -7,7 +7,9 @@ description: Report agentic-kit's outstanding upstream status from its upstream 
 
 agentic-kit keeps one upstream registry, `src/lib/hook-audit/agentic-dependency-constraints.json`:
 dependency policies, constraints, and the `watch` list of upstream threads.
-`scripts/upstream-watch.mjs` checks the registry against GitHub and npm. It writes nothing.
+`scripts/upstream-watch.mjs` checks the registry against GitHub and npm. `report`, `check` and
+`ledger` only read. `record` fires the paid dispatch routine and builds a local ledger commit; it
+is the daily workflow's command, so never run it without `--dry-run`.
 
 ## When asked for upstream status or a report
 
@@ -22,8 +24,8 @@ dependency policies, constraints, and the `watch` list of upstream threads.
    - If `mode` is `offline`, say why (`offlineReason`, usually: run `gh auth login`) and that only
      what the registry records is shown.
 2. Give the counts first, in plain language, from `counts`. Leave out groups with zero items. Then
-   say when the watch last succeeded (`lastRun`); say so plainly when it is more than 48 hours ago
-   or unknown.
+   say when the scheduled watch last succeeded (`lastRun`); say so plainly when it is more than
+   48 hours ago, unknown, or there is none (`lastRun` is null).
 3. Then list the action items with their links, one report group at a time, in this order
    (the report's group titles):
    - "Could not check" first, each thread with its error from `fetchErrors`. When the thread
@@ -65,5 +67,7 @@ dependency policies, constraints, and the `watch` list of upstream threads.
 - For events since a date, run `node scripts/upstream-watch.mjs check --since <iso-date>`.
   Each line is a ledger line: `UPSTREAM-WATCH <id> <event> <date> …`.
 - For what the ledger recorded (history questions), run `node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--since <iso-date>]`.
+  `--since` selects by the event's date; `--recorded-since <iso-time>` selects what the runs since
+  then recorded (a notice's last line gives its run's time).
 
 Details: `docs/UPSTREAM-WATCH.md`.

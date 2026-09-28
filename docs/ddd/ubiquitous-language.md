@@ -34,7 +34,7 @@ contradictory meaning.
 | Upstream constraint | Versioned dependency issue, affected range, bounded local strategy, verification date, and objective sunset condition |
 | Watched upstream thread | Upstream issue or pull request in the upstream registry's watch list: what done means, the ak adjustment it unblocks, a lifecycle status from watching to retired, and dated history |
 | Upstream watch ledger | `events.ndjson` on the orphan branch `upstream-watch-ledger`: one `UPSTREAM-WATCH <id> <event> <date>` record per line, committed by the upstream watch workflow only on days with new records; an exact line already recorded is never recorded or acted on twice |
-| Upstream watch notice | Commit comment by `github-actions[bot]` on a ledger commit that mentions the maintainer when a new record needs them: a reply, a dispatchable release, a dispatch pull request, a reopened or not-planned thread, a retest due |
+| Upstream watch notice | Commit comment by `github-actions[bot]` on a ledger commit that mentions the maintainer when a new record needs them: a reply, a dispatchable release, a dispatch pull request, a reopened or not-planned thread, a retest due, or `idle` (nothing left to watch) |
 | Confirmed release | A published version whose tag contains the merged pull request or commit that fixed a watched thread (or the recorded first fixed version); only a confirmed release is dispatched |
 | Reviewed thread | A watch entry with a dated `reviewed` history line: its comments up to that day were read and need no reply |
 | Upstream dispatch | Draft pull request on `upstream/<id>` that makes a released thread's adjustment and passes its dependency's removal proof, opened by the dispatch routine when the watch fires it; the watcher never merges it |

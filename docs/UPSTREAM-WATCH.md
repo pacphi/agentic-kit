@@ -86,28 +86,34 @@ records.
 node scripts/upstream-watch.mjs report [--json]
 node scripts/upstream-watch.mjs check --since <iso-date> [--json]
 node scripts/upstream-watch.mjs record [--since <iso-date>] [--dry-run] [--json]
-node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [--since <iso-date>] [--json]
+node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [--since <iso-date>] [--recorded-since <iso-date>] [--json]
 ```
 
 Every command also takes `--concurrency <1-16>` (default 4) and `--registry <file>`.
 
 - `report` gives counts, then the groups below. In live mode it also gives the time of the
-  workflow's last successful run, and warns when that was more than 48 hours ago or cannot be
-  read.
+  workflow's last successful scheduled run, and warns when that was more than 48 hours ago,
+  cannot be read, or there is none. Pull request previews and manual runs do not count.
 - `check --since` prints the ledger line of every event after that time, without reading the
   ledger. Each thread or release it could not check goes to stderr as
   `Could not check <id>: <error>`; `check --json` lists them in `fetchErrors` and says `blind`
   when not one upstream thread could be read. It prints "No new upstream events." only when every
   read succeeded.
 - `record` is what the scheduled workflow runs (see [The ledger](#the-ledger)). It builds a
-  ledger commit locally and never pushes. `--dry-run` fires nothing and builds nothing.
+  ledger commit locally and never pushes. `--dry-run` fires nothing and builds nothing; it makes
+  the same read-only branch and pull request checks and lists each thread that would fire the
+  dispatch routine in `wouldFire` (`[]` when none, and on every run that is not a dry run).
 - `ledger` prints the recorded lines that match every filter given, or the records as JSON.
+  `--since` selects by the event's date; `--recorded-since` by when a run recorded it
+  (`recordedAt`).
 
 `report`, `check` and `ledger` exit 0 unless the command line is wrong (2) or, for `ledger`, the
 ledger branch cannot be read (3). `record` exits 3 when blind: `gh` cannot reach GitHub, the
 registry is invalid, the ledger branch cannot be read or holds a malformed line, or not one
-upstream thread could be read (our own tracking issues do not count). A `--since` in the future
-is a command-line error.
+upstream thread could be read (our own tracking issues do not count). It also exits 3 when the
+ledger commit could not be built; the routine sessions it already fired are then listed in
+`fired` and on stderr, and the next run fires them again. A `--since` in the future is a
+command-line error.
 
 The Ruflo support window (the newest six minors, never fewer than those released in the last
 30 days; `supportWindow` on the Ruflo dependency policy, ADR-0041 §7) comes from the npm release
@@ -144,6 +150,7 @@ Browse it on GitHub, or query it:
 ```bash
 node scripts/upstream-watch.mjs ledger --id ruvnet/ruflo#3194
 node scripts/upstream-watch.mjs ledger --event reply --since 2026-10-01 --json
+node scripts/upstream-watch.mjs ledger --recorded-since 2026-10-02T14:17:00Z
 git fetch origin upstream-watch-ledger && git show origin/upstream-watch-ledger:events.ndjson
 ```
 
@@ -177,7 +184,8 @@ always gives the same line, and a line already in `events.ndjson` is never recor
 A run with new records makes one commit: the previous records plus the new ones, a message with
 one plain sentence per new record, and the trailer `Checked-At:` with the run's start time, or the
 previous value when any thread or release could not be read, so the next run looks at the same
-window again. A run with nothing new makes no commit. A `Checked-At` later than the run's own
+window again. The message writes ids as `owner/repo no. n` and `no. n`: GitHub turns an
+`owner/repo#n` or `#n` in a commit message into a "referenced" entry on that thread. A run with nothing new makes no commit. A `Checked-At` later than the run's own
 time is ignored.
 
 ## Notifications
@@ -189,10 +197,11 @@ and email per their notification settings). A record needs them when it is a `re
 line, a `closed` line with `reason=not_planned`, a `retest-due` or `idle`. Acknowledgements, other
 closures, merges, stale threads, retirement proposals and held releases stay in the ledger only; a
 quiet day sends nothing. Thread ids in a notice are code spans, so it neither links to nor
-mentions upstream threads; a dispatch pull request's `#n` links here on purpose.
+mentions upstream threads; a dispatch pull request's `#n` links here on purpose. The notice ends
+with `ledger --recorded-since <run time>`, which prints every record that run wrote.
 
 Whether the watch still runs shows without a commit: `report` (and the `upstream-status` skill)
-gives the time of the last successful run and warns after 48 hours. A failed run fails the job,
+gives the time of the last successful scheduled run and warns after 48 hours. A failed run fails the job,
 and GitHub emails the user who last changed the workflow's `cron` line.
 
 ## Confirming a release
@@ -250,7 +259,9 @@ never posts, pushes or merges without explicit confirmation.
 at 14:17 UTC (`17 14 * * *`) and on demand (`workflow_dispatch`, with `record` off for a dry run in
 the job summary and an optional `since`). GitHub may start a scheduled run late or, under heavy
 load, drop it; the next run's window covers the gap. No model runs in it: the script decides the
-records, the firings and the notice text.
+records, the firings and the notice text. Every job summary says how many dispatch routine
+sessions the run would start (`wouldFire`) and lists them, so a dry run shows what a real run
+would fire.
 
 The `watch` job has `contents: write` (to push the ledger branch and comment on its commit),
 `actions: read` and `pull-requests: read`. Its steps, in order:
@@ -275,8 +286,11 @@ attached to it). It has no schedule: the watch fires its API trigger
 ([Add an API trigger](https://code.claude.com/docs/en/routines#add-an-api-trigger)) once for each
 `released` line with `branch=` whose branch does not exist yet, sends the line's id, version and
 branch as the payload, and records a `fired` line with the session link. If the branch has not
-appeared three days later it fires once more; after that the job fails and names both sessions. A
-day with nothing to dispatch costs nothing in claude.ai.
+appeared three days later it fires once more; after that the job fails and names both sessions.
+To clear that, create the branch or move the entry's status off `watching` and
+`fixed-unreleased`. Deleting a dispatch branch (for example after closing its pull request) lets
+the watch fire again, within the two firings per thread. A day with nothing to dispatch costs
+nothing in claude.ai.
 
 The trigger token is the repository secret `UPSTREAM_DISPATCH_TOKEN`, created in claude.ai; the
 routine id is in the workflow. The routine acts as the maintainer's GitHub user and its session

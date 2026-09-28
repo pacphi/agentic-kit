@@ -57,7 +57,7 @@ use to be cheap and quiet.
 | L2 | A commit is made only when a run has new records. The next run's window starts at the newest ledger commit's `Checked-At` trailer, which stays at the previous value when a read failed. No fixed lookback (a longer outage would lose replies), no heartbeat commit, no cursor file. |
 | L3 | Notification is one commit comment by `github-actions[bot]` on the day's ledger commit, mentioning `watchPolicy.notify.mention`, posted only when a new record is an action item. |
 | L4 | Dispatch fires automatically: the watch POSTs the routine's API trigger with the thread in the payload, records a `fired` line, and fires again at most once. The routine never reads the ledger. |
-| L5 | Liveness is pull-based: `report` and the `upstream-status` skill show the age of the last successful watch run from the Actions API. Failed runs keep GitHub's failure email. |
+| L5 | Liveness is pull-based: `report` and the `upstream-status` skill show the age of the last successful scheduled watch run from the Actions API. Failed runs keep GitHub's failure email. |
 | L6 | #243 is closed at rollout with a pointer to the ledger branch. |
 | L7 | The schedule is `17 14 * * *` (GitHub delays or drops scheduled runs at the start of the hour). |
 | L8 | The cleanup of the comment ledger and the doc alignment ship in the same pull request. |
@@ -112,6 +112,10 @@ Two record kinds are new, both written by `record` itself:
 - Message: `upstream-watch: <n> new records`, then one plain sentence per new record (the existing
   `sentence()`), then the trailer `Checked-At: <time>`: where the next window starts (the run's
   start, or the previous value when any read failed).
+- In the message, ids are written `owner/repo no. n` and `no. n` (`commitSafe`). A commit message
+  is plain text, not Markdown: GitHub turns an `owner/repo#n` or `#n` there into a "referenced"
+  timeline entry on that thread, code span or not, and one run's commit can name many upstream
+  threads. The notice, which is Markdown, keeps its code-span ids.
 
 ### Registry
 
@@ -134,10 +138,12 @@ reads a registry of another shape.
 The only code that reads or builds ledger commits. Every git call goes through an injectable
 `exec` (as in `fetch.mjs`), with argument vectors and no shell.
 
-- `createLedgerStore({ exec, cwd, remote })` returns `read(branch, { now })`: `git fetch --no-tags
-  origin +refs/heads/<branch>:refs/remotes/origin/<branch>` at full depth (a shallow fetch would
-  mark a maintainer's full clone shallow), then `git show <commit>:events.ndjson` and the tip's
-  `Checked-At` trailer. An absent branch is an empty ledger; any other failure or a malformed line
+- `createLedgerStore({ exec, cwd, remote })` returns `read(branch, { now })`: `git ls-remote
+  --exit-code --heads origin <branch>` (exit 2: the branch is absent, an empty ledger), then `git
+  fetch --no-tags origin +refs/heads/<branch>:refs/remotes/origin/<branch>` at full depth (a
+  shallow fetch would mark a maintainer's full clone shallow), then `git show
+  <commit>:events.ndjson` and the tip's `Checked-At` trailer. Any other failure, or a line that is
+  not a record (string `line`, `id`, `event` and `date`, object `fields`, UTC `recordedAt`),
   throws.
 - ... and `build({ parent, records, checkedAt, subject, sentences })`: blobs with
   `git hash-object -w --stdin`, the tree with `git mktree`, the commit with `git commit-tree`.
@@ -158,12 +164,17 @@ Deciding and making trigger calls, with an injectable `fetch` and `exec`.
   with `claude_code_session_url`; that URL goes into the `fired` record. Anything else is an
   error. The routine id comes from `UPSTREAM_DISPATCH_ROUTINE`.
 - For every branch with a `fired` record and no `dispatch-pr` record, `gh pr list --head <branch>`
-  finds an open pull request; the first one found produces a `dispatch-pr` record.
+  finds an open pull request; the first one from this repository (not a fork: `--head` matches the
+  branch name in any fork) produces a `dispatch-pr` record.
+- With `dryRun`, a candidate is listed in `wouldFire` (`{ id, version, branch }`) instead of
+  fired; the branch checks, the firing limit and the pull request lookups run as before and only
+  read.
 
 ### `scripts/upstream-watch/ledger.mjs` (changed)
 
 - Keeps `isoSeconds` and `sentence` (extended for `fired` and `dispatch-pr`).
-- Adds `isActionRecord(record)` and `renderNotice({ records, mention, date })`.
+- Adds `isActionRecord(record)`, `renderNotice({ records, mention, date, recordedAt })` and
+  `commitSafe(text)` (ids in commit sentences; see "Commits").
 - Removes `readLedger` (the comment version), `renderComment`, `commentBody`, `MAX_COMMENT` and the
   comment `checked-at` pattern. The notice has its own 60,000-character cap (`NOTICE_MAX`), lists
   what fits, and ends with "N more; see the ledger".
@@ -174,7 +185,7 @@ Deciding and making trigger calls, with an injectable `fetch` and `exec`.
 node scripts/upstream-watch.mjs report [--json]
 node scripts/upstream-watch.mjs check --since <iso-date> [--json]
 node scripts/upstream-watch.mjs record [--since <iso-date>] [--dry-run] [--json]
-node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [--since <iso-date>] [--json]
+node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [--since <iso-date>] [--recorded-since <iso-date>] [--json]
 ```
 
 (`--concurrency` and `--registry` stay on every command.)
@@ -184,17 +195,23 @@ node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [-
   10 s) before counting it as an error. It drops lines already recorded (`withoutRecorded`,
   unchanged), makes the trigger calls, adds `dispatch-pr` records, builds one commit when there
   are new records, and never pushes. `--json` prints `since`, `sinceSource` (`flag`, `ledger` or
-  `default`), `checkedAt`, `blind`, `records`, `fetchErrors`, `dispatchErrors`, `parent`,
-  `commit`, `notice` (`{ post, body }`). `--dry-run` makes no trigger calls, writes no objects,
-  and prints the same fields with `commit: null`.
+  `default`), `checkedAt`, `blind`, `records`, `fetchErrors`, `dispatchErrors`, `wouldFire`,
+  `parent`, `commit`, `notice` (`{ post, body }`). `--dry-run` makes no trigger calls, writes no
+  objects, runs the dispatch checks with `dryRun`, and prints the same fields with `commit: null`
+  and `wouldFire` listing what a real run would fire (`[]` otherwise, and on blind output).
 - **`ledger`** reads the ledger and prints the records that match every filter given (`--id`
-  exact, `--event` exact, `--since` on `date`), as lines or JSON.
+  exact, `--event` exact, `--since` on `date`, `--recorded-since` on `recordedAt`, compared as
+  times), as lines or JSON.
 - **`report`** adds `lastRun` (`at`, `ageHours`, `url`) from
-  `gh api repos/<repo>/actions/workflows/upstream-watch.yml/runs?status=success&per_page=1`, and
-  the text report warns when the last successful run is more than 48 hours old or cannot be read.
+  `gh api repos/<repo>/actions/workflows/upstream-watch.yml/runs?status=success&event=schedule&per_page=1`
+  (pull request previews and manual runs also succeed, so only scheduled runs count), and the text
+  report warns when the last successful scheduled run is more than 48 hours old, cannot be read,
+  or does not exist.
 - **`check`** keeps its meaning, loses `--ledger <file>`, and does not read the ledger.
 - Exit codes: 2 for a wrong command line; 3 for blind on `record` (`gh` unusable, every upstream
-  thread unreadable, the ledger unreadable or malformed, or an invalid registry); 0 otherwise.
+  thread unreadable, the ledger unreadable or malformed, or an invalid registry) and when the
+  ledger commit cannot be built (the JSON's `fired` and stderr keep the sessions already fired);
+  0 otherwise.
   Residual read errors and dispatch errors are reported in the JSON, and the workflow fails the
   job after pushing and notifying.
 
@@ -216,7 +233,8 @@ Posted on the day's ledger commit when at least one new record is an action item
 
 Thread ids stay in code spans: a bare `owner/repo#n` or link puts a "referenced this issue" entry
 on the upstream thread. A bare `#n` for ak's own pull request is intended (it links here). The
-notice ends with `node scripts/upstream-watch.mjs ledger --since <date>`.
+notice ends with `node scripts/upstream-watch.mjs ledger --recorded-since <recordedAt>`, the
+run's time, which prints every record that run wrote (their dates are often earlier).
 
 ### Workflow (`.github/workflows/upstream-watch.yml`)
 
@@ -280,8 +298,8 @@ Work in a fresh clone of pacphi/agentic-kit on main.
 | Two firings and still no branch | not fired again; the job fails with both session links until the maintainer acts |
 | Push rejected (the branch moved) | the job fails; that run's `fired` records are lost, so the next run may fire again, and the routine stops at step 1 once its branch exists |
 | The commit comment fails | the job fails; the record is on the branch, and the failure email is the notice for that day |
-| A scheduled run is late or dropped | the next run's window starts at the last `Checked-At`; `report` shows the last successful run's age |
-| Scheduled workflows disabled after 60 days without repository activity | `report` shows the age of the last successful run |
+| A scheduled run is late or dropped | the next run's window starts at the last `Checked-At`; `report` shows the last successful scheduled run's age |
+| Scheduled workflows disabled after 60 days without repository activity | `report` shows the age of the last successful scheduled run |
 
 ## Cleanup (same pull request)
 
@@ -350,10 +368,12 @@ All offline, with fixtures and injected `exec` and `fetch`:
 1. Implement on this branch; open the pull request; merge.
 2. Create the routine's API trigger token in claude.ai; `gh secret set UPSTREAM_DISPATCH_TOKEN`;
    replace the routine's prompt and remove its schedule.
-3. Run the workflow by hand with `since=2026-09-21`: the ledger branch is created, and a notice is
-   posted if any record is an action item.
-4. Dispatch rehearsal on agentic-qe#617: a `fired` record, a branch, a draft pull request, then a
-   `dispatch-pr` notice.
+3. `gh workflow run upstream-watch.yml -f record=false -f since=2026-09-21T00:00:00Z`, and read
+   `wouldFire` in the job summary: how many routine sessions the real run will start. Then the
+   same with `record=true`: the ledger branch is created, the routine fires for each `wouldFire`
+   entry, and a notice is posted if any record is an action item.
+4. Dispatch rehearsal: the first entry `wouldFire` listed (or, if none, the first real release) —
+   a `fired` record, a branch, a draft pull request, then a `dispatch-pr` notice.
 5. Watch the first scheduled run.
 6. Close #243 with a pointer to the ledger branch; the maintainer deletes the disabled routine
    `watch-aqe-3.12.3-release`; decide on a rule for `main`, since the job token can push branches.

@@ -485,8 +485,9 @@ gh run list --workflow=nightly.yml --limit 3
 ```bash
 node scripts/upstream-watch.mjs report                     # counts, last run, then action items with links
 node scripts/upstream-watch.mjs check --since 2026-09-26   # ledger lines for activity since then
-node scripts/upstream-watch.mjs record --dry-run           # what the daily workflow would record and notify
-node scripts/upstream-watch.mjs ledger --since 2026-09-26  # what the ledger recorded
+node scripts/upstream-watch.mjs record --dry-run           # what the daily workflow would record, notify and fire
+node scripts/upstream-watch.mjs ledger --since 2026-09-26  # recorded events dated since then
+node scripts/upstream-watch.mjs ledger --recorded-since 2026-09-26T14:17:00Z  # what the runs since then recorded
 gh workflow run upstream-watch.yml -f record=false         # run the daily workflow now, summary only
 ```
 

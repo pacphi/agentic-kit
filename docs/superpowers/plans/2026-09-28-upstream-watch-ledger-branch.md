@@ -2233,7 +2233,7 @@ git commit -m "fix(upstream-watch): gate findings"
 
 1. Push `feat/upstream-watch-ledger-ref` and open the pull request; the `preview` job runs `record --dry-run` against the real threads. Merge.
 2. In claude.ai: create the routine's API trigger token; `gh secret set UPSTREAM_DISPATCH_TOKEN`; replace the routine's prompt with the one in `docs/UPSTREAM-WATCH.md`; remove its schedule (RemoteTrigger `update`).
-3. `gh workflow run upstream-watch.yml -f since=2026-09-21T00:00:00Z`: the `upstream-watch-ledger` branch appears, and a notice arrives if any record needs the maintainer.
-4. Dispatch rehearsal on agentic-qe#617: a `fired` record, a branch, a draft pull request, then a `dispatch-pr` notice.
+3. `gh workflow run upstream-watch.yml -f record=false -f since=2026-09-21T00:00:00Z`, and read `wouldFire` in the job summary: how many routine sessions the real run will start. Then the same with `record=true`: the `upstream-watch-ledger` branch appears, the routine fires for each `wouldFire` entry, and a notice arrives if any record needs the maintainer.
+4. Dispatch rehearsal: the first entry `wouldFire` listed (or, if none, the first real release) — a `fired` record, a branch, a draft pull request, then a `dispatch-pr` notice.
 5. Watch the first scheduled run (14:17 UTC).
 6. Close #243 with a comment pointing to the ledger branch; delete `pacphi/upstream-watch-probe-20260928`; decide on a rule for `main` (the job token can push branches).
