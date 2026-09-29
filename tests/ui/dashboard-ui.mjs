@@ -1291,10 +1291,12 @@ async function main() {
   });
   const refreshRequests = [];
   const statusRequests = [];
+  const systemSummaryRequests = [];
   page.on('request', (request) => {
     const pathname = new URL(request.url()).pathname;
     if (pathname === '/api/refresh') refreshRequests.push({ method: request.method(), body: request.method() === 'POST' ? request.postDataJSON() : null });
     if (pathname === '/api/status') statusRequests.push(request.url());
+    if (pathname === '/api/system/summary') systemSummaryRequests.push(request.url());
   });
 
   // Anything the page logs as an error, or any request it fails, is a defect —
@@ -5763,11 +5765,43 @@ async function main() {
     check('Reload issues only GETs and starts no checks', reloadRequests.length > 0
       && reloadRequests.every(method => method === 'GET')
       && refreshRequests.filter((r) => r.method === 'POST').length === postCount);
+    for (const view of ['summary', 'storage', 'projects']) {
+      await page.click(`[data-system-view="${view}"]`);
+      await page.waitForTimeout(3100);
+      const before = systemSummaryRequests.length;
+      await page.click('#poll-now');
+      await page.waitForTimeout(300);
+      check(`Reload re-reads active System ${view} without measuring`,
+        systemSummaryRequests.length > before
+          && systemSummaryRequests.slice(before).every(url => !new URL(url).searchParams.has('refresh')),
+        `System reads before/after: ${before}/${systemSummaryRequests.length}`);
+    }
+    await page.click('[data-system-view="storage"]');
+    await page.selectOption('#refresh-strength', 'local');
+    const beforeCompletion = systemSummaryRequests.length;
+    await page.click('#refresh-run');
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.');
+    await page.waitForTimeout(300);
+    check('completed Refresh re-reads active System Storage without measuring',
+      systemSummaryRequests.length > beforeCompletion
+        && systemSummaryRequests.slice(beforeCompletion).every(url => !new URL(url).searchParams.has('refresh')),
+      `System reads before/after: ${beforeCompletion}/${systemSummaryRequests.length}`);
+    await page.click('#poll-ivl');
+    await page.click('#poll-menu [data-ms="15000"]');
+    const backgroundBefore = systemSummaryRequests.length;
+    await page.click('#poll-play');
+    await page.waitForTimeout(16_000);
+    await page.click('#poll-play');
+    check('background poll keeps System Storage on the existing cheap-read policy',
+      systemSummaryRequests.length === backgroundBefore,
+      `System reads before/after background tick: ${backgroundBefore}/${systemSummaryRequests.length}`);
     console.log(`refresh requests: idle 0; local POST 1, GET ${localRefreshReads}; machine POST 1, total GET ${refreshRequests.filter(request => request.method === 'GET').length}; Reload ${reloadRequests.length} GET`);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+    await page.evaluate(() => { localStorage.setItem('ak-dash-theme', 'light'); location.reload(); });
+    await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'light');
     await page.screenshot({ path: path.join(SHOTS, 'refresh-header-light-390.png'), animations: 'disabled' });
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    await page.evaluate(() => { localStorage.setItem('ak-dash-theme', 'dark'); location.reload(); });
+    await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'dark');
     await page.screenshot({ path: path.join(SHOTS, 'refresh-header-dark-390.png'), animations: 'disabled' });
     check('Refresh header fits at 390px in light and dark themes',
       await page.evaluate(() => {
