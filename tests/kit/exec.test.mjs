@@ -3,7 +3,130 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { run, have, resolveShim } from '../../src/lib/exec.mjs';
+import { run, have, resolveShim, withAbortSignal } from '../../src/lib/exec.mjs';
+
+const isAlive = (pid) => {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+};
+async function waitUntil(predicate) {
+  for (let n = 0; n < 60; n += 1) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return predicate();
+}
+
+for (const [name, options] of [
+  ['no input with explicit signal', { input: undefined, inherited: false }],
+  ['input with explicit signal', { input: '', inherited: false }],
+  ['no input with inherited signal', { input: undefined, inherited: true }],
+  ['input with inherited signal', { input: '', inherited: true }],
+]) {
+  test(`run() abort reaps owned grandchild: ${name}`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-abort-tree-'));
+    const pidFile = path.join(dir, 'pids.json');
+    const controller = new AbortController();
+    const code = `const {spawn}=require('node:child_process');
+      const gc=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
+      setInterval(()=>{},1000);`;
+    let pids = [];
+    try {
+      const launch = () => run(process.execPath, ['-e', code], {
+        input: options.input, timeout: 5_000,
+        ...(options.inherited ? {} : { signal: controller.signal }),
+      });
+      const pending = options.inherited ? withAbortSignal(controller.signal, launch) : launch();
+      assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true, 'owned children started');
+      pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+      assert.equal(isAlive(pids[1]), true, 'grandchild alive before abort');
+      controller.abort();
+      const result = await pending;
+      assert.notEqual(result.code, 0);
+      assert.equal(await waitUntil(() => !isAlive(pids[1])), true,
+        'abort must terminate the grandchild, not only its parent');
+    } finally {
+      controller.abort();
+      for (const pid of pids) {
+        if (isAlive(pid)) {
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+        }
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('run() does not spawn for a pre-aborted signal, including inherited abort', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-preabort-'));
+  const marker = path.join(dir, 'spawned');
+  const aborted = new AbortController();
+  aborted.abort();
+  const args = ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)},'yes')`];
+  try {
+    for (const input of [undefined, '']) {
+      const explicit = await run(process.execPath, args, { signal: aborted.signal, input });
+      const inherited = await withAbortSignal(aborted.signal,
+        () => run(process.execPath, args, { input }));
+      assert.notEqual(explicit.code, 0);
+      assert.notEqual(inherited.code, 0);
+      assert.equal(fs.existsSync(marker), false);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an explicit live signal takes precedence over an aborted inherited signal', async () => {
+  const inherited = new AbortController();
+  inherited.abort();
+  const explicit = new AbortController();
+  for (const input of [undefined, '']) {
+    const result = await withAbortSignal(inherited.signal, () => run(
+      process.execPath, ['-e', 'process.stdout.write("ok")'],
+      { signal: explicit.signal, input },
+    ));
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, 'ok');
+  }
+});
+
+test('Windows abort reaps the Node child behind a PowerShell shim and its grandchild', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-abort-shim-'));
+  const pidFile = path.join(dir, 'pids.json');
+  const controller = new AbortController();
+  const quotedNode = process.execPath.replaceAll("'", "''");
+  let pids = [];
+  try {
+    fs.writeFileSync(path.join(dir, 'codex.cmd'), '@echo off\r\n');
+    fs.writeFileSync(path.join(dir, 'codex.ps1'), `& '${quotedNode}' -e $args[0]\n`);
+    const code = `const {spawn}=require('node:child_process');
+      const gc=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
+      setInterval(()=>{},1000);`;
+    const pending = run('codex', [code], {
+      env: { PATH: dir, PATHEXT: '.CMD' }, signal: controller.signal, timeout: 10_000,
+    });
+    assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true, 'PowerShell launched Node');
+    pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+    assert.equal(isAlive(pids[1]), true);
+    controller.abort();
+    const result = await pending;
+    assert.notEqual(result.code, 0);
+    assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true,
+      'taskkill must remove the Node process and its grandchild');
+  } finally {
+    controller.abort();
+    for (const pid of pids) {
+      if (isAlive(pid)) {
+        try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // code-quality Finding 2: exec.mjs used to set shell:true for a fixed set of
 // Windows .cmd shims (npm/npx/claude/ruflo/aqe/claude-flow), which handed

@@ -1,5 +1,5 @@
 // Subprocess helpers. Rule (binding, from the plan): NOTHING goes through a
-// shell string — execFile with argv arrays only, shell ALWAYS false.
+// shell string — spawn with argv arrays only, shell ALWAYS false.
 //
 // npm/npx/claude/deja/ruflo/aqe/claude-flow are .cmd shims on Windows, and
 // Windows' CreateProcess cannot launch a .cmd directly — that historically
@@ -7,26 +7,21 @@
 // command line to cmd.exe as ONE string (CVE-class: any arg with `&`/`|`/`^`
 // breaks out into a second command). The actual fix is resolving the shim to
 // its real file on PATH. Native .com/.exe files run directly. A .cmd shim is
-// never passed to execFile: Node does not execute batch files without a shell.
+// never passed to spawn: Node does not execute batch files without a shell.
 // Instead, its sibling .ps1 shim runs through Windows PowerShell's `-File`
 // interface, preserving every caller argument as a separate argv element.
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isWindows } from './paths.mjs';
 
-const pexecFile = promisify(execFile);
 const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
 
 // A caller that bounds work it does not own (a live check under `ak status
 // --refresh=live` running the full live-check suite) scopes an AbortSignal
 // here; every run() inside the scope that passes no signal of its own uses it,
-// so a timed-out check's direct child processes stop and its own cleanup still
-// runs. The abort signals only that direct child: a process it started keeps
-// running (on Windows a .cmd shim's child is PowerShell, so the ruflo or aqe
-// node process behind it survives the abort).
+// so a timed-out check's entire owned process tree stops and cleanup still runs.
 const abortScope = new AsyncLocalStorage();
 
 /** Run `fn` with `signal` as the default abort signal for run() calls in it.
@@ -156,53 +151,76 @@ function captureStream(stream, encoding, maxBuffer, onOverflow) {
   return state;
 }
 
-/** The stdin-feeding, process-group variant of `run()`, used whenever a caller
- *  passes `opts.input`. Two reasons it exists, both from the security review:
- *  the payload stays out of argv (SEC-7 — `ps -ww` shows argv to the same user
- *  here, and `/proc/<pid>/cmdline` shows it to ANY local user on Linux), and
- *  the child leads its own process group so the timeout reaps its subprocesses
- *  (SEC-8).
- *
- *  WHY `spawn` AND NOT `execFile`: execFile forwards only a fixed whitelist of
- *  options through to spawn, and `detached` is not on it — passing it there is
- *  silently ignored, and the child stays in the PARENT's process group, where
- *  `process.kill(-pid)` fails ESRCH and the grandchild survives. Measured, not
- *  assumed. The timeout is likewise managed here rather than handed to the
- *  child process API, whose own `timeout` signals only the direct child. */
-function runWithInput(command, args, execOpts, { windows, input }) {
+/** `spawn` is required for both paths: execFile silently drops `detached`, so
+ *  its AbortSignal and timeout can only stop the direct child. Input stays on
+ *  stdin and never enters argv. The Windows taskkill completion is awaited
+ *  before returning, even if the direct child closes first. */
+function runOwned(command, args, execOpts, { windows, input }) {
   const { timeout, encoding, maxBuffer, cwd, env, signal } = execOpts;
+  if (signal?.aborted) return Promise.resolve({ code: 1, stdout: '', stderr: 'The operation was aborted' });
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(command, args, { cwd, env, signal, shell: false, detached: !windows });
+      child = spawn(command, args, { cwd, env, shell: false, detached: !windows });
     } catch (err) { resolve(failureResult(err)); return; }
 
     let failure = null;
-    const abort = (reason) => { failure ??= reason; killGroup(child); };
+    let closed = false;
+    let stopping = Promise.resolve();
+    const abort = (reason) => {
+      if (closed || (windows && (child.exitCode !== null || child.signalCode !== null))) return;
+      if (failure) return;
+      failure = reason;
+      if (!windows) { killGroup(child); return; }
+      if (!Number.isInteger(child.pid) || child.pid < 1) return;
+      stopping = new Promise((done) => {
+        let killer;
+        try {
+          killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+            stdio: 'ignore', shell: false,
+          });
+        } catch { try { child.kill('SIGKILL'); } catch { /* exited */ } done(); return; }
+        killer.once('error', () => { try { child.kill('SIGKILL'); } catch { /* exited */ } done(); });
+        killer.once('close', (code) => {
+          if (code !== 0 && child.exitCode === null && child.signalCode === null) {
+            try { child.kill('SIGKILL'); } catch { /* exited */ }
+          }
+          done();
+        });
+      });
+    };
+    const onSignal = () => abort('The operation was aborted');
+    signal?.addEventListener('abort', onSignal, { once: true });
+    if (signal?.aborted) onSignal();
     const out = captureStream(child.stdout, encoding, maxBuffer,
       () => abort('stdout maxBuffer length exceeded'));
     const errOut = captureStream(child.stderr, encoding, maxBuffer,
       () => abort('stderr maxBuffer length exceeded'));
-    const timer = setTimeout(() => abort(`timed out after ${timeout}ms`), timeout);
-    timer.unref?.();
+    const timer = timeout > 0 ? setTimeout(() => abort(`timed out after ${timeout}ms`), timeout) : null;
+    timer?.unref?.();
 
     child.on('error', (err) => {
       clearTimeout(timer);
-      resolve(failureResult(err, out.text, errOut.text));
+      signal?.removeEventListener('abort', onSignal);
+      stopping.then(() => resolve(failureResult(err, out.text, errOut.text)));
     });
-    child.on('close', (code) => {
+    child.on('close', (code, exitSignal) => {
+      closed = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onSignal);
       const exitCode = typeof code === 'number' ? code : 1;
-      resolve({
+      stopping.then(() => resolve({
         code: failure ? exitCode || 1 : exitCode,
         stdout: out.text,
         stderr: failure ? errOut.text || failure : errOut.text,
-      });
+        ...(exitSignal ? { signal: exitSignal } : {}),
+      }));
     });
     // A child that exits without reading its input makes this write fail with
     // EPIPE. That is the child's own non-zero exit to report, not a crash here.
     child.stdin?.on('error', () => {});
-    child.stdin?.end(input);
+    if (typeof input === 'string') child.stdin?.end(input);
+    else child.stdin?.end();
   });
 }
 
@@ -229,13 +247,9 @@ export async function run(cmd, args = [], opts = {}) {
       env,
       shell: false,
     };
-    if (typeof opts.input === 'string') {
-      return await runWithInput(invocation.command, invocation.args, execOpts, {
-        windows, input: opts.input,
-      });
-    }
-    const { stdout, stderr } = await pexecFile(invocation.command, invocation.args, execOpts);
-    return { code: 0, stdout, stderr };
+    return await runOwned(invocation.command, invocation.args, execOpts, {
+      windows, input: opts.input,
+    });
   } catch (err) {
     return failureResult(err);
   }
