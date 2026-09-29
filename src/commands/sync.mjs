@@ -493,7 +493,10 @@ export const SYNC_STEPS = [
       if (applied.result.changed) ok(`ruflo daemon settings: config ${config}, start-on-use ${autostart}`);
       const { held } = applied.result;
       if (held) {
-        warn(`.claude-flow/config.json is not ak-managed here (${held.invalid ? 'unreadable or not a JSON object' : 'a key holds your own value'}); `
+        const reason = held.reason === 'yaml-shadow' ? 'creating JSON would hide existing YAML daemon values'
+          : held.reason === 'higher-priority-json' ? 'Ruflo reads root claude-flow.config.json first'
+            : held.invalid ? 'unreadable or not a JSON object' : 'a key holds your own value';
+        warn(`.claude-flow/config.json is not ak-managed here (${reason}); `
           + `left as is, and the daemon is not restarted for ${held.entries.map((e) => e.key).join(', ')}`);
       }
       if (applied.restarted) ok('ruflo daemon restarted so it reads its settings');

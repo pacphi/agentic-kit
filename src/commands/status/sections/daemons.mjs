@@ -87,6 +87,12 @@ const flatKeys = (entries, pick) => entries.map((e) => `"${e.key}": ${JSON.strin
 export function heldRow(held) {
   const file = DAEMON_CONFIG_RELATIVE.split(path.sep).join('/');
   const want = flatKeys(held.entries, (e) => e.want);
+  if (held.reason === 'yaml-shadow') return row('daemons', 'warn',
+    `${file} is not ak-managed: creating it would hide existing .claude-flow/config.yaml or config.yml daemon values`,
+    `review the YAML daemon values and set ${want} in the active config yourself, ${RESTART}`, { repair: 'manual' });
+  if (held.reason === 'higher-priority-json') return row('daemons', 'warn',
+    `${file} is not ak-managed: Ruflo reads claude-flow.config.json first`,
+    `review claude-flow.config.json and set ${want} there yourself, ${RESTART}`, { repair: 'manual' });
   return held.invalid
     ? row('daemons', 'warn', `${file} is not ak-managed: it is unreadable or not a JSON object, so ak leaves it untouched`,
       `fix ${file} so it is a JSON object holding ${want} (flat keys), ${RESTART}`, { repair: 'manual' })

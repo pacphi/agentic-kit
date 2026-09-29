@@ -100,10 +100,14 @@ function readDaemonConfig(file) {
   }
 }
 
+const pathPresent = (candidate) => {
+  try { fs.lstatSync(candidate); return true; } catch (error) { return error?.code !== 'ENOENT'; }
+};
+
 /** A desired key ak leaves to the user: the file is unreadable (`invalid`),
  *  or it holds the user's own value `have` instead of `want`.
  *  @typedef {{ key: string, want: number, have?: unknown }} HeldKey
- *  @typedef {{ invalid: boolean, entries: HeldKey[] } | null} HeldConfig */
+ *  @typedef {{ invalid: boolean, entries: HeldKey[], reason?: 'yaml-shadow'|'higher-priority-json' } | null} HeldConfig */
 
 /** Plan the config.json edit: which owned keys to drop, which to set. */
 function planConfig(current, owned, desired) {
@@ -127,8 +131,24 @@ function planConfig(current, owned, desired) {
   return { next, nextOwned, removed, written, conflicts };
 }
 
+/** @returns {{status: string, changed: boolean, held: HeldConfig}} */
 function reconcileConfig(root, receipt, desired, dryRun) {
   const file = path.join(root, DAEMON_CONFIG_RELATIVE);
+  // Never follow a user-controlled .claude-flow link (or special file) when
+  // reading, creating, replacing or removing config.json.
+  try {
+    const dir = fs.lstatSync(path.dirname(file));
+    if (!dir.isDirectory() || dir.isSymbolicLink()) {
+      const entries = Object.entries(desired).map(([key, want]) => ({ key, want }));
+      return { status: 'user-managed', changed: false, held: entries.length ? { invalid: true, entries } : null };
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      const entries = Object.entries(desired).map(([key, want]) => ({ key, want }));
+      return { status: 'user-managed', changed: false, held: entries.length ? { invalid: true, entries } : null };
+    }
+  }
+  const higherPriority = pathPresent(path.join(root, 'claude-flow.config.json'));
   const owned = receipt.configKeys ?? {};
   const current = readDaemonConfig(file);
   if (current.state === 'invalid') {
@@ -139,6 +159,17 @@ function reconcileConfig(root, receipt, desired, dryRun) {
     receipt.configKeys = {};
     receipt.configCreated = false;
     if (!Object.keys(desired).length) return { status: 'absent', changed: false, held: null };
+    // Ruflo 3.48.0 chooses root JSON, then .claude-flow/config.json, then
+    // config.yaml/yml. Creating our JSON over YAML would hide all user YAML
+    // daemon values; under root JSON this file would have no effect at all.
+    const yaml = ['config.yaml', 'config.yml'].some((name) => pathPresent(path.join(root, '.claude-flow', name)));
+    if (higherPriority || yaml) return {
+      status: 'user-managed', changed: false,
+      held: {
+        invalid: false, reason: higherPriority ? 'higher-priority-json' : 'yaml-shadow',
+        entries: Object.entries(desired).map(([key, want]) => ({ key, want })),
+      },
+    };
     if (!dryRun) {
       writePrivateFileAtomic(file, `${JSON.stringify(desired, null, 2)}\n`);
       receipt.configKeys = { ...desired };
@@ -146,7 +177,13 @@ function reconcileConfig(root, receipt, desired, dryRun) {
     }
     return { status: 'written', changed: true, held: null };
   }
-  const plan = planConfig(current.value, owned, desired);
+  // A root JSON file wins even over existing .claude-flow/config.json. Keep
+  // receipted still-needed keys and clean obsolete ones, but add no new keys
+  // to a file the daemon does not read.
+  const effectiveDesired = higherPriority
+    ? Object.fromEntries(Object.entries(desired).filter(([key]) => Object.hasOwn(owned, key)))
+    : desired;
+  const plan = planConfig(current.value, owned, effectiveDesired);
   const changed = plan.written || plan.removed;
   const empty = Object.keys(plan.next).length === 0;
   if (!dryRun) {
@@ -156,7 +193,10 @@ function reconcileConfig(root, receipt, desired, dryRun) {
     receipt.configCreated ??= false;
     if (changed && empty && receipt.configCreated === true) receipt.configCreated = false;
   }
-  const held = plan.conflicts.length ? { invalid: false, entries: plan.conflicts } : null;
+  /** @type {HeldConfig} */
+  const held = higherPriority && Object.keys(desired).length
+    ? { invalid: false, reason: 'higher-priority-json', entries: Object.entries(desired).map(([key, want]) => ({ key, want })) }
+    : plan.conflicts.length ? { invalid: false, entries: plan.conflicts } : null;
   if (plan.written) return { status: 'written', changed, held };
   if (plan.removed) return { status: 'removed', changed, held };
   return { status: held ? 'user-managed' : 'converged', changed: false, held };

@@ -120,6 +120,94 @@ test('a malformed, non-object or symlinked config.json is user-managed and untou
   assert.equal(fs.readFileSync(target, 'utf8'), '{}');
 });
 
+test('YAML markers hold JSON creation in apply and preview without hiding user daemon values', (t) => {
+  for (const extension of ['yaml', 'yml']) {
+    const root = tmpProject(t);
+    fs.mkdirSync(path.join(root, '.claude-flow'));
+    const yaml = path.join(root, '.claude-flow', `config.${extension}`);
+    fs.writeFileSync(yaml, 'daemon:\n  maxConcurrent: 7\n');
+    writeSettings(root, { claudeFlow: { daemon: { autoStart: false } } });
+    const receipts = {};
+    const preview = reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts, dryRun: true });
+    assert.equal(preview.config, 'user-managed');
+    assert.equal(preview.held?.reason, 'yaml-shadow');
+    assert.equal(preview.autostart, 'enabled');
+    assert.deepEqual(receipts, {});
+    const applied = reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts });
+    assert.deepEqual({ config: applied.config, held: applied.held, changed: applied.changed },
+      { config: preview.config, held: preview.held, changed: preview.changed });
+    assert.equal(fs.existsSync(configFile(root)), false);
+    assert.equal(fs.readFileSync(yaml, 'utf8'), 'daemon:\n  maxConcurrent: 7\n');
+    assert.equal(autoStart(root), true);
+  }
+});
+
+test('a root JSON config holds ineffective creation of lower-priority daemon JSON', (t) => {
+  const root = tmpProject(t);
+  fs.writeFileSync(path.join(root, 'claude-flow.config.json'), '{"daemon.maxConcurrent":7}');
+  const result = reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts: {} });
+  assert.equal(result.held?.reason, 'higher-priority-json');
+  assert.equal(fs.existsSync(configFile(root)), false);
+});
+
+test('a symlinked .claude-flow directory cannot redirect daemon JSON edits outside the project', (t) => {
+  const root = tmpProject(t);
+  const target = tmpProject(t);
+  fs.symlinkSync(target, path.join(root, '.claude-flow'));
+  const receipts = {};
+  const result = reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts });
+  assert.equal(result.config, 'user-managed');
+  assert.equal(result.held?.invalid, true);
+  assert.equal(fs.existsSync(path.join(target, 'config.json')), false);
+  assert.deepEqual(receipts, {});
+  fs.writeFileSync(path.join(target, 'config.json'), '{}');
+  const second = reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts });
+  assert.equal(second.config, 'user-managed');
+  assert.equal(fs.readFileSync(path.join(target, 'config.json'), 'utf8'), '{}');
+});
+
+test('root JSON becoming active holds new keys but permits receipted obsolete-key cleanup', (t) => {
+  const root = tmpProject(t);
+  const receipts = {};
+  reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts });
+  fs.writeFileSync(path.join(root, 'claude-flow.config.json'), '{"daemon.maxConcurrent":7}');
+  const result = reconcileRufloDaemon(root, { rufloVersion: '3.46.1', platform: 'darwin', receipts });
+  assert.equal(result.held?.reason, 'higher-priority-json');
+  assert.deepEqual(readConfig(root), { 'daemon.resourceThresholds.minFreeMemoryPercent': 0 });
+  assert.deepEqual(receipts[path.resolve(root)].configKeys,
+    { 'daemon.resourceThresholds.minFreeMemoryPercent': 0 });
+});
+
+test('an existing JSON keeps its ownership rules beside YAML, and release exposes YAML again', (t) => {
+  const root = tmpProject(t);
+  const receipts = {};
+  reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts });
+  const yaml = path.join(root, '.claude-flow', 'config.yml');
+  fs.writeFileSync(yaml, 'daemon:\n  maxConcurrent: 7\n');
+  const preview = reconcileRufloDaemon(root, { rufloVersion: '3.46.1', platform: 'linux', receipts, dryRun: true });
+  assert.equal(preview.config, 'removed');
+  assert.equal(fs.existsSync(configFile(root)), true);
+  assert.equal(reconcileRufloDaemon(root, { rufloVersion: '3.46.1', platform: 'linux', receipts }).config, 'removed');
+  assert.equal(fs.existsSync(configFile(root)), false);
+  assert.equal(fs.readFileSync(yaml, 'utf8'), 'daemon:\n  maxConcurrent: 7\n');
+  assert.deepEqual(receipts, {});
+});
+
+test('a YAML hold stops repeated low-memory restarts while leaving the YAML and receipts alone', async (t) => {
+  const root = rufloRepo(t);
+  fs.writeFileSync(path.join(root, '.claude-flow', 'config.yaml'), 'daemon:\n  maxConcurrent: 7\n');
+  fs.mkdirSync(path.join(root, '.claude-flow', 'logs'));
+  fs.writeFileSync(path.join(root, '.claude-flow', 'logs', 'daemon.log'),
+    `[${new Date().toISOString()}] [INFO] Worker consolidate deferred: Memory too low: 3.9% free\n`);
+  const { calls, runner } = recorder();
+  const cfg = { rufloDaemon: { receipts: {} } };
+  const result = await applyRufloDaemon(root, { cfg, rufloVersion: '3.46.1', platform: 'darwin', runner, alive: () => true });
+  assert.equal(result.restarted, false);
+  assert.deepEqual(calls, []);
+  assert.equal(fs.existsSync(configFile(root)), false);
+  assert.deepEqual(cfg.rufloDaemon.receipts, {});
+});
+
 test('the memory pin still wins and .swarm stays the memory root', (t) => {
   const root = tmpProject(t);
   fs.writeFileSync(path.join(root, 'claude-flow.config.json'), JSON.stringify({ memory: { persistPath: '.swarm' } }));
