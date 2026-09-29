@@ -124,8 +124,9 @@ export function reconcileClaudeCostState(rec) {
     ].filter(Boolean) };
 }
 
-// Price only the missing-cost portion of a coalesced row. Reported zero is
-// evidence; missing coverage is an estimate even when that estimate is zero.
+// Price only the missing-cost portion of a coalesced row. OpenCode's
+// positive-token reported zero can mean an absent model rate; those responses
+// are explicitly unpriced. Missing coverage is an estimate even when zero.
 //
 // A missing-cost portion served by a LOCAL provider is neither: the pricing
 // table has no rate for a model that costs nothing per call, and the
@@ -133,7 +134,8 @@ export function reconcileClaudeCostState(rec) {
 // `unpricedMessages` — coverage the reader can see — and contribute no dollars.
 export function rowCostEvidence(row, rec, deps) {
   const observed = typeof row.costObserved === 'number' && Number.isFinite(row.costObserved) && row.costObserved >= 0;
-  const missing = row.costMissingUsage ?? (observed ? null : row);
+  const untrustedMessages = row.costUntrustedMessages ?? 0;
+  const missing = row.costMissingUsage ?? (observed || untrustedMessages ? null : row);
   const unpriced = !!missing && (isLocalInferenceProvider(row.provider) || row.model === 'codex-auto-review');
   const estimatedUsd = missing && !unpriced ? (deps.costOf({
     model: row.model, provider: row.provider ?? rec.provider, day: row.day,
@@ -146,7 +148,7 @@ export function rowCostEvidence(row, rec, deps) {
     estimatedUsd,
     observedMessages: observed ? (row.costObservedMessages ?? row.responses ?? 0) : 0,
     estimatedMessages: unpriced ? 0 : missingMessages,
-    unpricedMessages: unpriced ? missingMessages : 0,
+    unpricedMessages: (unpriced ? missingMessages : 0) + untrustedMessages,
   };
 }
 
