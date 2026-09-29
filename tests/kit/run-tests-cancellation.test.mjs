@@ -24,6 +24,10 @@ test('real test timeout closes owned runner and orphan before cwd removal and re
     import { interruptionScope, childGone, until } from ${JSON.stringify(helper)};
     let scope, child, closed = false, removed = false;
     test('intentional cancellation', { timeout: 500 }, async t => {
+      // Node 22 unrefs its test timeout; keep this fixture alive until it fires.
+      // This owned handle is bounded even if cancellation cleanup fails.
+      const keepAlive = setTimeout(() => {}, 10000);
+      t.after(() => clearTimeout(keepAlive));
       scope = interruptionScope(t, { beforeRemove(home) {
         assert.equal(closed, true, 'close must precede cwd removal');
         assert.equal(childGone(child.pid), true, 'OS must report ESRCH before removal');
