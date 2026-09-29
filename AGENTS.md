@@ -307,7 +307,7 @@ compression, or neural-routing targets are not measured agentic-kit guarantees.
 pnpm test
 
 # One focused suite
-node --test tests/kit/dispatch-surface.test.mjs
+node scripts/run-tests.mjs focus tests/kit/dispatch-surface.test.mjs
 
 # Browser verification
 pnpm run test:ui
@@ -319,6 +319,8 @@ pnpm run lint:cc
 pnpm run lint:md
 pnpm run build
 ```
+
+A plain `node --test` run lacks the wrapper's real-state tripwire and temp-root checks.
 
 `pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`, which fingerprints
 `~/.config/agentic-kit`, `~/.local/state/agentic-kit` (or `%APPDATA%`/`%LOCALAPPDATA%` on

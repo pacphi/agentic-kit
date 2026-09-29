@@ -2,7 +2,7 @@
 
 ## Status
 
-Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Tasks 10/5/7 were independently accepted. Task 11 now implements private owner records, guarded own-root removal and list-only sibling handling; focused refusal/race/error tests and helper coverage are recorded in the ignored Task 11 report. No backlog removal, push, PR or merge has occurred. Task 12 focus implementation has not started. The creator census is complete: 647 sites classified, zero unresolved current lifecycles. Native Windows/Linux behavioral proof remains open. Default sibling handling is list-only on every platform.
+Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Tasks 10/5/7 and Task 11 were independently accepted. Task 12 adds guarded `focus <files…>` and a bounded POSIX interrupted-run proof: a completed focus run retains an interrupted root while its child lives, after that child exits, and while another runner is live. Default sibling handling remains list-only on every platform; native Windows/Linux behavior is unmeasured. No backlog removal, push, PR or merge has occurred. The creator census is complete: 647 sites classified, zero unresolved current lifecycles.
 
 ## Contract and dependencies
 
@@ -27,6 +27,6 @@ The [cleanup design](2026-09-28-test-temp-folder-cleanup-design.md) selects B9-R
 
 ## Execution boundaries
 
-For now, use `node scripts/run-tests.mjs exec -- --test <files>` with disposable home/state roots. After Task 12, use `node scripts/run-tests.mjs focus <files>`. Do not use pnpm in a worktree with symlinked dependencies. Run focused failure-path checks before wider gates; do not repeat green gates without a new concern. Each code unit needs its own failing/passing evidence and conventional commit after authorization. Before editing/staging `AGENTS.md`, verify there is no injected drift.
+Use `node scripts/run-tests.mjs focus <files>` with disposable home/state roots for focused tests. Do not use pnpm in a worktree with symlinked dependencies. Run focused failure-path checks before wider gates; do not repeat green gates without a new concern. Each code unit needs its own failing/passing evidence and conventional commit after authorization. Before editing/staging `AGENTS.md`, verify there is no injected drift.
 
 Task 13 excludes recently modified entries, live-handle matches, unattributed prefixes, product-created `ak-sync-preview-npm-*`, and valid owner roots. Age is a manual-review filter only. Task 13 does not implement deletion. No unit claims interrupted-run backlog reclamation until a platform can prove every descendant gone.

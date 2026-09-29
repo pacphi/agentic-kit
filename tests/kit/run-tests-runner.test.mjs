@@ -17,10 +17,44 @@ function sandbox(t) {
   fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
   const env = spawnEnv(home, { APPDATA: path.join(home, 'AppData', 'Roaming'), CI: 'true' });
   delete env.AK_TRIPWIRE_STRICT;
+  // Nested CLI fixtures must run as independent test processes.
+  delete env.NODE_TEST_CONTEXT;
   return { home, repo, env };
 }
 
 const stub = (dir, name, body) => { const f = path.join(dir, name); fs.writeFileSync(f, body); return f; };
+
+test('focus runs a literal clean test file through the guarded root', (t) => {
+  const { home, env } = sandbox(t);
+  const file = stub(home, 'clean.test.mjs', "import { test } from 'node:test'; test('clean', () => {});");
+  const before = fs.readdirSync(env.TMPDIR);
+  const r = spawnSync(process.execPath, [RUNNER, 'focus', file], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /real-state tripwire: watching/);
+  assert.match(r.stderr, /removed own run root /);
+  assert.deepEqual(fs.readdirSync(env.TMPDIR), before);
+});
+
+test('focus reports a leaked temp folder with hygiene exit code', (t) => {
+  const { home, env } = sandbox(t);
+  const file = stub(home, 'leaky.test.mjs', `import { test } from 'node:test';
+    import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+    test('leak', () => { fs.mkdtempSync(path.join(os.tmpdir(), 'focus-leak-')); });`);
+  const r = spawnSync(process.execPath, [RUNNER, 'focus', file], { env, encoding: 'utf8' });
+  assert.equal(r.status, 4, r.stdout + r.stderr);
+  assert.match(r.stderr, /temp folders left behind.*focus-leak-/s);
+});
+
+test('focus rejects missing files and option-shaped filenames before creating roots', (t) => {
+  const { env } = sandbox(t);
+  const before = fs.readdirSync(env.TMPDIR);
+  for (const args of [[], ['--test-reporter=dot'], ['does-not-exist.test.mjs']]) {
+    const r = spawnSync(process.execPath, [RUNNER, 'focus', ...args], { env, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /usage: run-tests\.mjs focus/);
+    assert.deepEqual(fs.readdirSync(env.TMPDIR), before);
+  }
+});
 
 test('a command that writes real state fails the run and the path is named', (t) => {
   const { home, repo, env } = sandbox(t);

@@ -71,6 +71,8 @@ export function runGuarded(commands, {
         log(`kept own run root ${tempRoot}: directory identity changed`); return false;
       }
       fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });
+      try { log(`removed own run root ${tempRoot}`); }
+      catch { /* Reporting cannot change a completed removal into a failure. */ }
       return true;
     } catch (error) {
       log(`own run root removal failed; may be partially removed ${tempRoot}: ${error.message}`);
@@ -132,6 +134,15 @@ function enclosingRepository(dir) {
 function main(argv) {
   const [mode] = argv;
   if (mode === 'unit' || mode === 'ui') return runGuarded(commandsFor(mode));
+  if (mode === 'focus') {
+    const files = argv.slice(1);
+    // Reject Node options disguised as filenames before constructing an argv vector.
+    if (!files.length || files.some((file) => !file || file.startsWith('-') || !isTestFile(file))) {
+      console.error('usage: run-tests.mjs focus <test files…> (each file must exist)');
+      return 2;
+    }
+    return runGuarded([['--test', ...files]]);
+  }
   if (mode === 'exec') {
     const sep = argv.indexOf('--');
     const repoAt = argv.indexOf('--repo');
@@ -139,8 +150,13 @@ function main(argv) {
     const repoRoot = repoAt >= 0 && repoAt < sep ? path.resolve(argv[repoAt + 1]) : REPO;
     return runGuarded([argv.slice(sep + 1)], { repoRoot });
   }
-  console.error('usage: run-tests.mjs unit|ui|exec');
+  console.error('usage: run-tests.mjs unit|ui|exec|focus');
   return 2;
+}
+
+function isTestFile(file) {
+  try { return fs.statSync(path.resolve(REPO, file)).isFile(); }
+  catch { return false; }
 }
 
 // Compare real paths (drive-letter case differs on Windows): a missed match would
