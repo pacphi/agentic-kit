@@ -1,4 +1,4 @@
-// Task 6 (Branch 6a refactor/evidence-store): `ak status --refresh` had no
+// `ak status --refresh` had no
 // effect on version-drift rows because four sections silently dropped the
 // `refresh` key their shared collect() ctx already carries. The four
 // libraries (versions.mjs/ruvector.mjs/ruvnet-brain.mjs's driftReport/

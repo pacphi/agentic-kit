@@ -1858,7 +1858,7 @@ test('blankSession v14 fingerprint fields default honest-empty', () => {
   assert.equal(rec.promptFPOverflow, 0);
 });
 
-// ── v11 index carry-through + lookback (Task 5) ─────────────────────────────
+// ── v11 index carry-through + lookback ─────────────────────────────
 
 /** Carries BOTH v16 shape flags: it opens with a persona assignment and it ends
  *  with a question mark. Shared by the fixture and its assertions so the two
@@ -1959,7 +1959,7 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
   assertBoth(); // cache-hit read: identical values prove the round trip
 });
 
-// ── lookback (Task 5) ────────────────────────────────────────────────────────
+// ── lookback ────────────────────────────────────────────────────────
 
 test("buildIndex({ days, lookbackDays }) widens discovery/parse; unset stays exactly today's behavior", async () => {
   _resetForTest();
@@ -1986,7 +1986,7 @@ test("buildIndex({ days, lookbackDays }) widens discovery/parse; unset stays exa
   assert.equal(byId(undefinedLookback, 'old-session'), undefined, 'lookbackDays: undefined must not widen the window either');
   assert.deepEqual(undefinedLookback.totals, plain.totals, 'unset lookbackDays is identical to omitting it entirely');
 
-  // Task 7 (2026-08-28-scorecard-matrix-a SDD) ruling B: lookbackDays alone
+  // lookbackDays alone
   // no longer widens what the CURRENT window's sessions/totals contain — only
   // discovery/parse/cache. `aggregate` is always called with the DISPLAY
   // cutoff (now - days*DAY_MS), so a `previous: true`-less caller must see
@@ -2030,7 +2030,7 @@ test('scanKey distinguishes calls that differ only by lookbackDays', async () =>
     'a call with lookbackDays set must not collide with one that omits it — they must not share the in-flight promise / result object');
 });
 
-// Task 7 fix round 1: the same F-08-style regression guard as the lookbackDays
+// The same F-08-style regression guard as the lookbackDays
 // test above, now for `previous` — added after review flagged that scanKey
 // folded lookbackDays into its identity but not previous, so a {previous:true}
 // caller (e.g. /api/usage) racing a {previous:false} caller (e.g. the Models
@@ -2045,7 +2045,7 @@ test('scanKey distinguishes calls that differ only by previous', async () => {
     'a call with previous:true must not collide with one that omits it — they must not share the in-flight promise / result object');
 });
 
-// ── aggregate: buckets, rhythm, per-day engaged, previous window (Task 6) ───
+// ── aggregate: buckets, rhythm, per-day engaged, previous window ───
 //
 // These suites drive `aggregate()` directly instead of through buildIndex: the
 // previous-window projection reads records OLDER than the cutoff, which only

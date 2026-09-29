@@ -1114,7 +1114,7 @@ function handleCodexUserMessage(rec, turns, titleState, latState, decoded, ms, w
     rec.prompts++;
     if (!titleState.firstPrompt) titleState.firstPrompt = text;
     // Opens the prompt→agent-message latency window; closed by the first
-    // following handleCodexAssistantMessage (mirrors Claude's latState, Task 3).
+    // following handleCodexAssistantMessage (mirrors Claude's latState).
     latState.pendingPromptMs = ms;
     // Codex's kind is exactly this gate's verdict (see the turn row below), so
     // a gated message contributes no fingerprint — the layer sits behind the

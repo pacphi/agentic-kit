@@ -159,8 +159,8 @@ function spyReadIndex(records, calls) {
 
 test('/api/usage payload carries rhythm, mode, provider and a previous-window projection', async () => {
   const calls = [];
-  // Mirrors usage-index.mjs's corrected buildIndex/scan contract (Task 7
-  // ruling B): `aggregate` always sees the DISPLAY cutoff, and `previous`
+  // Mirrors usage-index.mjs's corrected buildIndex/scan contract:
+  // `aggregate` always sees the DISPLAY cutoff, and `previous`
   // rides through from the caller's own options unchanged.
   const usage = { readIndex: spyReadIndex(FIXTURE_RECORDS, calls) };
   const srv = await startDashboard({
@@ -799,11 +799,11 @@ test('the whole-history chip ships hidden, for the one view that needs it', () =
   assert.match(JS, /usage-days-all/, 'and the client actually toggles it');
 });
 
-// ── usage-rhythm.mjs: rhythm/mode chart primitives (Task 8) ────────────────
+// ── usage-rhythm.mjs: rhythm/mode chart primitives ────────────────
 //
 // These are pure string builders, imported directly here — real ESM on disk,
 // not read through the concatenated client.mjs bundle (that concatenation is
-// exercised separately, above, via the `JS` import). Task 9 wires these
+// exercised separately, above, via the `JS` import). The panels wire these
 // exports into usage.mjs's panels.
 
 test('deltaChip renders an up arrow and a rounded percent for a positive change', () => {
@@ -851,7 +851,7 @@ test('histogram renders a marker and its label, with the bars emitted after the 
   // geometry test below for the CSS half of this: .hist-bars must ALSO be
   // positioned for "markers first" to actually put bars on top). This only
   // asserts the half a string test can honestly observe: markup order.
-  // Task 9's screenshot verification is what confirms the rendered result.
+  // Screenshot verification is what confirms the rendered result.
   const html = histogram({ counts: [1, 5, 2], labels: ['<1s', '1-3s', '3s+'], markers: [{ atPct: 50, label: 'p50' }] });
   assert.match(html, /p50/);
   assert.match(html, /hist-marker/);
@@ -917,7 +917,7 @@ test('usage styles append the rhythm/mode chart primitive classes with the mark-
   assert.match(CSS, /\.hist-bars\{[^}]*position:relative/, 'hist-bars must be positioned to paint over the positioned marker overlay');
 });
 
-// ── Task 9: the panels that consume all of the above ──────────────────────
+// ── the panels that consume all of the above ──────────────────────
 
 test('usage-rhythm.mjs reaches the served bundle, with exactly one escaper in it', () => {
   // Without this splice every panel below throws ReferenceError in the browser

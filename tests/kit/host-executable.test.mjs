@@ -27,7 +27,7 @@ test('hostExecutable accepts a launcher that answers --version', async () => {
   assert.deepEqual(calls, [['codex', '--version']]);
 });
 
-// ── hostExecutable refresh caching (Branch 6a Task 5) ───────────────────────
+// ── hostExecutable refresh caching ───────────────────────
 // `runner` is injectable, so these prove zero-spawn directly instead of
 // needing the broken-PATH trick tests/kit/host-setup-evidence.test.mjs uses
 // for the non-injectable have()/hostVersion() probes.

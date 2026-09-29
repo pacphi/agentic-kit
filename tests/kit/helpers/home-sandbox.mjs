@@ -218,7 +218,7 @@ export const snapshot = (dir) => walk(dir, dir, new Map());
  *  modified path — the load-bearing assertion behind every `--dry-run` test.
  *  `opts.ignore` is a list of relative-path prefixes (as `snapshot()` keys,
  *  e.g. from `path.relative(dir, someSubdir)`) excluded from the diff — for a
- *  deliberate, documented side-channel write (Branch 6a Task 5: the shared
+ *  deliberate, documented side-channel write (the shared
  *  evidence probe cache) a caller still wants every OTHER path covered for.
  * @param {Map<string,string>} before
  * @param {string} dir

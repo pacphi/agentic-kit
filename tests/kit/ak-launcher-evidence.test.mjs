@@ -1,4 +1,4 @@
-// Branch 6a Task 7: claudeLauncherUnavailable() (src/lib/mcp.mjs) stops
+// claudeLauncherUnavailable() (src/lib/mcp.mjs) stops
 // spawning `which ak` (and, when ak is present, `ak x ruflo-mcp --help`) on
 // every plain `ak status` call where sync's register() would run — it reuses
 // fresh evidence instead (kind 'ak-launcher', id 'machine', 6h TTL,

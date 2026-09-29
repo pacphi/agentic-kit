@@ -1248,7 +1248,7 @@ test('enabled + absent CLI: the install is attempted by hosts, the wiring is ski
   assert.ok(!fs.existsSync(ocHome()), 'the config home is never fabricated for an absent host');
 });
 
-// final-review fix: a real (non-dry-run) sync forces host evidence fresh
+// a real (non-dry-run) sync forces host evidence fresh
 // BEFORE the plan is read (refreshPlanHosts), so a cached row that has not
 // yet gone stale (host-setup's 6h TTL) but is simply WRONG — here, claude
 // went from "absent" to "on PATH" since it was last recorded — can never

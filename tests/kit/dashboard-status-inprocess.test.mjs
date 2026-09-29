@@ -1,10 +1,10 @@
-// Branch 6a Task 9: dashboard-server.mjs's default /api/status provider now
+// dashboard-server.mjs's default /api/status provider now
 // calls status.mjs's own collect() in process instead of shelling out to
 // `node bin/agentic-kit.mjs status --json`. This file proves the swap kept
 // both properties that mattered about the old subprocess boundary:
 //
 // 1. A warm-cache request spawns nothing (tests/fixtures/status-zero-spawn-child.mjs
-//    already proved this for a bare collect() call — Task 8a/Task 7; this
+//    already proved this for a bare collect() call; this harness
 //    proves it for a REQUEST ARRIVING AT A RUNNING SERVER, the actual shape
 //    the dashboard's 30s poll exercises).
 // 2. The JSON /api/status now COMPUTES has the same {overall, rows} content

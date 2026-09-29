@@ -1,7 +1,7 @@
 // ADR-0058 §7: every row carries state + meaning + action, never a bare label.
 // Evidence comes from the cache; `ak status --refresh` re-probes first. The
 // projection itself (Claude env conflicts, policy state, missing hosts) is
-// shared with Task 10's dashboard through rufloComponentsPayload — this
+// shared with the dashboard through rufloComponentsPayload — this
 // section never re-implements it (controller ruling 3).
 import { installedVersion } from '../../../lib/versions.mjs';
 import { row } from '../row.mjs';

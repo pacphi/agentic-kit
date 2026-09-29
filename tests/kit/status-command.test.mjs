@@ -284,7 +284,7 @@ test('collect() writes nothing to HOME or the project, beyond its own probe-resu
   const beforeHome = snapshot(HOME);
   const beforeProject = snapshot(PROJECT);
   await collect();
-  // Branch 6a Task 5: a plain status collect() call (refresh:false, the
+  // a plain status collect() call (refresh:false, the
   // default) still probes for real on a cache miss/stale/first run (Ruling
   // A) and records the result — so a LATER plain status call can reuse it.
   // That write lands only under the shared evidence store, never anywhere
@@ -329,7 +329,7 @@ test('ruflo provider intent never claims registration alone is routed execution'
   assert.doesNotMatch(intent.message, /routable|executed successfully/);
 });
 
-// Branch 6a Task 9: dashboard-server.mjs now calls collect() in process, and
+// dashboard-server.mjs now calls collect() in process, and
 // a live dashboard server can be asked (via its per-request `cwd`) for a
 // project other than its own launch cwd. Every cwd-sensitive section must
 // resolve against the PASSED cwd, never a silent process.cwd() fallback.
