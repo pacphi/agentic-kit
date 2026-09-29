@@ -1198,7 +1198,7 @@ cache-read *columns* in this table are provider-published absolute rates; the
 kit's `pricing.mjs` instead stores **multipliers** — 1.25× for a 5-minute cache
 write and 2× for a 1-hour cache write (both uniform, no published per-model
 exception) and, for cache reads, 0.1×
-for every model *except* Fable 5.1 / Mythos 5.1 (0.025×) and Opus 5.5 (0.05×),
+for every model *except* Fable 5.1 / Mythos 5.1 (0.025×), Opus 5.5 (0.05×) and GPT-6.1 Sol (0.05×),
 which carry their own cache-read override on their `PRICES` entries
 instead of the module-wide default multiplier.
 

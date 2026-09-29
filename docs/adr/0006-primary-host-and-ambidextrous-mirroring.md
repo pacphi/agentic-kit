@@ -5,8 +5,10 @@
 - **Updated:** 2026-09-29
 - **Latest update note (2026-09-29):** The Codex balanced tier is now `gpt-6.1-sol`; `gpt-6-sol` is
   `tier: 'prior'`, so a pinned `gpt-6-sol` route mirrors to the Claude prior tier, as other prior pins do.
+  It is also the first Codex `prior` entry, so a pinned `claude-sonnet-5` route now mirrors to `gpt-6-sol`
+  (it was `gpt-5.6-sol` as of 2026-09-28).
   See `docs/archive/2026-09-29-audit-gpt-6-1-sol.md`.
-- **Update note:** Balanced tier moved to `claude-sonnet-5-5` (same per-token price
+- **Earlier update (2026-09-28):** Balanced tier moved to `claude-sonnet-5-5` (same per-token price
   as `claude-sonnet-5`; Anthropic's first-party benchmarks show it strictly ahead on every axis
   checked). `claude-sonnet-5` is retained at `tier: 'prior'` for user pins, so a pinned route now
   mirrors to `gpt-5.6-sol`, not `gpt-6-sol` — the same behavior the Opus 5 → Opus 5.5 move
