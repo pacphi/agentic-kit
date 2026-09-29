@@ -161,7 +161,7 @@ test('invalid or unreadable managed file stays unknown instead of using the user
   }), 'unknown');
 });
 
-test('explicit disabled managed statusLine cannot inherit the user footer', () => {
+test('managed null or false statusLine is unknown and cannot inherit the user footer', () => {
   const fx = teeFixture({ statusLine: cmd('node ~/.claude/helpers/statusline.cjs'),
     scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
   const managedSettingsFile = path.join(fx.home, 'managed-settings.json');
@@ -169,7 +169,7 @@ test('explicit disabled managed statusLine cannot inherit the user footer', () =
     fs.writeFileSync(managedSettingsFile, JSON.stringify({ statusLine }));
     assert.equal(classifyClaudeTeeChannel({
       settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
-    }), 'none');
+    }), 'unknown');
   }
 });
 
@@ -637,7 +637,7 @@ test('readLimits forwards a managed settings path to the Claude classifier', asy
     claudeSettingsFile: fx.settingsFile, claudeManagedSettingsFile: managedSettingsFile,
     home: fx.home,
   });
-  assert.equal(out.claudeChannel, 'none');
+  assert.equal(out.claudeChannel, 'unknown');
 });
 
 test('readLimits carries why Codex limits are unavailable beside an unchanged codex field', async () => {

@@ -174,7 +174,9 @@ function managedStatusLine(file, fsImpl) {
   if (!managed || typeof managed !== 'object' || Array.isArray(managed)) return { state: 'unknown' };
   if (!Object.hasOwn(managed, 'statusLine')) return { state: 'absent' };
   const line = managed.statusLine;
-  if (line == null || line === false) return { state: 'disabled' };
+  // A present null/false value is not a documented way to disable statusLine.
+  // Do not infer effective policy or fall through to a lower-precedence footer.
+  if (line == null || line === false) return { state: 'unknown' };
   if (!line || typeof line !== 'object' || Array.isArray(line)
     || (line.type !== undefined && line.type !== 'command')
     || typeof line.command !== 'string' || !line.command.trim()) return { state: 'unknown' };
@@ -187,7 +189,8 @@ function managedStatusLine(file, fsImpl) {
  * footer), 'project-helper' (it runs each project's ruflo helper, so it depends
  * on the project), 'custom' (anything else: another script, an inline command,
  * a missing file), or 'unknown' (a relevant settings file cannot be read or
- * interpreted). This does not observe server, MDM, or SDK managed policy.
+ * interpreted). This does not observe managed-settings.d drop-ins, server,
+ * MDM, or SDK managed policy.
  *
  * @param {{ settingsFile?: string, managedSettingsFile?: string|null,
  *           fsImpl?: any, home?: string, platform?: NodeJS.Platform }} [o]
@@ -201,7 +204,6 @@ export function classifyClaudeTeeChannel({
     ? claudeManagedSettingsPath(platform) : managedSettingsFile;
   const managed = managedStatusLine(managedFile, fsImpl);
   if (managed.state === 'unknown') return 'unknown';
-  if (managed.state === 'disabled') return 'none';
   let settings = managed.settings;
   if (!settings) {
     try { settings = JSON.parse(fsImpl.readFileSync(settingsFile, 'utf8')); }
