@@ -382,21 +382,24 @@ function deployTokenAuditSkill(pkgRoot) {
  *  left alone. Shares HOSTS/hostInstallState/installHost with `ak sync`'s
  *  and `ak host pick`'s own host-install loops; the interactive confirmation
  *  here (vs. their unconditional install) is this command's own UX. */
-async function installEnabledAbsentHosts(cfg, flags) {
+export async function installEnabledAbsentHosts(cfg, flags, lifecycle = {}) {
+  const { installState, install, collectFacts } = {
+    installState: hostInstallState, install: installHost, collectFacts: collectIntegrationFacts, ...lifecycle,
+  };
   let installed = false;
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
-    const st = await hostInstallState(h);
+    const st = await installState(h);
     if (st.method === 'absent') {
       if (await ask(`${h.id} CLI not found — install ${h.pkg} globally?`, true, flags.yes)) {
-        const r = await installHost(h.id);
+        const r = await install(h.id);
         (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
         if (r.ok) {
           installed = true;
           // hostInstallState() above already recorded the pre-install
           // 'absent' evidence; re-probe now so a subsequent `ak status`
           // doesn't read that stale row back.
-          await hostInstallState(h, { refresh: true, record: true, source: 'setup' });
+          await installState(h, { refresh: true, record: true, source: 'setup' });
         }
       } else warn(`${h.id} not installed — enable/install later with: ak host pick`);
     } else {
@@ -405,7 +408,7 @@ async function installEnabledAbsentHosts(cfg, flags) {
   }
   // host-setup covers every host in one call; refresh it once after the
   // loop, not per host, once anything actually changed.
-  if (installed) await collectIntegrationFacts({ cfg, refresh: true, record: true, source: 'setup' });
+  if (installed) await collectFacts({ cfg, refresh: true, record: true, source: 'setup' });
 }
 
 /** Step 6b: host lifecycle wiring — connected MCPs, compact lazy gateway,
@@ -468,7 +471,7 @@ async function printUndetectedHostHints(cfg) {
   }
 }
 
-export async function run_machine({ flags, pkgRoot, cfg }) {
+export async function run_machine({ flags, pkgRoot, cfg, deps = { hostLifecycle: undefined } }) {
   heading('machine setup');
   if (flags['dry-run']) { info('dry-run: would ensure packages (incl. agent-browser and ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
 
@@ -480,7 +483,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   // key on `codex` being on PATH / dual-mode enablement). Running them here
   // warned + drifted on genuinely bare machines.
   deployTokenAuditSkill(pkgRoot);
-  await installEnabledAbsentHosts(cfg, flags);
+  await installEnabledAbsentHosts(cfg, flags, deps.hostLifecycle);
   if (!(await applyMachineHostLifecycles(cfg, pkgRoot))) return false;
   if (cfg.codexContext && cfg.integrations?.hosts?.codex) {
     try { await manageCodexContext(cfg, { persist: saveKitConfig }); }
@@ -954,6 +957,7 @@ async function applySetupCodexRepairs(flags, repairPlan, cwd, repairTopology) {
 
 export async function run({
   flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE,
+  deps = { hostLifecycle: undefined },
   ...runtimeOverrides
 }) {
   const runtime = { ...DEFAULT_SETUP_RUNTIME, ...runtimeOverrides };
@@ -994,7 +998,7 @@ export async function run({
     flags, cfg, hostFlags, companionPreflight, dejaVuFlagsResult,
   });
 
-  if (!(await runtime.machineSetup({ flags, pkgRoot, cfg }))) return 1;
+  if (!(await runtime.machineSetup({ flags, pkgRoot, cfg, deps }))) return 1;
   if (!flags['dry-run'] && cfg.aqe !== false) {
     // Persist the selected choice even on failure, so retry/sync has an exact plan.
     saveKitConfig(cfg);

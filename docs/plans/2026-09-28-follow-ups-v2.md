@@ -2,7 +2,7 @@
 
 ## Status
 
-**Active.** Branch `fix/follow-ups-v2`; exact base `e2f9dcae0554ff63921df618a819fd5e6afe80d2` (develop bootstrap #272). B1 is complete in `fb54f02b`; B12 is verified and fixed by a test-first unit. Other rows remain unimplemented. The controller reviews and assigns later rows. One test-first unit commit per row.
+**Active.** Branch `fix/follow-ups-v2`; exact base `e2f9dcae0554ff63921df618a819fd5e6afe80d2` (develop bootstrap #272). B1 is complete in `fb54f02b`; B12 is verified and fixed by a test-first unit. B2 is implemented in the isolated `fix/follow-ups-v2-rest` branch, pending independent review and integration. Other rows remain unimplemented. The controller reviews and assigns later rows. One test-first unit commit per row.
 
 The [remediation program V4](2026-09-28-remediation-program-v2.md#v4-fixfollow-ups-v2-every-small-product-cli-and-upstream-item) defines scope. The [archived Branch 9 plan](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md) supplies task details. Paths below name current source seams and focused test targets. After an explicit directory prefix, subsequent bare filenames in the same cell use that directory. A new test named below is a proposed file. Later implementers must verify dependencies before editing.
 

@@ -181,7 +181,7 @@ export const parseFallback = (str) => str.split(';').map((s) => s.trim()).filter
   return { provider: provider.trim().toLowerCase(), models: models.split(',').map((m) => m.trim()).filter(Boolean) };
 });
 
-export async function run({ flags, positionals, pkgRoot }) {
+export async function run({ flags, positionals, pkgRoot, deps = { hostLifecycle: undefined } }) {
   const sub = positionals[0] ?? 'status';
   const cwd = process.cwd();
 
@@ -193,7 +193,7 @@ export async function run({ flags, positionals, pkgRoot }) {
 
   if (sub === 'status') return status({ flags, cwd });
   if (sub === 'off') return off({ cwd, pkgRoot, flags });
-  if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
+  if (sub === 'pick') return pick({ flags, cwd, pkgRoot, deps });
   if (sub === 'reset-routes') return resetRoutes({ flags, cwd });
   if (sub === 'align') return (await import('./host-align.mjs')).run({ flags });
   if (sub === 'adapters') {
@@ -918,25 +918,28 @@ async function retireCodexOnDisable(cfg, cwd, { codexMcpManaged, rufloCodexManag
 /** Install any enabled host that is entirely absent (external installs
  *  untouched). Unlike setup's install loop, pick never prompts first — the
  *  user already confirmed the trust manifest for this exact enable. */
-async function installPickAbsentHosts(cfg, cwd) {
+export async function installPickAbsentHosts(cfg, cwd, lifecycle = {}) {
+  const { installState, install, collectFacts } = {
+    installState: hostInstallState, install: installHost, collectFacts: collectIntegrationFacts, ...lifecycle,
+  };
   let installed = false;
   for (const h of HOSTS) {
     if (!cfg.integrations.hosts[h.id]) continue;
-    if ((await hostInstallState(h)).method !== 'absent') continue;
+    if ((await installState(h)).method !== 'absent') continue;
     info(`${h.id} not installed — installing ${h.pkg}…`);
-    const r = await installHost(h.id);
+    const r = await install(h.id);
     (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
     if (r.ok) {
       installed = true;
       // hostInstallState() above already recorded the pre-install 'absent'
       // evidence; re-probe now so a subsequent `ak status` doesn't read that
       // stale row back.
-      await hostInstallState(h, { refresh: true, record: true, source: 'host-pick' });
+      await installState(h, { refresh: true, record: true, source: 'host-pick' });
     }
   }
   // host-setup covers every host in one call; refresh it once after the
   // loop, not per host, once anything actually changed.
-  if (installed) await collectIntegrationFacts({ cwd, cfg, refresh: true, record: true, source: 'host-pick' });
+  if (installed) await collectFacts({ cwd, cfg, refresh: true, record: true, source: 'host-pick' });
 }
 
 /** opencode enable half: apply the same owner-module stack setup/sync use —
@@ -1144,7 +1147,7 @@ async function resolvePickIntentAndPreview({
   };
 }
 
-export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetiredRoutesInConfig }) {
+export async function pick({ flags, cwd, pkgRoot, deps = { hostLifecycle: undefined }, migrateRoutes = migrateRetiredRoutesInConfig }) {
   const aqeProviderTypes = aqeSelectableProviderTypes();
   const aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   const cfg = loadKitConfig();
@@ -1195,7 +1198,7 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   }
   saveKitConfig(cfg);
 
-  await installPickAbsentHosts(cfg, cwd);
+  await installPickAbsentHosts(cfg, cwd, deps.hostLifecycle);
   const { incompleteTeardown } = await applyPickOpencodeLifecycle(cfg, { pkgRoot, cwd, prevOpencode });
 
   const { router } = await applyPickProviderStack(cfg, cwd, {
