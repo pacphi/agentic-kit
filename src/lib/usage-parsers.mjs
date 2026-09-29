@@ -226,6 +226,7 @@ export function blankSession(id, provider) {
     // Codex host observations. Missing telemetry remains null; compactions
     // count completed context replacements, never extra token spend.
     codexEffort: null, firstTokenMs: null, compactions: 0,
+    compactionEvidence: { lowerBound: 0, upperBound: 0 },
     // v11: cross-host permission posture (usage-modes.normalizeMode), a
     // response-latency histogram, THIS session's own engaged seconds, model
     // context-window detail, and codex's explicit-abort count. Every field
@@ -885,7 +886,7 @@ function handleCodexMeta(rec, metaState, decoded, payload) {
   }
 }
 
-function handleCodexTurnContext(rec, decoded, payload) {
+function handleCodexTurnContext(rec, decoded, payload, captureEffort = true) {
   if (!rec.projectEvidence && typeof decoded.cwd === 'string') rec.projectEvidence = observeUsageProject(decoded.cwd);
   if (typeof decoded.model === 'string' && !rec.models.includes(decoded.model)) rec.models.push(decoded.model);
   if (decoded.provider) {
@@ -907,7 +908,7 @@ function handleCodexTurnContext(rec, decoded, payload) {
     : payload.sandbox_policy;
   const m = normalizeMode({ host: 'codex', approvalPolicy: payload.approval_policy, sandboxPolicy: sandbox });
   if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
-  if (['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(payload.effort)) {
+  if (captureEffort && ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(payload.effort)) {
     rec.codexEffort ??= { last: null, counts: {} };
     rec.codexEffort.last = payload.effort;
     rec.codexEffort.counts[payload.effort] = (rec.codexEffort.counts[payload.effort] ?? 0) + 1;
@@ -1002,9 +1003,9 @@ function handleCodexTaskStarted(rec, latState, payload) {
  *  awaiting approval overnight arrives as a multi-hour "response" that the
  *  prompt-gap path would have discarded. A non-null `error` counts as an
  *  exception regardless of whether the fallback sample fires. */
-function handleCodexTaskComplete(rec, latState, payload) {
+function handleCodexTaskComplete(rec, latState, payload, captureFirstToken = true) {
   const first = payload.time_to_first_token_ms;
-  if (typeof first === 'number' && Number.isFinite(first) && first >= 0
+  if (captureFirstToken && typeof first === 'number' && Number.isFinite(first) && first >= 0
       && first <= MAX_LATENCY_SAMPLE_SECONDS * 1000) {
     rec.firstTokenMs ??= { count: 0, total: 0, min: first, max: first, provenance: 'host-observed' };
     rec.firstTokenMs.count++;
@@ -1142,8 +1143,15 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   // thread's: they must not open latency windows, sample a context window or
   // count the parent's aborts against the child.
   if (replay && ['task_started', 'task_complete', 'turn_aborted'].includes(payload.type)) return;
-  if (payload.type === 'task_started') { handleCodexTaskStarted(rec, latState, payload); return; }
-  if (payload.type === 'task_complete') { handleCodexTaskComplete(rec, latState, payload); return; }
+  if (payload.type === 'task_started') {
+    noteCodexCompactionTurn(usageState, payload.turn_id);
+    handleCodexTaskStarted(rec, latState, payload);
+    return;
+  }
+  if (payload.type === 'task_complete') {
+    handleCodexTaskComplete(rec, latState, payload, !usageState.unprovable);
+    return;
+  }
   if (payload.type === 'turn_aborted') {
     rec.aborts++;
     // An interrupted turn leaves no valid latency evidence behind it: a
@@ -1158,7 +1166,9 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   if (decoded.generation === 'legacy') stats.legacyEvents++;
   else if (decoded.generation === 'item') stats.itemCompletedEvents++;
   if (decoded.unknownItemType) {
-    if (!replay && decoded.unknownItemType === 'ContextCompaction') usageState.itemCompactions++;
+    if (!replay && !usageState.unprovable && decoded.unknownItemType === 'ContextCompaction') {
+      noteCodexCompaction(usageState, 'item', payload.turn_id);
+    }
     // A type this parser tallies is a type it UNDERSTANDS. Recording it as an
     // unknown kind too made the four tool items simultaneously "tools" in the
     // scorecard and "unknown kinds" in sourceHealth — raising the
@@ -1189,21 +1199,52 @@ function rawPayload(e) {
   return e?.payload && typeof e.payload === 'object' ? e.payload : {};
 }
 
+/** Keep IDs transient. Top-level `compacted` has no turn ID, so its nearest
+ * preceding task-start segment is only pairing evidence, not proof of a
+ * one-to-one relationship with ContextCompaction. */
+function noteCodexCompactionTurn(state, turnId) {
+  const key = `turn-${++state.turnSequence}`;
+  state.currentCompactionTurn = key;
+  if (typeof turnId === 'string' && turnId.length <= 256) state.compactionTurnIds.set(turnId, key);
+}
+
+function noteCodexCompaction(state, shape, turnId = null) {
+  // An item ID without a matching observed task_start cannot establish a
+  // separate turn from a nearby ID-less top-level compacted envelope.
+  const explicitKey = typeof turnId === 'string' && turnId.length <= 256
+    ? state.compactionTurnIds.get(turnId) : null;
+  const key = explicitKey ?? state.currentCompactionTurn ?? 'unscoped';
+  const counts = state.compactionTurns.get(key) ?? { completed: 0, item: 0 };
+  counts[shape]++;
+  state.compactionTurns.set(key, counts);
+}
+
+function finalizeCodexCompactions(rec, state) {
+  let lowerBound = 0;
+  let upperBound = 0;
+  for (const { completed, item } of state.compactionTurns.values()) {
+    lowerBound += Math.max(completed, item);
+    upperBound += completed + item;
+  }
+  rec.compactions = lowerBound;
+  rec.compactionEvidence = { lowerBound, upperBound };
+}
+
 /** One line of a Codex rollout, dispatched on its decoded type. */
 function processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns) {
   const decoded = decodeCodexRecord(e);
+  const replay = isCodexReplayLine(usageState.boundary, e);
   if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded, rawPayload(e)); return; }
   if (decoded.type === 'turnContext') {
-    if (!isCodexReplayLine(usageState.boundary, e)) handleCodexTurnContext(rec, decoded, rawPayload(e));
+    if (!replay) handleCodexTurnContext(rec, decoded, rawPayload(e), !usageState.unprovable);
     noteCodexWalkModel(usageState.walk, decoded.model);
     return;
   }
   if (e.type === 'compacted') {
-    if (!isCodexReplayLine(usageState.boundary, e)) usageState.completedCompactions++;
+    if (!replay && !usageState.unprovable) noteCodexCompaction(usageState, 'completed');
     return;
   }
   if (e.type !== 'event_msg') return;
-  const replay = isCodexReplayLine(usageState.boundary, e);
   handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns, replay);
 }
 
@@ -1303,8 +1344,9 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const ownership = newCodexTurnOwnership({ hasImports });
   let firstMeta = null;
   let genuineActivity = false;
-  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary, importOwnership: hasImports,
-    completedCompactions: 0, itemCompactions: 0 };
+  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary,
+    unprovable: plan.unprovable, importOwnership: hasImports, compactionTurns: new Map(),
+    compactionTurnIds: new Map(), currentCompactionTurn: null, turnSequence: 0 };
   const titleState = { firstPrompt: '' };
   // Opened by task_started (turn start remembered), closed either by a
   // prompt→agent-message gap sample or by task_complete's own duration_ms
@@ -1358,9 +1400,7 @@ export function parseCodex(raw, { id, withTurns = false }) {
     finalizeMixedCodexOrigin(rec, firstMeta);
   }
   finalizeCodexUsage(rec, usageState.walk);
-  // The host may emit both a top-level `compacted` and an item_completed
-  // ContextCompaction for one replacement. Neither replays token usage.
-  rec.compactions = Math.max(usageState.completedCompactions, usageState.itemCompactions);
+  finalizeCodexCompactions(rec, usageState);
   stats.clippedLines = source.stats?.clippedLines ?? 0;
   rec.title = maskSecrets(clip(titleState.firstPrompt)) || '(untitled)';
   return { session: seal(rec), turns, parseStats: stats };

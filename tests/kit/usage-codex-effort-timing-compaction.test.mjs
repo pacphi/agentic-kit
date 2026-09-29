@@ -107,3 +107,56 @@ test('older v26 records with absent or malformed optional detail remain unmeasur
   assert.equal(a.totals.compactions, 0);
   assert.equal(a.totals.firstTokenMs, null);
 });
+
+test('compaction observations on separate turns count separately', () => {
+  const r = new Rollout({ id: 'separate' }).meta().taskStarted('a').turn()
+    .tokenCount(usage({ input: 10, output: 2 })).raw('compacted', compacted)
+    .taskStarted('b').turn().raw('event_msg', {
+      type: 'item_completed', turn_id: 'b', item: { type: 'ContextCompaction' },
+    });
+  const rec = parseCodex(String(r), { id: 'fallback' }).session;
+  assert.equal(rec.compactions, 2);
+  assert.deepEqual(rec.compactionEvidence, { lowerBound: 2, upperBound: 2 });
+});
+
+test('partially paired compaction shapes retain an explicit uncertainty bound', () => {
+  const r = new Rollout({ id: 'partial' }).meta().taskStarted('a').turn()
+    .tokenCount(usage({ input: 10, output: 2 })).raw('compacted', compacted)
+    .raw('event_msg', { type: 'item_completed', turn_id: 'a', item: { type: 'ContextCompaction' } })
+    .taskStarted('b').turn().raw('compacted', { ...compacted, window_number: 3 });
+  const rec = parseCodex(String(r), { id: 'fallback' }).session;
+  assert.equal(rec.compactions, 2);
+  assert.deepEqual(rec.compactionEvidence, { lowerBound: 2, upperBound: 3 });
+  const a = aggregate([rec], { days: 14, now, cutoff: now - 14 * 86400000, deps: stubDeps() });
+  assert.equal(a.totals.compactions, 2);
+  assert.deepEqual(a.totals.compactionEvidence, { lowerBound: 2, upperBound: 3 });
+});
+
+test('an unmatched item turn ID cannot prove it differs from an ID-less compacted record', () => {
+  const r = new Rollout({ id: 'unmatched' }).meta().turn()
+    .tokenCount(usage({ input: 10, output: 2 })).raw('compacted', compacted)
+    .raw('event_msg', { type: 'item_completed', turn_id: 'unseen', item: { type: 'ContextCompaction' } });
+  const rec = parseCodex(String(r), { id: 'fallback' }).session;
+  assert.deepEqual(rec.compactionEvidence, { lowerBound: 1, upperBound: 2 });
+});
+
+test('pre-ordinal subagent history cannot supply effort, first-token time or compactions', () => {
+  const r = new Rollout({ id: 'old-child' }).meta({ thread_source: 'subagent' })
+    .taskStarted('parent-turn').turn('gpt-5.6', { effort: 'high' })
+    .tokenCount(usage({ input: 100, output: 5 }))
+    .raw('event_msg', { type: 'task_complete', time_to_first_token_ms: 950 })
+    .raw('compacted', compacted);
+  const preOrdinal = r.lines.map((line) => {
+    const entry = JSON.parse(line);
+    delete entry.ordinal;
+    return JSON.stringify(entry);
+  }).join('\n');
+  const rec = parseCodex(preOrdinal, { id: 'fallback' }).session;
+  assert.deepEqual(rec.usage, []);
+  assert.equal(rec.codexEffort, null);
+  assert.equal(rec.firstTokenMs, null);
+  assert.equal(rec.compactions, 0);
+  const a = aggregate([rec], { days: 14, now, cutoff: now - 14 * 86400000, deps: stubDeps() });
+  assert.equal(a.totals.compactions, 0);
+  assert.equal(a.totals.firstTokenMs, null);
+});

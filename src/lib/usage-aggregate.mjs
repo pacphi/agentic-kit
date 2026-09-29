@@ -853,7 +853,8 @@ const CODEX_EFFORT_VALUES = new Set(['none', 'minimal', 'low', 'medium', 'high',
 
 /** Normalize cached v26 records that predate these optional Codex details. */
 function codexObservationProjection(rec) {
-  if (rec.host !== 'codex') return { codexEffort: null, firstTokenMs: null, compactions: 0 };
+  if (rec.host !== 'codex') return { codexEffort: null, firstTokenMs: null, compactions: 0,
+    compactionEvidence: { lowerBound: 0, upperBound: 0 } };
   const rawEffort = rec.codexEffort;
   const counts = Object.fromEntries(Object.entries(rawEffort?.counts ?? {})
     .filter(([key, value]) => CODEX_EFFORT_VALUES.has(key) && Number.isSafeInteger(value) && value > 0));
@@ -868,7 +869,15 @@ function codexObservationProjection(rec) {
     ? { count: rawTiming.count, total: rawTiming.total, min: rawTiming.min,
       max: rawTiming.max, provenance: 'host-observed' } : null;
   const compactions = Number.isSafeInteger(rec.compactions) && rec.compactions > 0 ? rec.compactions : 0;
-  return { codexEffort, firstTokenMs, compactions };
+  const rawCompaction = rec.compactionEvidence;
+  const validBounds = Number.isSafeInteger(rawCompaction?.lowerBound)
+    && rawCompaction.lowerBound === compactions
+    && Number.isSafeInteger(rawCompaction.upperBound)
+    && rawCompaction.upperBound >= compactions;
+  const compactionEvidence = validBounds
+    ? { lowerBound: compactions, upperBound: rawCompaction.upperBound }
+    : { lowerBound: compactions, upperBound: compactions ? null : 0 };
+  return { codexEffort, firstTokenMs, compactions, compactionEvidence };
 }
 
 /** One aggregate session row from a parsed record, its folded usage sums,
@@ -1004,7 +1013,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
   const totals = {
     sessions: sessions.length, prompts: 0, humanPrompts: 0, responses: 0,
     exceptions: 0, aborts: 0,
-    compactions: 0, firstTokenMs: null,
+    compactions: 0, compactionEvidence: { lowerBound: 0, upperBound: 0 }, firstTokenMs: null,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
     // v16. `humanPrompts` above is main-thread PROMPT COUNTS; these two are the
@@ -1035,6 +1044,10 @@ function foldSessionTotals(sessions, byDay, byModel) {
     if (source === 'main') totals.humanPrompts += s.prompts;
     totals.exceptions += s.exceptions; totals.aborts += Number(s.aborts) || 0;
     totals.compactions += s.compactions;
+    totals.compactionEvidence.lowerBound += s.compactionEvidence.lowerBound;
+    totals.compactionEvidence.upperBound = totals.compactionEvidence.upperBound === null
+      || s.compactionEvidence.upperBound === null ? null
+      : totals.compactionEvidence.upperBound + s.compactionEvidence.upperBound;
     if (s.firstTokenMs) {
       totals.firstTokenMs ??= { count: 0, total: 0, min: s.firstTokenMs.min,
         max: s.firstTokenMs.max, provenance: 'host-observed' };
