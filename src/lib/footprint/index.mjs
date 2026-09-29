@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  claudeDir, claudeSettingsPath, claudeUserMcpPath, codexConfigPath, codexDir, configDir, home,
+  claudeDir, claudeSettingsPath, claudeUserMcpPath, codexConfigPath, codexDir, configDir, stateBase,
 } from '../paths.mjs';
 import { loadKitConfig } from '../config.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
@@ -65,8 +65,8 @@ export const INCLUDE_PROJECT_TREES_DEFAULT = false;
  *  point: these are the files that grow fastest between deep scans (ledgers,
  *  tee files, index caches), and a user watching one grow should not have to
  *  run a deep scan to see it move. */
-function knownFileSpecs() {
-  const stateRoot = process.env.XDG_STATE_HOME || path.join(home, '.local', 'state');
+export function knownFileSpecs() {
+  const stateRoot = stateBase();
   const kit = (name) => path.join(configDir(), name);
   // [id, host, category, label, path] — the categories are STORAGE_CATEGORIES'
   // vocabulary so a known file and its deep-tier node land in the same bucket.
