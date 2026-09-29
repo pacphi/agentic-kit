@@ -36,6 +36,41 @@ test('Claude record coverage separates handled, ignored, unknown, invalid type a
   assert.equal(JSON.stringify({ session, parseStats }).includes('future-private-type'), false);
 });
 
+test('valid whitespace-prefixed objects and non-object JSON have separate coverage from invalid JSON', () => {
+  const source = ['  ' + line({ type: 'user', timestamp: at, message: { role: 'user', content: 'hello' } }),
+    '\t' + line(assistant), ' [1,2]', '"private scalar"', 'null', '42', '  ', '{bad json'].join('\n');
+  const { session, parseStats } = parseClaude(source, { id: 's1' });
+  assert.deepEqual(parseStats, {
+    knownHandledRecords: 2, knownIgnoredRecords: 0, unknownRecords: 0,
+    invalidTypeRecords: 4, malformedRecords: 1,
+  });
+  assert.equal(session.responses, 1);
+  assert.equal(session.usage[0].input, 3);
+  assert.equal(session.usage[0].output, 5);
+  assert.equal(JSON.stringify({ session, parseStats }).includes('private scalar'), false);
+});
+
+test('whitespace-prefixed known records stay healthy across cold and warm cache reads', async () => {
+  const root = tempDir('ak-claude-whitespace-health');
+  const project = path.join(root, 'claude', 'project');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 's1.jsonl'), ['  ' + line(assistant), '\t' + line({ type: 'system' })].join('\n'));
+  const options = { days: 7, now: Date.parse('2026-09-29T00:00:00Z'),
+    roots: { claude: path.join(root, 'claude'), codex: path.join(root, 'codex') },
+    cachePath: path.join(root, 'cache.json'), deps };
+  for (let i = 0; i < 2; i++) {
+    _resetForTest();
+    const result = await buildIndex(options);
+    assert.equal(result.sourceHealth.claude.status, 'ok');
+    assert.deepEqual(result.sourceHealth.claude.diagnostics.records, {
+      knownHandledRecords: 1, knownIgnoredRecords: 1, unknownRecords: 0,
+      invalidTypeRecords: 0, malformedRecords: 0, coverage: 'complete',
+    });
+    assert.equal(result.totals.responses, 1);
+    assert.equal(result.totals.cost, 2);
+  }
+});
+
 test('cold, warm and legacy v26 cache expose count-only incomplete coverage without changing totals', async () => {
   const root = tempDir('ak-claude-record-coverage');
   const project = path.join(root, 'claude', 'project');

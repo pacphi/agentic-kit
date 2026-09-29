@@ -184,8 +184,9 @@ function applyProject(rec, res) {
 
 // ── transcript parsing ──────────────────────────────────────────────────────
 
-/** Split JSONL into parsed objects, skipping anything that will not parse. */
-function* jsonLines(raw, stats = null) {
+/** Split JSONL into parsed records. Codex retains its conservative object-only
+ * framing; Claude also observes valid non-object JSON for shape diagnostics. */
+function* jsonLines(raw, stats = null, includeNonObjects = false) {
   if (stats) stats.malformedRecords = 0;
   // Scanned lazily, not split up front: a caller that needs only the first
   // line (the subagent replay pre-pass) must not pay for the whole file.
@@ -196,7 +197,8 @@ function* jsonLines(raw, stats = null) {
     const start = pos;
     pos = end + 1;
     if (end === start) continue;
-    if (raw.charCodeAt(start) !== 123 /* '{' */) {
+    if (includeNonObjects && !raw.slice(start, end).trim()) continue;
+    if (!includeNonObjects && raw.charCodeAt(start) !== 123 /* '{' */) {
       if (stats && raw.slice(start, end).trim()) stats.malformedRecords++;
       continue;
     }
@@ -205,7 +207,7 @@ function* jsonLines(raw, stats = null) {
       if (stats) stats.malformedRecords++;
       continue;
     }
-    if (obj && typeof obj === 'object') yield obj;
+    if (includeNonObjects || (obj && typeof obj === 'object')) yield obj;
   }
 }
 
@@ -803,8 +805,8 @@ function claudeRecordCounter(type) {
   return CLAUDE_IGNORED_RECORD_TYPES.has(type) ? 'knownIgnoredRecords' : 'unknownRecords';
 }
 function* knownClaudeLines(raw, stats) {
-  for (const e of jsonLines(raw, stats)) {
-    const counter = claudeRecordCounter(e.type);
+  for (const e of jsonLines(raw, stats, true)) {
+    const counter = claudeRecordCounter(e?.type);
     stats[counter]++;
     if (counter !== 'invalidTypeRecords' && counter !== 'unknownRecords') yield e;
   }

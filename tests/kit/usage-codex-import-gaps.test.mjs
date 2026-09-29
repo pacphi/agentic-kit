@@ -48,6 +48,16 @@ for (const broken of ['{"type":"event_msg","payload":{"type":"task_started","tur
   });
 }
 
+test('string and streaming Codex imports keep whitespace-prefixed records fail closed', () => {
+  const r = beforeGap();
+  r.lines.push('  {"type":"event_msg","payload":{"type":"task_started","turn_id":"native-2"}}');
+  afterGap(r);
+  for (const result of parseBoth(r)) {
+    assertExcluded(result);
+    assert.equal(result.session.importEvidence.malformedRecords, 1);
+  }
+});
+
 for (const turnId of [null, '', 'bad id', 1, {}, [], 'x'.repeat(257)]) {
   test(`explicitly invalid context ID breaks adjacency: ${JSON.stringify(turnId).slice(0, 24)}`, () => {
     const r = afterGap(beforeGap().turn('copied-model', { turn_id: turnId, cwd: '/copied' }));
