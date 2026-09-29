@@ -1,5 +1,15 @@
 # Main watcher reconciliation
 
+## Status
+
+Implemented and independently reviewed through `7c2f3054`. The controller integrated
+validated V6 develop at `3bbee599`; the reviewed watcher files were unchanged by
+that merge. All eight local gates passed on that exact clean commit: 6,440 unit
+tests passed, seven skipped, legacy suites passed, and browser checks passed.
+Coverage was 94.18% lines, 83.80% branches and 93.50% functions. Feature PR CI,
+squash integration and final human main review remain separate gates at archival.
+No real routine trigger was performed. The limits below describe the worker scope.
+
 ## Scope and acceptance
 
 Combine develop PR observation and blind reporting with main #280 dispatch pacing.
@@ -19,7 +29,7 @@ lockfiles, V6 fixtures, develop/main integration, archive index changes, publica
 and final full gates remain controller-owned. This plan is ready for the controller
 to archive with its index update in the completing pull request.
 
-## Limits
+## Worker limits
 
 No real trigger, provider turn, external mutation, full suite, UI tests, pnpm,
 installed CLI changes, user data writes, or delegated workers. Inject fetch,
