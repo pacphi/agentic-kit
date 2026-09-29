@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { tempDir } from './helpers/temp-dir.mjs';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
 
-const hook = fileURLToPath(new URL('../../scripts/trace-ort.mjs', import.meta.url));
+const hook = new URL('../../scripts/trace-ort.mjs', import.meta.url).href;
 
 function pkg(root, name, version, { commonjs = false, malformed = false } = {}) {
   const dir = path.join(root, 'node_modules', ...name.split('/'));
@@ -17,11 +17,11 @@ function pkg(root, name, version, { commonjs = false, malformed = false } = {}) 
   return dir;
 }
 
-function run(root, source, log = path.join(root, 'trace.jsonl')) {
+function run(root, source, log = path.join(root, 'trace.jsonl'), hookUrl = hook) {
   const home = path.join(root, 'home');
   const entry = path.join(root, 'entry.mjs');
   fs.writeFileSync(entry, source);
-  const env = spawnEnv(home, { NODE_OPTIONS: `--import=${hook}`, TRACE_ORT_LOG: log });
+  const env = spawnEnv(home, { NODE_OPTIONS: `--import=${hookUrl}`, TRACE_ORT_LOG: log });
   const child = spawnSync(process.execPath, [entry], { cwd: root, env, encoding: 'utf8' });
   const records = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
   return { child, records };
@@ -87,4 +87,19 @@ if (result.status !== 0) process.exit(result.status || 1);
   assert.equal(new Set(starts.map((r) => r.pid)).size, 2);
   assert.equal(records.filter((r) => r.type === 'package').length, 1);
   assert.equal(records.find((r) => r.type === 'package')?.version, '1.21.0');
+});
+
+test('preloads a hook from a path containing spaces', (t) => {
+  const root = tempDir('trace ort space', t);
+  const hookDir = path.join(root, 'hook with spaces');
+  fs.mkdirSync(hookDir);
+  const copiedHook = path.join(hookDir, 'trace ort.mjs');
+  fs.copyFileSync(fileURLToPath(hook), copiedHook);
+  pkg(root, 'onnxruntime-node', '1.30.0', { commonjs: true });
+  const { child, records } = run(root,
+    "import { createRequire } from 'node:module'; createRequire(import.meta.url)('onnxruntime-node');\n",
+    path.join(root, 'trace output.jsonl'), pathToFileURL(copiedHook).href);
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(records.filter((r) => r.type === 'start').length, 1);
+  assert.equal(records.find((r) => r.type === 'package')?.version, '1.30.0');
 });
