@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { eventLine } from '../../scripts/upstream-watch/classify.mjs';
-import { FIRE_HEADERS, FIRE_URL, PR_OBSERVE_DAYS, SAME_REPO_PR, createDispatcher, dispatch } from '../../scripts/upstream-watch/dispatch.mjs';
+import { FIRE_HEADERS, FIRE_URL, PR_OBSERVE_DAYS, SAME_REPO_PR, createDispatcher, dispatch, sessionList } from '../../scripts/upstream-watch/dispatch.mjs';
 
 const NOW = new Date('2026-10-02T14:17:00Z');
 const RECORDED_AT = '2026-10-02T14:17:00Z';
@@ -28,6 +28,12 @@ function fakeDispatcher({ exists = false, pr = null, session = 'https://claude.a
 }
 const run = (dispatcher, records = [], { dryRun, list = [released], eligibleIds = new Set([ID]), now = NOW } = {}) => dispatch({ released: list, records, dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now, recordedAt: RECORDED_AT, dryRun, eligibleIds });
 const NOTHING = { records: [], errors: [], wouldFire: [] };
+
+test('exhausted firing links read naturally at any count', () => {
+  assert.equal(sessionList(['one']), 'one');
+  assert.equal(sessionList(['one', 'two']), 'one and two');
+  assert.equal(sessionList(['one', 'two', 'three']), 'one, two, and three');
+});
 
 test('a released fix without a branch fires once and is recorded with its session', async () => {
   const dispatcher = fakeDispatcher();

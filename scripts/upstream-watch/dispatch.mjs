@@ -20,6 +20,11 @@ const ROUTINE = /^trig_[A-Za-z0-9]+$/;
 const DISPATCH_BRANCH = /^upstream\/[a-z0-9._-]+$/;
 const DAY = 86_400_000;
 
+export function sessionList(sessions) {
+  if (sessions.length < 3) return sessions.join(' and ');
+  return `${sessions.slice(0, -1).join(', ')}, and ${sessions.at(-1)}`;
+}
+
 export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env = process.env } = {}) {
   return {
     async branchExists(branch) {
@@ -69,7 +74,7 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
       if (await dispatcher.branchExists(branch)) continue;
       const firings = recordsOf(event.id, 'fired');
       if (firings.length >= MAX_FIRES) {
-        errors.push({ id: event.id, error: `dispatch did not complete after ${firings.length} firings; see ${firings.map((item) => item.fields.session).join(' and ')}` });
+        errors.push({ id: event.id, error: `dispatch did not complete after ${firings.length} firings; see ${sessionList(firings.map((item) => item.fields.session))}` });
         continue;
       }
       const newest = Math.max(...firings.map((item) => Date.parse(item.recordedAt)), 0);
