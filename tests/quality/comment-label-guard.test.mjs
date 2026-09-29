@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { inspectCommentLabels } from '../helpers/comment-label-guard.mjs';
+import { spawnEnv } from '../kit/helpers/home-sandbox.mjs';
+import { tempDir } from '../kit/helpers/temp-dir.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -85,8 +87,11 @@ test('parses CommonJS return and module imports using the matching source mode',
   assert.throws(() => inspectCommentLabels('return;', 'fixture.mjs'), /Cannot parse/);
 });
 
-test('tracked JavaScript comments and test titles use durable references', () => {
-  const files = execFileSync('git', ['ls-files', '-z', '--', 'src', 'scripts', 'bin', 'tests'], { cwd: root, encoding: 'utf8' })
+test('tracked JavaScript comments and test titles use durable references', (t) => {
+  const home = tempDir('ak-comment-label-git', t);
+  const files = execFileSync('git', ['ls-files', '-z', '--', 'src', 'scripts', 'bin', 'tests'], {
+    cwd: root, encoding: 'utf8', env: spawnEnv(home),
+  })
     .split('\0').filter(file => /\.(?:mjs|cjs|js)$/.test(file));
   assert.ok(files.length > 0);
   const findings = files.flatMap(file => inspectCommentLabels(readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8'), file)
