@@ -307,7 +307,7 @@ compression, or neural-routing targets are not measured agentic-kit guarantees.
 pnpm test
 
 # One focused suite
-node --test tests/kit/dispatch-surface.test.mjs
+node scripts/run-tests.mjs focus tests/kit/dispatch-surface.test.mjs
 
 # Browser verification
 pnpm run test:ui
@@ -319,6 +319,8 @@ pnpm run lint:cc
 pnpm run lint:md
 pnpm run build
 ```
+
+A plain `node --test` run lacks the wrapper's real-state tripwire and temp-root checks.
 
 `pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`, which fingerprints
 `~/.config/agentic-kit`, `~/.local/state/agentic-kit` (or `%APPDATA%`/`%LOCALAPPDATA%` on
@@ -332,8 +334,20 @@ them, and `sandboxHome()` and `redirectToolState()` do the same for in-process c
 Code's own `~/.claude.json`) are listed as "concurrent writers" and do not fail a local run; CI
 (or `AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with
 `TMPDIR`/`TEMP`/`TMP` pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is
-listed, and the runner refuses to start when that folder sits inside a git repository (point
-`TMPDIR` elsewhere). The runner also drops `FORCE_COLOR` (Claude Code shells set it), because
+listed (excluding its private atomic `.ak-suite-owner.json`, child-hold directory and Node compile cache). The runner
+refuses home/filesystem-root temp bases before allocation and refuses roots inside a git
+repository (point `TMPDIR` elsewhere). A completed run removes only its own validated direct,
+canonical, nonsymlink, current-owner root. Tests with known child lifetime uncertainty acquire
+`acquireRunRootHold()` before launching those children and release only after proving their exits.
+An unresolved or unreadable hold retains the own root; it is not a general descendant-exit proof.
+The runner then lists sibling suite roots: missing, invalid,
+foreign or uncertain owner metadata means keep. Sibling handling is list-only on macOS, Linux
+and Windows because no installed probe proves all descendants have exited; even a dead owner
+is insufficient. Interrupted runs remove and collect nothing. Sibling listing/collection errors
+do not change the suite's exit code. Own-root inspection failure retains the root; inspection,
+removal or safety-refusal failure returns hygiene exit 4 unless a command or tripwire failure
+already takes precedence. Removal errors may leave a partially removed own root. The runner also
+drops `FORCE_COLOR` (Claude Code shells set it), because
 tests read plain text from pipes. Tests make temporary folders with `tempDir()` from
 `tests/kit/helpers/temp-dir.mjs`, and spawned children get their environment from `spawnEnv()` in
 `tests/kit/helpers/home-sandbox.mjs`. UI tests launch Chrome with `launchChrome()` from

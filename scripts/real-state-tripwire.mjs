@@ -34,7 +34,8 @@ export const CONCURRENT_WRITERS = [
   { kind: 'state', pattern: /^statusline-debug\.log$/, writer: 'statusline debug log (src/templates/statusline-footer.cjs:2-15)' },
   { kind: 'repo', pattern: /^\.swarm(\/|$)/, writer: 'Ruflo hooks and daemon of a live session' },
   { kind: 'repo', pattern: /^\.agentic-qe\/(?!llm-config\.json)/, writer: 'AQE hooks of a live session' },
-  { kind: 'repo', pattern: /^\.claude-flow\/(?!config\.json$)/, writer: 'Ruflo hooks and statusline caches of a live session' },
+  { kind: 'repo', pattern: /^\.claude-flow(?:\/(?!config\.json$)|$)/, writer: 'Ruflo hooks and statusline caches of a live session' },
+  { kind: 'repo', pattern: /^\.claude\/(?:proven-config\.json|\.proven-config-version)$/, writer: 'Ruflo proven-config adoption on CLI startup (@claude-flow/cli 3.48.0 dist/src/config/proven-config-refresh.js:24,30,94,120-125; dist/src/index.js:173-175)' },
   { kind: 'user-file', pattern: /^\.claude\.json$/, writer: 'Claude Code session state in ~/.claude.json (https://code.claude.com/docs/en/settings)' },
 ];
 
