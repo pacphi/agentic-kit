@@ -16,7 +16,8 @@
 
 **Spec:** the maintainer decisions of 2026-09-28, recorded in [§ Decisions](#decisions). There is no separate spec document.
 
-**Status:** Proposed, 2026-09-28, not started. Written against `main@82d1211b`. [§ When to run](#when-to-run) says how to refresh it first.
+**Status:** In progress, 2026-09-28. Phase 1 and Phase 2 are implemented in PR #264 against
+`main@e957737b`; Phase 3 starts on `docs/archive-link-repair` only after that PR merges.
 
 ## Decisions
 
