@@ -5,6 +5,7 @@
 //   Project scope (when run inside a git repo / --project): the port of
 //   ruflo-setup-project — init, sanitize, pin, activate, verify, daemon.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { run as runCmd, have } from '../lib/exec.mjs';
@@ -602,25 +603,52 @@ export async function startProjectDaemon(root, {
   } else warn('daemon failed to start — try: ruflo daemon start');
 }
 
-/** Step 7: write-verification (store → actual on-disk row, then clean up).
- *  The CLI mirrors the write into agentdb-memory.db under the memory root
- *  (CLAUDE_FLOW_MEMORY_PATH, else a config persistPath, else <cwd>/.swarm).
- *  The probe pins that root beside the pinned memory.db, so both copies land
- *  in the stores cleanup checks even when the project's root is redirected;
- *  this is the user's real corpus, so nothing of the probe may be left behind. */
+/** Step 7: verify a real primary write. Ruflo also writes a native mirror
+ * under CLAUDE_FLOW_MEMORY_PATH; keep that disposable mirror in a private
+ * directory so setup cannot create a spare project store. */
 export async function verifyProjectMemoryWrite(root, env, { runner = runCmd } = {}) {
   const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
-  const probeEnv = { ...env, CLAUDE_FLOW_MEMORY_PATH: path.dirname(env?.CLAUDE_FLOW_DB_PATH ?? paths.projectMemoryDb(root)) };
-  const stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env: probeEnv })).code === 0;
-  const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
-  if (!landed) {
+  let mirrorDir;
+  let stored = false;
+  let landed = null;
+  let cleanup;
+  let runnerError = false;
+  let mirrorCleanupError = false;
+  try {
+    mirrorDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-setup-memory-probe-'));
+    const probeEnv = {
+      ...env,
+      CLAUDE_FLOW_DB_PATH: env?.CLAUDE_FLOW_DB_PATH ?? paths.projectMemoryDb(root),
+      CLAUDE_FLOW_MEMORY_PATH: mirrorDir,
+      RUFLO_DAEMON_AUTOSTART: '0',
+    };
+    stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env: probeEnv })).code === 0;
+  } catch {
+    runnerError = true;
+  } finally {
+    // A failed command may still have written its primary row. Keep the
+    // existing refusal behavior for unreadable or busy project stores.
+    if (mirrorDir) {
+      try {
+        landed = findMemoryEntry(root, '_setup', probeKey);
+        cleanup = removeMemoryProbe(root, '_setup', probeKey);
+      } catch {
+        runnerError = true;
+      } finally {
+        try { fs.rmSync(mirrorDir, { recursive: true, maxRetries: 3 }); }
+        catch { mirrorCleanupError = true; }
+      }
+    }
+  }
+  if (cleanup?.failed.length) {
+    warn(`memory probe cleanup failed in ${cleanup.failed.map((f) => `${path.basename(f.file)} (${f.kind})`).join(', ')} — remove ${probeKey} from _setup manually`);
+  }
+  if (mirrorCleanupError) warn(`memory probe temporary mirror cleanup failed at ${mirrorDir} — inspect it manually`);
+  if (!stored || !landed || runnerError || cleanup?.failed.length || mirrorCleanupError) {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
     return;
   }
-  const cleanup = removeMemoryProbe(root, '_setup', probeKey);
-  if (cleanup.failed.length) {
-    warn(`memory write verified, but probe cleanup failed in ${cleanup.failed.map((f) => `${path.basename(f.file)} (${f.kind})`).join(', ')} — remove ${probeKey} from _setup manually`);
-  } else ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
+  ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
 }
 
 function reportProjectGuidance(result) {

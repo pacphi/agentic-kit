@@ -2,7 +2,7 @@
 
 ## Status
 
-**Active.** Branch `fix/follow-ups-v2`; exact base `e2f9dcae0554ff63921df618a819fd5e6afe80d2` (develop bootstrap #272). B1 is complete in `fb54f02b`; other rows remain unimplemented. The controller reviews and assigns later rows. One test-first unit commit per row.
+**Active.** Branch `fix/follow-ups-v2`; exact base `e2f9dcae0554ff63921df618a819fd5e6afe80d2` (develop bootstrap #272). B1 is complete in `fb54f02b`; B12 is verified and fixed by a test-first unit. Other rows remain unimplemented. The controller reviews and assigns later rows. One test-first unit commit per row.
 
 The [remediation program V4](2026-09-28-remediation-program-v2.md#v4-fixfollow-ups-v2-every-small-product-cli-and-upstream-item) defines scope. The [archived Branch 9 plan](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md) supplies task details. Paths below name current source seams and focused test targets. After an explicit directory prefix, subsequent bare filenames in the same cell use that directory. A new test named below is a proposed file. Later implementers must verify dependencies before editing.
 
@@ -23,7 +23,7 @@ The [remediation program V4](2026-09-28-remediation-program-v2.md#v4-fixfollow-u
 | B9 | `src/lib/exec.mjs`, `execution/process-tree.mjs` | `tests/kit/process-tree.test.mjs`; abort kills descendants; Windows CI required |
 | B10 | `src/lib/maintenance/discovery/partitions.mjs`; inventory `src/lib/live/jsonl-tailer.mjs`, `live/transcript-streams.mjs`, `telemetry/store.mjs`, `maintenance/management/service-store.mjs` for additional persisted IDs | `tests/kit/file-identity-bigint.test.mjs`; distinguish IDs above `2^53`; enumerate the exact sites before edit |
 | B11 | `src/lib/live-checks.mjs` | `tests/kit/live-checks.test.mjs`; skipped deja-vu check says skipped and check-created temp folders are cleaned |
-| B12 | `src/commands/setup.mjs`; `src/lib/memory-probe-cleanup.mjs` | `tests/kit/setup-memory-probe.test.mjs`; disposable real Ruflo reproduction first, fix only if unused `agentdb-memory.db` appears |
+| B12 | `src/commands/setup.mjs`; `src/lib/memory-probe-cleanup.mjs` unchanged | **Fixed:** `tests/kit/setup-memory-probe.test.mjs`; Ruflo 3.48.0 seeded reproduction created an unused native side file, and a disposable candidate run confirmed a private mirror leaves no canonical side file or probe row |
 | B13 | `src/commands/sync.mjs`; `src/lib/aqe-project-pin.mjs` | `tests/kit/sync-command.test.mjs`, `aqe-project-pin.test.mjs`; only if program §2 step 2 shows sync omitted the AQE pin |
 | C1 | `.github/workflows/ci.yml`; `src/lib/aqe-readiness.mjs`; `src/lib/hook-audit/agentic-dependency-constraints.json` | `tests/live/ruflo-memory-routing.test.mjs`, `tests/kit/aqe-readiness.test.mjs`; disposable macOS and temporary Linux/Windows CI busy-rule evidence; remove temporary job before merge; #240 action follows result |
 | C2 | `docs/host-support.md`; `src/lib/hook-audit/agentic-dependency-constraints.json` | `tests/kit/ruflo-support-window.test.mjs` plus link check; verify AQE 3.14.4 #528/#532/#535 and Ruflo #2356/#420 first |
