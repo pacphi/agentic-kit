@@ -16,13 +16,14 @@ bounded, hashed Claude API message identities per cached file and reconciles
 copied charges after discovery. Aggregate responses/tokens/cost count a shared
 message once; each session's `responses` still counts what its transcript
 recorded, with `accountedResponses` showing its aggregate share. Unit 12 awaits
-independent review before Unit 13. Its comparison-window rule groups copies
-only among sessions selected into the same displayed or previous window by
-session end. Widening `lookbackDays` therefore cannot remove a current-window
-charge; the cost is that a message copied across the two windows may appear
-once in each window's totals. Those windows are separate whole-session views,
-not additive unique-message partitions. This rule uses only discovered files
-within the requested bounded lookback.
+independent review before Unit 13. The Claude identity pool always covers the
+displayed window and its equal-length predecessor, regardless of the
+`previous` or `lookbackDays` options. One owner is elected per identity across
+that pool before either window is projected; a copied message therefore
+contributes to at most one of the two windows. Explicit deeper lookback can
+support other history views but cannot change the elected owner. Claude reads
+may reach twice the displayed window (capped at 730 days for the dashboard's
+365-day maximum), with the cap reported in source health for wider callers.
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin

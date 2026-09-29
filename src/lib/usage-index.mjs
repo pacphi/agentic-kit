@@ -192,6 +192,9 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
 
 const DAY_MS = 86_400_000;
+// Dashboard windows stop at 365 days. One displayed window plus its equal
+// previous window is therefore bounded at 730 days of Claude identity reads.
+const MAX_CLAUDE_IDENTITY_DAYS = 730;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
 // see the carry-forward pruning comment in scan() below.
 const KEEP_MS = 366 * DAY_MS;
@@ -347,6 +350,13 @@ function attachTelemetryHealth(health, common, diagnostics = health.diagnostics)
 function claudeParseHealth(root, common) {
   if (root.status !== 'ok' || common.unitsSeen === common.unitsParsed) return root;
   return { ...root, status: 'degraded', reason: 'transcript-parse-incomplete' };
+}
+
+function reconcileWithinIdentityHorizon(records, cutoff) {
+  const selected = records.filter((rec) => rec?.provider === 'claude' && rec.end >= cutoff);
+  const accounted = reconcileClaudeMessages(selected);
+  const replacements = new Map(selected.map((rec, i) => [rec, accounted[i]]));
+  return records.map((rec) => replacements.get(rec) ?? rec);
 }
 
 function defaultRoots() {
@@ -627,11 +637,14 @@ function notify(onProgress, payload) {
  *           pair this with `previous: true` (below) to actually get the
  *           older records back out, via `previous.totals`/`previous.rhythm`,
  *           rather than by hand-splitting a widened `sessions[]`. Undefined
- *           (default) behaves exactly as `days` alone: no widening.
+ *           (default) still discovers Claude files through the equal-length
+ *           preceding identity window; other hosts retain the `days` cutoff.
  * @property {boolean} [previous]   also have `aggregate` project the
  *           equal-length window immediately before the displayed one (see
- *           usage-aggregate.mjs's `previousWindow`); needs `lookbackDays` set
- *           wide enough for those older records to have been read at all.
+ *           usage-aggregate.mjs's `previousWindow`); Claude's equal-length
+ *           predecessor is acquired for identity accounting even without an
+ *           explicit lookback, while other hosts need `lookbackDays` set wide
+ *           enough for their older records to have been read.
  *           Forwarded to `aggregate`'s own `previous` option unchanged.
  * @property {boolean} [prompts]    also have `aggregate` build the prompt
  *           repetition projection (`agg.promptPatterns` — recurring clusters,
@@ -921,25 +934,32 @@ async function scan(o = {}) {
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
   const cacheFile = cachePath ?? defaultCachePath();
-  // Widened when the caller passes lookbackDays (a server wanting a
-  // `previous`-window projection, e.g.) — every DISCOVERY/parse use below
-  // (candidates, opencode listing, carry-forward) shares this ONE value, so
-  // widening it here is the entire discovery-side effect. It does NOT reach
-  // `aggregate`'s own cutoff below — see displayCutoff — so the CURRENT
-  // window's `sessions`/`totals` never silently widen with it; only
-  // `aggregate`'s `previous` projection (when requested) reads the extra
-  // records this pulls in. Unset, `lookbackDays ?? days` is exactly `days` —
-  // today's behavior, unchanged.
+  // The display and its equal-length comparison need ONE Claude identity
+  // pool even if the caller does not request the comparison. This fixed pool
+  // cannot depend on `previous` or an explicit, deeper `lookbackDays`, or a
+  // toggle would elect a different owner for the same message. Only Claude
+  // discovery pays the additional read; other hosts retain their original
+  // cutoff. The 730-day ceiling covers the dashboard's supported 365-day
+  // display+comparison maximum and is reported as a cap for wider callers.
   const cutoff = now - (lookbackDays ?? days) * DAY_MS;
+  const requestedDays = Number(days);
+  const identityDays = Math.min(MAX_CLAUDE_IDENTITY_DAYS,
+    2 * Math.max(1, Number.isFinite(requestedDays) ? requestedDays : 14));
+  const identityCutoff = now - identityDays * DAY_MS;
+  const claudeCutoff = Math.min(cutoff, identityCutoff);
 
   // Primary transcript roots: read once at root level (cheap — not the
   // recursive per-file walk listClaude/listCodex still do below).
   const claudeHealth = rootHealth(r.claude);
   const codexHealth = rootHealth(r.codex);
   const windowConfigDir = resolveWindowConfigDir(o, roots);
-  const candidates = [...listClaude(r.claude), ...listCodex(r.codex)]
+  const claudeCandidates = listClaude(r.claude)
     .map((e) => withWindowLedger({ ...e, stat: statSafe(e.file) }, windowConfigDir))
+    .filter((e) => e.stat && e.stat.mtimeMs >= claudeCutoff);
+  const codexCandidates = listCodex(r.codex)
+    .map((e) => ({ ...e, stat: statSafe(e.file) }))
     .filter((e) => e.stat && e.stat.mtimeMs >= cutoff);
+  const candidates = [...claudeCandidates, ...codexCandidates];
 
   const opencodeSource = discoverOpencodeSource(roots, cutoff);
   let opencodeHealth = opencodeSource.health;
@@ -998,9 +1018,7 @@ async function scan(o = {}) {
   // `previous: true` caller would find its "current" totals silently
   // absorbing what should have been the previous window (the bug this fixes).
   const displayCutoff = now - days * DAY_MS;
-  const result = aggregate(reconcileClaudeMessages(applyCodexLedger(records, ledger), {
-    currentStartMs: displayCutoff, previousStartMs: displayCutoff - days * DAY_MS,
-  }), {
+  const result = aggregate(reconcileWithinIdentityHorizon(applyCodexLedger(records, ledger), identityCutoff), {
     days, now, cutoff: displayCutoff, deps, previous, prompts,
   });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
@@ -1008,7 +1026,12 @@ async function scan(o = {}) {
     warnings: codexSourceHealth.diagnostics.warnings,
   });
   result.sourceHealth = {
-    claude: attachTelemetryHealth(claudeParseHealth(claudeHealth, commonDiagnostics.claude), commonDiagnostics.claude),
+    claude: {
+      ...attachTelemetryHealth(claudeParseHealth(claudeHealth, commonDiagnostics.claude), commonDiagnostics.claude),
+      identityCoverage: { horizonDays: identityDays,
+        horizonCoversComparison: 2 * requestedDays <= MAX_CLAUDE_IDENTITY_DAYS,
+        basis: 'file-mtime-and-session-end' },
+    },
     codex: attachTelemetryHealth(codexSourceHealth, commonDiagnostics.codex),
     opencode: attachTelemetryHealth(opencodeHealth, commonDiagnostics.opencode),
     codexLedger: codexLedgerHealth,

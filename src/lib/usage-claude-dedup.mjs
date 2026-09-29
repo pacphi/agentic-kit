@@ -104,7 +104,7 @@ function alter(rec, claim, factor, usage = claim.usage) {
 /** Return accounting copies. `responses` remains the file's original count;
  * `accountedResponses` is the globally unique count used by aggregate folds.
  * ID-less messages remain untouched, including equal-looking token vectors. */
-export function reconcileClaudeMessages(records, { currentStartMs = null, previousStartMs = null } = {}) {
+export function reconcileClaudeMessages(records) {
   const copies = records.map((rec) => rec?.provider === 'claude'
     ? { ...rec, usage: rec.usage.map((row) => ({ ...row })),
       originalUsage: rec.usage, punchcard: { ...rec.punchcard }, accountedResponses: rec.responses }
@@ -114,16 +114,9 @@ export function reconcileClaudeMessages(records, { currentStartMs = null, previo
     if (rec?.provider !== 'claude') continue;
     for (const claim of rec.claudeMessages ?? []) {
       if (typeof claim.identity !== 'string' || !claim.identity) continue;
-      // Aggregate selects whole sessions by end. A comparison lookback may
-      // discover an older copy, but it must not change the displayed window.
-      // Count the identity once within each bounded display/comparison cohort.
-      const scope = currentStartMs === null ? 'all'
-        : rec.end >= currentStartMs ? 'current'
-          : rec.end >= previousStartMs ? 'previous' : 'older';
-      const key = `${scope}:${claim.identity}`;
-      const list = groups.get(key) ?? [];
+      const list = groups.get(claim.identity) ?? [];
       list.push({ rec, claim });
-      groups.set(key, list);
+      groups.set(claim.identity, list);
     }
   }
   for (const list of groups.values()) {

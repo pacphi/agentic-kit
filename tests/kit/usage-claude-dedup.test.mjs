@@ -258,7 +258,7 @@ test('equal claims have a stable accounting owner when sidechain and source diff
     'source identity settles a tie even when every visible session field matches');
 });
 
-test('a previous-window copy cannot take a current-window charge when lookback widens', async () => {
+test('one identity is charged once across current, previous and combined windows regardless of lookback', async () => {
   _resetForTest();
   const dir = tempDir('ak-cross-window');
   const root = path.join(dir, 'claude');
@@ -279,18 +279,74 @@ test('a previous-window copy cannot take a current-window charge when lookback w
     deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
       classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
   const plain = await buildIndex(o);
-  assert.equal(plain.totals.output, 100);
-  assert.equal(plain.totals.responses, 1);
+  assert.equal(plain.totals.output, 0, 'the richer older copy is the single accounting owner');
+  assert.equal(plain.totals.responses, 0);
+  assert.equal(plain.totals.cost, 0);
+  assert.deepEqual(plain.sourceHealth.claude.identityCoverage,
+    { horizonDays: 2, horizonCoversComparison: true, basis: 'file-mtime-and-session-end' });
   _resetForTest();
   const widenedCurrent = await buildIndex({ ...o, lookbackDays: 2 });
-  assert.equal(widenedCurrent.totals.output, 100);
-  assert.equal(widenedCurrent.totals.responses, 1);
+  assert.equal(widenedCurrent.totals.output, plain.totals.output);
+  assert.equal(widenedCurrent.totals.responses, plain.totals.responses);
   _resetForTest();
   const widened = await buildIndex({ ...o, lookbackDays: 2, previous: true });
-  assert.equal(widened.totals.output, 100, 'lookback cannot change the displayed charge');
-  assert.equal(widened.totals.responses, 1);
+  assert.equal(widened.totals.output, plain.totals.output, 'comparison cannot change the displayed charge');
+  assert.equal(widened.totals.responses, plain.totals.responses);
   assert.equal(widened.previous.totals.output, 200);
   assert.equal(widened.previous.totals.responses, 1);
+  assert.equal(widened.previous.totals.cost, 2);
+  _resetForTest();
+  const combined = await buildIndex({ ...o, days: 2 });
+  assert.equal(combined.totals.output, 200);
+  assert.equal(combined.totals.responses, 1);
+  assert.equal(combined.totals.cost, 2);
+  assert.equal(widened.totals.output + widened.previous.totals.output, combined.totals.output);
+  assert.equal(widened.totals.responses + widened.previous.totals.responses, combined.totals.responses);
+  _resetForTest();
+  const warmPlain = await buildIndex(o);
+  assert.equal(warmPlain.totals.output, plain.totals.output);
+  const outsideFile = path.join(proj, 'outside.jsonl');
+  write(outsideFile, -86_400, 300);
+  _resetForTest();
+  const longLookback = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(longLookback.totals.output, plain.totals.output,
+    'a third copy outside the fixed accounting horizon cannot change current ownership');
+  assert.equal(longLookback.previous.totals.output, 200);
+  _resetForTest();
+  assert.equal((await buildIndex(o)).totals.output, plain.totals.output,
+    'cached older history cannot change the plain query');
+  _resetForTest();
+  const capped = await buildIndex({ ...o, days: 400 });
+  assert.deepEqual(capped.sourceHealth.claude.identityCoverage,
+    { horizonDays: 730, horizonCoversComparison: false, basis: 'file-mtime-and-session-end' },
+    'a caller wider than the supported dashboard window sees the identity cap');
+});
+
+test('equal copied usage still yields one charge across adjacent windows', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-equal-cross-window');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  for (const [name, seconds] of [['old', 0], ['new', 86_400]]) {
+    const file = path.join(proj, `${name}.jsonl`);
+    fs.writeFileSync(file, asst({ id: 'msg_equal', s: seconds + 5, block: text() }) + '\n');
+    fs.utimesSync(file, new Date(at(seconds)), new Date(at(seconds + 5)));
+  }
+  const o = { days: 1, now: T0 + 2 * 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  const split = await buildIndex({ ...o, previous: true });
+  assert.equal(split.previous.totals.sessions, 1, 'comparison is acquired within the common identity horizon');
+  _resetForTest();
+  const combined = await buildIndex({ ...o, days: 2 });
+  assert.equal(split.totals.output + split.previous.totals.output, 200);
+  assert.equal(split.totals.responses + split.previous.totals.responses, 1);
+  assert.equal(combined.totals.output, 200);
+  assert.equal(combined.totals.responses, 1);
+  assert.equal(split.totals.cost + split.previous.totals.cost, combined.totals.cost);
 });
 
 test('malformed cached Claude claim is reparsed instead of crashing or trusted', async () => {
