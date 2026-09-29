@@ -1,3 +1,4 @@
+import { censusDisclosure } from '../lib/census-presentation.mjs';
 // ak system — the machine footprint in the terminal (ADR-0025).
 //
 // The CLI twin of the dashboard's System area, driving the SAME composed
@@ -349,6 +350,7 @@ function renderProjects(projects, now) {
     info(dim('not measured yet — run: ak system --refresh=machine'));
     return;
   }
+  info(dim(censusDisclosure(projects)));
   field('discovered', `${meas(projects.count)}${projects.truncated ? dim(' · list truncated') : ''}`);
   if (!projects.locMeasured) field('lines of code', dim('not measured in this scan'));
 

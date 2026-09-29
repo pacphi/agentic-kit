@@ -1,4 +1,5 @@
 // @ts-nocheck — classic browser bundle source.
+import { projectSurfacesHtml } from './session-presentation.mjs';
 import { mntLanguageLogo } from './maintenance-language-logos.mjs';
 import { esc } from './bootstrap.mjs';
 import { MNT, MNT_SCOPE_LABELS, mntKindLabel } from './maintenance-workspace.mjs';
@@ -68,7 +69,7 @@ import { mntFacetValueLabel } from './maintenance-filters.mjs';
       +(level==='project'?mntProjectKindBadge(node.projectKind):'')
       +(level==='project'&&node.languages&&node.languages.length?mntLanguageBadges(node.languages):'')
       +(node.description?'<span class="mnt-row-context mnt-resource-description" title="'+esc(node.descriptionSource||'Declared description')+'">'+esc(node.description)+'</span>':'')
-      +(note?'<span class="mnt-row-context">'+esc(note)+'</span>':'')+'</span><span class="mnt-node-count">'+esc(node.count)+' installation'+(node.count===1?'':'s')+'</span>'+mntIcon('chevron')+'</button></li>';
+      +(note?'<span class="mnt-row-context">'+esc(note)+'</span>':'')+'</span><span class="mnt-node-count">'+esc(node.count)+' installation'+(node.count===1?'':'s')+'</span>'+mntIcon('chevron')+'</button>'+(level==='project'?projectSurfacesHtml(node):'')+'</li>';
   }
   function mntFocusInstallation(row,index){
     var crumbs=(row.breadcrumb||[]).slice(),scope=row.scope||{};

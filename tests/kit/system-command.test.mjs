@@ -243,3 +243,11 @@ test('ak system --help documents only the current spellings', () => {
   assert.match(r.stdout, /\[--refresh\[=live\|machine\]\] \[--project-trees\] \[--json\]/);
   assert.doesNotMatch(r.stdout, /--deep\b/, 'only the current spellings');
 });
+test('system reports pure exclusions, mixed activity and unresolved ownership separately with Cowork coverage', async () => {
+  const collector = fakeCollector({ snapshot: { projects: { projects: [], importedExcluded: 4, importedMixed: 2, importedUnresolved: 3 } } });
+  const result = await captureLog(() => system.run({ flags: {}, deps: { collector } }));
+  assert.match(result.out, /4 confirmed pure imported copies excluded/);
+  assert.match(result.out, /2 mixed files retain proven native activity/);
+  assert.match(result.out, /3 files have unresolved bounded ownership/);
+  assert.match(result.out, /dedicated Cowork transcript source is not covered/);
+});

@@ -28,15 +28,15 @@ test('should_segment_and-alphabetize picker options with the same designations a
     { key: 'd', label: 'g-p-opaque', learningScope: 'unknown', learningOrigins: ['codex-desktop'] },
   ] });
   const html = elements['intel-project-select'].innerHTML;
-  for (const label of ['Git repositories', 'Git worktrees', 'User-level learning', 'Other / unclassified']) {
+  for (const label of ['Git repositories', 'Git worktrees', 'User-level learning', 'Unknown']) {
     assert.ok(html.includes(`<optgroup label="${label}">`));
   }
   assert.ok(html.indexOf('value="a"') < html.indexOf('value="z"'));
   assert.match(html, /value="z" selected>Zulu — Git repository</);
   assert.match(html, /alpha — Git repository/);
-  assert.match(html, /Settings — Directory/);
+  assert.match(html, /Settings — User-level learning/);
   assert.match(html, /Feature — Git worktree/);
-  assert.match(html, /g-p-opaque — ChatGPT Desktop/);
+  assert.match(html, /g-p-opaque — Unknown/);
   assert.equal(elements['history-project-name'].textContent, 'Zulu');
 });
 test('should_keep_empty_picker_disabled_and_escape_untrusted_option_labels', () => {
