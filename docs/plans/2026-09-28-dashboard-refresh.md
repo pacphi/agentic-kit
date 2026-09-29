@@ -2,7 +2,7 @@
 
 ## Status
 
-**Active** — 6c-1 is implemented and under review; 6c-2 through 6c-5 await separate dispatches. Branch: `feat/dashboard-refresh`. Source: `develop@e2f9dcae0554ff63921df618a819fd5e6afe80d2`.
+**Active** — 6c-1 was independently accepted at `33a3d213`. 6c-2 is implemented in `feat/dashboard-refresh` with its core and three carry-in fixes in separate commits. Its guarded UI gate passed; controller review follows. Tasks 6c-3 through 6c-5 remain separately dispatched. Source: `develop@e2f9dcae0554ff63921df618a819fd5e6afe80d2`.
 
 Implement the deferred 6c work in order, with one reviewed task and unit commit at a time. The [remediation program](2026-09-28-remediation-program-v2.md) and [6b handoff](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md) define the contracts. A passing exact-head develop CI gate precedes production edits. Tests use sandbox state and injected services; final branch gates and integration belong to the controller.
 
