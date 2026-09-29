@@ -17,7 +17,7 @@
 **Spec:** the maintainer decisions of 2026-09-28, recorded in [§ Decisions](#decisions). There is no separate spec document.
 
 **Status:** Implemented, 2026-09-28. Phase 1 and Phase 2 merged in PR #264 at
-`main@e7cfe9ca`; Phase 3 is ready for review on `docs/archive-link-repair`.
+`main@e7cfe9ca`; Phase 3 is ready for review in PR #266.
 
 ## Decisions
 
