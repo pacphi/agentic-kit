@@ -276,6 +276,20 @@ test('Opus 5.5 resolves its own row: $4/$20, 0.05x cache reads, 1.25x/2x writes'
   assert.equal(priceFor('claude-opus-5-20260401').key, 'claude-opus-5', 'a dated Opus 5 id is not Opus 5.5');
 });
 
+// Sonnet 5.5 (2026-09-28) launched at the SAME per-token rate as Sonnet 5, so
+// falling through to `claude-sonnet-5` via the prefix matcher would be a
+// numeric no-op today — but the row still needs its own key + asOf anchor so
+// a future rate divergence is a one-line diff, not a silent mis-price.
+test('Sonnet 5.5 resolves its own row: $2/$10, standard 0.1x cache reads', () => {
+  const p = priceFor('claude-sonnet-5-5');
+  assert.equal(p.key, 'claude-sonnet-5-5', 'must not fall through to claude-sonnet-5');
+  assert.deepEqual([p.in, p.out, p.cacheReadMultiplier, p.asOf], [2, 10, 0.1, '2026-09-28']);
+  for (const [counter, expected] of Object.entries({ input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 })) {
+    assert.equal(costOf({ model: 'claude-sonnet-5-5', [counter]: M }), expected, counter);
+  }
+  assert.equal(priceFor('claude-sonnet-5').key, 'claude-sonnet-5', 'Sonnet 5 keeps its own rate');
+});
+
 test('GPT-6 Sol and Luna carry their published standard rates and write premium', () => {
   for (const [model, rates] of Object.entries({
     'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },

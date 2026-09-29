@@ -54,11 +54,11 @@ test('Claude keeps the 1M selector as a variant instead of a duplicate base mode
 
 test('Claude public facts retain first-party lifecycle, discovery, limits, and scope', () => {
   const result = discoverAnthropicPublicCatalog({
-    capturedAt: '2026-09-23T13:00:00.000Z', scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
+    capturedAt: '2026-09-28T13:00:00.000Z', scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
   });
   assert.equal(result.source.id, 'anthropic-docs');
   assert.equal(result.source.ownerType, 'provider');
-  assert.equal(result.source.sourceVersion, '2026-09-23');
+  assert.equal(result.source.sourceVersion, '2026-09-28');
   assert.equal(result.models.length, ANTHROPIC_PUBLIC_MODELS.length);
 
   const fable = result.models.find((model) => model.identity.modelId === 'claude-fable-5');
@@ -123,7 +123,7 @@ test('Claude public facts include Fable 5.1 and Mythos 5.1 as active, priced ent
 
 test('Claude bundled public facts become explicitly stale instead of silently aging', () => {
   const result = discoverAnthropicPublicCatalog({
-    capturedAt: '2026-12-23T00:00:01.000Z', scopeKey: SCOPE_KEY, // just past 90 days after 2026-09-23
+    capturedAt: '2026-12-27T00:00:01.000Z', scopeKey: SCOPE_KEY, // just past 90 days after 2026-09-28
   });
   assert.equal(result.source.status, 'stale');
   assert.equal(result.models[0].evidence.every(({ freshness }) => freshness === 'stale'), true);

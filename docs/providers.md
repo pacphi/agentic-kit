@@ -467,7 +467,7 @@ claude-only projects.
 ```bash
 ak host pick --host claude,codex        # enables both → seeds routing → prints the table
 ak status                                     # a "routing" row; the dashboard shows the matrix
-ak host pick --route 'testing:claude:claude-sonnet-5'   # override one activity (persisted)
+ak host pick --route 'testing:claude:claude-sonnet-5-5'   # override one activity (persisted)
 ak host pick --primary-host codex       # make codex the lead; claude becomes the alternate
 ```
 
@@ -480,11 +480,11 @@ reasoning model and escalation steps up a tier either way:
 | Tier | Claude | Codex |
 |---|---|---|
 | reasoning | `claude-opus-5-5` | `gpt-6-astra` |
-| balanced | `claude-sonnet-5` | `gpt-6-sol` |
+| balanced | `claude-sonnet-5-5` | `gpt-6-sol` |
 | fast | `claude-haiku-4-5-20251001` | `gpt-6-luna` |
 
 With Codex leading, architecture, design, security-analysis and debugging run on `gpt-6-astra`,
-and implementation and testing run on `claude-sonnet-5`, escalating to `gpt-6-astra`. Astra costs
+and implementation and testing run on `claude-sonnet-5-5`, escalating to `gpt-6-astra`. Astra costs
 more per token than Opus 5.5 ($10/$50 vs $4/$20), so Codex-led reasoning uses more Codex allowance.
 `ak status` marks the primary and fails (not warns) if the primary host is missing.
 
@@ -533,7 +533,7 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 
 | Activity | Host | Default model |
 |---|---|---|
-| specification, review, release | claude | `claude-sonnet-5` |
+| specification, review, release | claude | `claude-sonnet-5-5` |
 | architecture, design, debugging, security-analysis | claude | `claude-opus-5-5` |
 | implementation, testing, security-scan | codex | `gpt-6-sol` |
 | documentation, packaging | codex | `gpt-6-luna` |

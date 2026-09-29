@@ -238,7 +238,7 @@ you opt in.
   design, review; Codex for implementation, testing — and materializes it into agentic-qe's
   `agentOverrides` (adopting upstream [#568](https://github.com/proffesor-for-testing/agentic-qe/issues/568)).
   It's seeded automatically (subscription-only, so no metered surprises), shown in `status` and the
-  dashboard matrix, and **tunable per activity** (`ak host pick --route 'testing:claude:claude-sonnet-5'`)
+  dashboard matrix, and **tunable per activity** (`ak host pick --route 'testing:claude:claude-sonnet-5-5'`)
   with your edits preserved across syncs. **`--primary-host claude|codex`** chooses which host leads:
   codex-primary *mirrors* the default table so Codex drives and Claude is the alternate — symmetric
   either way. `ak run <template> "<task>"` executes a materialized plan from that policy. Nothing is

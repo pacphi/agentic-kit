@@ -163,7 +163,7 @@ Examples:
   ak host pick --host claude,opencode
   ak host pick --host claude,codex,opencode
   ak host pick --host claude       disable codex + opencode; preserve user config
-  ak host pick --route 'testing:claude:claude-sonnet-5'
+  ak host pick --route 'testing:claude:claude-sonnet-5-5'
   ak host reset-routes --activity architecture,design
   ak host off
   ak host check-connection codex --dry-run`;
