@@ -239,6 +239,120 @@ test('partial copied snapshots reconcile component maxima once', () => {
   assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 1);
 });
 
+test('equal claims have a stable accounting owner when sidechain and source differ', () => {
+  const main = parse([asst({ id: 'msg_tie', s: 5, block: text() })]);
+  const side = parse([asst({ id: 'msg_tie', s: 5, block: text() })]);
+  main.sidechain = false; side.sidechain = true;
+  main.claudeSourceKey = 'a'; side.claudeSourceKey = 'b';
+  const forward = reconcileClaudeMessages([main, side]);
+  const reverse = reconcileClaudeMessages([side, main]);
+  assert.equal(forward.find((r) => r.claudeSourceKey === 'a').accountedResponses, 1);
+  assert.equal(reverse.find((r) => r.claudeSourceKey === 'a').accountedResponses, 1);
+  assert.equal(forward.find((r) => r.claudeSourceKey === 'b').accountedResponses, 0);
+  assert.equal(reverse.find((r) => r.claudeSourceKey === 'b').accountedResponses, 0);
+  const x = parse([asst({ id: 'msg_same_metadata', s: 5, block: text() })]);
+  const y = parse([asst({ id: 'msg_same_metadata', s: 5, block: text() })]);
+  x.claudeSourceKey = 'x'; y.claudeSourceKey = 'y';
+  assert.equal(reconcileClaudeMessages([x, y]).find((r) => r.claudeSourceKey === 'x').accountedResponses, 1);
+  assert.equal(reconcileClaudeMessages([y, x]).find((r) => r.claudeSourceKey === 'x').accountedResponses, 1,
+    'source identity settles a tie even when every visible session field matches');
+});
+
+test('a previous-window copy cannot take a current-window charge when lookback widens', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-cross-window');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const oldFile = path.join(proj, 'old.jsonl');
+  const newFile = path.join(proj, 'new.jsonl');
+  const write = (file, s, output) => {
+    fs.writeFileSync(file, [prompt(s), asst({ id: 'msg_shared', s: s + 5, block: text(),
+      usage: { ...USAGE, output_tokens: output } })].join('\n') + '\n');
+    fs.utimesSync(file, new Date(at(s)), new Date(at(s + 5)));
+  };
+  write(oldFile, 0, 200);
+  write(newFile, 86_400, 100);
+  const o = { days: 1, now: T0 + 2 * 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  const plain = await buildIndex(o);
+  assert.equal(plain.totals.output, 100);
+  assert.equal(plain.totals.responses, 1);
+  _resetForTest();
+  const widenedCurrent = await buildIndex({ ...o, lookbackDays: 2 });
+  assert.equal(widenedCurrent.totals.output, 100);
+  assert.equal(widenedCurrent.totals.responses, 1);
+  _resetForTest();
+  const widened = await buildIndex({ ...o, lookbackDays: 2, previous: true });
+  assert.equal(widened.totals.output, 100, 'lookback cannot change the displayed charge');
+  assert.equal(widened.totals.responses, 1);
+  assert.equal(widened.previous.totals.output, 200);
+  assert.equal(widened.previous.totals.responses, 1);
+});
+
+test('malformed cached Claude claim is reparsed instead of crashing or trusted', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-malformed-claims');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, 'one.jsonl');
+  fs.writeFileSync(file, asst({ id: 'msg_one', s: 5, block: text() }) + '\n');
+  const o = { days: 14, now: T0 + 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: () => 0, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  assert.equal((await buildIndex(o)).totals.output, 200);
+  const original = JSON.parse(fs.readFileSync(o.cachePath, 'utf8'));
+  const claim = original.entries[file].session.claudeMessages[0];
+  for (const malformed of [[null], [{ ...claim, usage: { ...claim.usage, output: 201 } }],
+    [claim, claim]]) {
+    const cache = structuredClone(original);
+    cache.entries[file].session.claudeMessages = malformed;
+    fs.writeFileSync(o.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    assert.equal((await buildIndex(o)).totals.output, 200);
+    const repaired = JSON.parse(fs.readFileSync(o.cachePath, 'utf8'));
+    assert.equal(repaired.entries[file].session.claudeMessages.length, 1);
+    assert.equal(typeof repaired.entries[file].session.claudeMessages[0].identity, 'string');
+  }
+});
+
+test('invalid cached claims do not mask a source that becomes unreadable before reparse', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-claim-fallback');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, 'one.jsonl');
+  fs.writeFileSync(file, asst({ id: 'msg_one', s: 5, block: text() }) + '\n');
+  const o = { days: 14, now: T0 + 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: () => 0, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  await buildIndex(o);
+  const cache = JSON.parse(fs.readFileSync(o.cachePath, 'utf8'));
+  cache.entries[file].session.claudeMessages = [null];
+  fs.writeFileSync(o.cachePath, JSON.stringify(cache));
+  _resetForTest();
+  const result = await buildIndex({ ...o, onProgress: ({ phase, scanned }) => {
+    if (phase === 'scan' && scanned === 0) {
+      fs.unlinkSync(file);
+      fs.mkdirSync(file); // still stats, but is no longer a readable transcript
+    }
+  } });
+  assert.equal(result.totals.sessions, 0, 'an invalid cache is not a fallback observation');
+  assert.equal(result.sourceHealth.claude.status, 'degraded');
+  assert.equal(result.sourceHealth.claude.diagnostics.common.unitsSeen, 1);
+  assert.equal(result.sourceHealth.claude.diagnostics.common.unitsParsed, 0);
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(o.cachePath, 'utf8')).entries).length, 0);
+});
+
 test('index keeps cross-file accounting on cold, warm, add, change and removal scans', async () => {
   _resetForTest();
   const dir = tempDir('ak-cross-file');

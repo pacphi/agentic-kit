@@ -16,7 +16,13 @@ bounded, hashed Claude API message identities per cached file and reconciles
 copied charges after discovery. Aggregate responses/tokens/cost count a shared
 message once; each session's `responses` still counts what its transcript
 recorded, with `accountedResponses` showing its aggregate share. Unit 12 awaits
-independent review before Unit 13.
+independent review before Unit 13. Its comparison-window rule groups copies
+only among sessions selected into the same displayed or previous window by
+session end. Widening `lookbackDays` therefore cannot remove a current-window
+charge; the cost is that a message copied across the two windows may appear
+once in each window's totals. Those windows are separate whole-session views,
+not additive unique-message partitions. This rule uses only discovered files
+within the requested bounded lookback.
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin

@@ -7,7 +7,8 @@
 // The corpus is large (1.3 GB on the reference machine) and a finished
 // transcript never changes again, so every file is parsed AT MOST ONCE: the
 // derived per-session record is cached in ~/.config/agentic-kit/usage-index.json
-// keyed by (path, mtime, size). A warm refresh only stats.
+// keyed by (path, mtime, size). A warm refresh stats source files and validates
+// cached Claude message claims before using them for cross-file accounting.
 //
 // Three rules this module exists to enforce:
 //   1. Engaged time is the UNION of ACTIVE intervals, never the sum of spans.
@@ -36,6 +37,7 @@
 // consumer's existing import path expects them from here.
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
 import { readClaudeWindowLog, statClaudeWindowLedger } from './claude-window-ledger.mjs';
 import { writePrivateFileAtomic } from './file-write.mjs';
@@ -50,7 +52,7 @@ import {
   MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit,
 } from './usage-telemetry.mjs';
 import { parseClaude, parseCodex } from './usage-parsers.mjs';
-import { reconcileClaudeMessages } from './usage-claude-dedup.mjs';
+import { reconcileClaudeMessages, validClaudeMessageClaims } from './usage-claude-dedup.mjs';
 import { openCodexRollout } from './codex-rollout-reader.mjs';
 import { maskSecrets, applyCodexLedger, aggregate, sessionPayload } from './usage-aggregate.mjs';
 
@@ -340,6 +342,11 @@ function attachTelemetryHealth(health, common, diagnostics = health.diagnostics)
       common: finalizeTelemetryDiagnostics(common),
     },
   };
+}
+
+function claudeParseHealth(root, common) {
+  if (root.status !== 'ok' || common.unitsSeen === common.unitsParsed) return root;
+  return { ...root, status: 'degraded', reason: 'transcript-parse-incomplete' };
 }
 
 function defaultRoots() {
@@ -768,8 +775,17 @@ function withWindowLedger(entry, windowConfigDir) {
 function compatibleCostStateCache(c, hit) {
   return c.provider !== 'claude' || (Object.hasOwn(hit.session ?? {}, 'claudeCostState')
     && Object.hasOwn(hit.session ?? {}, 'claudeMessageCoverage')
-    && Array.isArray(hit.session.claudeMessages)
+    && validClaudeMessageClaims(hit.session)
     && (!hit.session.claudeCostState || Object.hasOwn(hit.session.claudeCostState, 'startMs')));
+}
+
+function parseValidatedCandidate(c, failure, readLimits) {
+  const parsed = parseFile(c, failure, readLimits);
+  const session = parsed?.session ?? null;
+  // A source with malformed accounting cannot enter the cache or global
+  // reconciliation, even when the parser could salvage other fields.
+  return { session: c.provider === 'claude' && session && !validClaudeMessageClaims(session) ? null : session,
+    parseStats: parsed?.parseStats ?? null };
 }
 
 /** Parse (or reuse the cached parse of) one scan candidate, updating the
@@ -794,9 +810,7 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
   let parseStats = cacheHit ? hit.parseStats : null;
   const failure = {};
   if (!session) {
-    const parsed = parseFile(c, failure, readLimits);
-    session = parsed ? parsed.session : null;
-    parseStats = parsed?.parseStats ?? null;
+    ({ session, parseStats } = parseValidatedCandidate(c, failure, readLimits));
   }
   const counted = c.provider !== 'codex'
     || recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure });
@@ -830,10 +844,12 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
  *  Mutates `entries` and `records` in place; returns the possibly-updated
  *  opencode health (a degraded existence check discovered mid-loop must
  *  still be visible to the NEXT entry's check and to the final report). */
-function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth }) {
+function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth, attemptedFiles }) {
   if (!cache?.entries) return opencodeHealth;
   for (const [file, e] of Object.entries(cache.entries)) {
-    if (entries[file] || !e?.session) continue;
+    // A candidate that failed reparsing must not be revived just because its
+    // path still stats (it may now be unreadable or no longer be a file).
+    if (entries[file] || attemptedFiles.has(file) || !e?.session) continue;
     const lastActivity = e.session.end ?? e.session.start;
     // No timestamp at all → can't judge age; keep it rather than guess.
     if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
@@ -951,14 +967,16 @@ async function scan(o = {}) {
         ...(parseStats ? { parseStats } : {}),
         ...(c.dbFile ? { dbFile: c.dbFile } : {}),
       };
-      if (!session.imported) records.push(session);
+      if (!session.imported) records.push(c.provider === 'claude'
+        ? { ...session, claudeSourceKey: createHash('sha256').update(c.file).digest('hex') }
+        : session);
     }
     scanned++;
     if (scanned % 100 === 0) notify(onProgress, { scanned, total, phase: 'scan' });
   }
 
   opencodeHealth = carryForwardCachedEntries(cache, entries, records, {
-    now, cutoff, ocDb, opencodeHealth,
+    now, cutoff, ocDb, opencodeHealth, attemptedFiles: new Set(candidates.map((candidate) => candidate.file)),
   });
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
   // Completed OpenCode responses whose provider reported no token counts: one
@@ -980,7 +998,9 @@ async function scan(o = {}) {
   // `previous: true` caller would find its "current" totals silently
   // absorbing what should have been the previous window (the bug this fixes).
   const displayCutoff = now - days * DAY_MS;
-  const result = aggregate(reconcileClaudeMessages(applyCodexLedger(records, ledger)), {
+  const result = aggregate(reconcileClaudeMessages(applyCodexLedger(records, ledger), {
+    currentStartMs: displayCutoff, previousStartMs: displayCutoff - days * DAY_MS,
+  }), {
     days, now, cutoff: displayCutoff, deps, previous, prompts,
   });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
@@ -988,7 +1008,7 @@ async function scan(o = {}) {
     warnings: codexSourceHealth.diagnostics.warnings,
   });
   result.sourceHealth = {
-    claude: attachTelemetryHealth(claudeHealth, commonDiagnostics.claude),
+    claude: attachTelemetryHealth(claudeParseHealth(claudeHealth, commonDiagnostics.claude), commonDiagnostics.claude),
     codex: attachTelemetryHealth(codexSourceHealth, commonDiagnostics.codex),
     opencode: attachTelemetryHealth(opencodeHealth, commonDiagnostics.opencode),
     codexLedger: codexLedgerHealth,
