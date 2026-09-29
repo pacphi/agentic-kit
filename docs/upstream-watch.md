@@ -107,8 +107,8 @@ Every command also takes `--concurrency <1-16>` (default 4) and `--registry <fil
   `--since` selects by the event's date; `--recorded-since` by when a run recorded it
   (`recordedAt`).
 
-`report`, `check` and `ledger` exit 0 unless the command line is wrong (2) or, for `ledger`, the
-ledger branch cannot be read (3). `record` exits 3 when blind: `gh` cannot reach GitHub, the
+`report` and `check` exit 0 unless the command line is wrong (2). `ledger` exits 3 when the
+registry is invalid or the ledger branch cannot be read. `record` exits 3 when blind: `gh` cannot reach GitHub, the
 registry is invalid, the ledger branch cannot be read or holds a malformed line, or not one
 upstream thread could be read (our own tracking issues do not count). It also exits 3 when the
 ledger commit could not be built; the routine sessions it already fired are then listed in
@@ -298,8 +298,11 @@ has GitHub write tools, so the limits below are instructions in its prompt, not 
 platform checks each push to a branch not prefixed `claude/` and refuses it when the branch is
 protected, someone else has an open pull request from it, or it carries someone else's commits
 ([Repositories and branch permissions](https://code.claude.com/docs/en/routines#repositories-and-branch-permissions)).
-GitHub does not notify you of your own pull request by default, so the watch's next run records
-`dispatch-pr` and its notice says the draft is ready.
+GitHub does not notify you of your own pull request by default, so the watch checks for an open
+draft pull request while the entry is `watching` or `fixed-unreleased`, for up to seven days after
+its latest firing. When found, it records `dispatch-pr` and its notice says the draft is ready.
+After that window, a late pull request needs manual reconciliation; the `fired` evidence remains
+in the ledger.
 
 - **Trigger:** API only.
 - **Prompt:**

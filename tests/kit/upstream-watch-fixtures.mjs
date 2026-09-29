@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { UPSTREAM_REGISTRY_FILE } from '../../src/lib/hook-audit/upstream.mjs';
 import { releaseFacts } from '../../scripts/upstream-watch/classify.mjs';
+import { PermanentFetchError } from '../../scripts/upstream-watch/fetch.mjs';
 
 const FIXTURES = path.resolve('tests/fixtures/upstream-watch');
 const threads = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'threads.json'), 'utf8')).threads;
@@ -55,7 +56,7 @@ export function fixtureFetcher({ authenticated = true, failing = new Set(), flak
     thread: async (id) => {
       if (failing.has(id)) throw new Error('HTTP 502');
       if (flaky.get(id) > 0) { flaky.set(id, flaky.get(id) - 1); throw new Error('HTTP 502'); }
-      if (!threads[id]) throw new Error(`no fixture for ${id}`);
+      if (!threads[id]) throw new PermanentFetchError(`no fixture for ${id}`);
       return clone(threads[id]);
     },
     release: async ({ name }) => releaseFacts('npm', npm[name]),
