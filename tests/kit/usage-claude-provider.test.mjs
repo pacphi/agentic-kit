@@ -18,7 +18,10 @@ test('session-bound Bedrock and Vertex model IDs establish a separate provider d
   for (const [model, provider] of [
     ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'amazon-bedrock'],
     ['anthropic.claude-haiku-4-5', 'amazon-bedrock'],
+    ['anthropic.claude-opus-4-6-v1', 'amazon-bedrock'],
+    ['anthropic.claude-fable-5-1', 'amazon-bedrock'],
     ['claude-sonnet-4-5@20250929', 'google-vertex-ai'],
+    ['claude-sonnet-4-5@20240229', 'google-vertex-ai'],
   ]) {
     const rec = parse(assistant(model));
     assert.equal(rec.sessionOrigin.surface, 'claude-desktop');
@@ -31,16 +34,31 @@ test('session-bound Bedrock and Vertex model IDs establish a separate provider d
 
 test('ordinary models, unrelated current configuration, unknown gateways and malformed metadata stay unknown', () => {
   for (const model of ['claude-sonnet-4-5', 'anthropic/claude-sonnet-4-5',
-    'https://secret:token@private.example/model', 'claude-sonnet-4-5@bad',
+    'https://secret:token@private.example/model', '//private.example/model', 'claude-sonnet-4-5@bad',
+    'anthropic.claude-sonnet-4-this-is-not-a-model', 'claude-sonnet-4-5@20999999',
+    'claude-sonnet-4-5@20260229', 'anthropic.claude-sonnet-4-5-20260229-v1:0',
     { value: 'us.anthropic.claude-sonnet-4-5' }]) {
-    const rec = parse(assistant(model, { env: { CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_BASE_URL: 'https://secret:token@private.example' },
-      settings: { env: { CLAUDE_CODE_USE_VERTEX: '1' } } }));
+    const { session: rec, turns } = parseClaude(assistant(model, {
+      env: { CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_BASE_URL: 'https://secret:token@private.example' },
+      settings: { env: { CLAUDE_CODE_USE_VERTEX: '1' } },
+    }), { id: 'provider-fixture', withTurns: true });
     assert.equal(rec.sessionOrigin.thirdPartyProvider, null);
     assert.equal(JSON.stringify(rec.sessionOrigin).includes('private.example'), false);
     assert.equal(JSON.stringify(rec.sessionOrigin).includes('token'), false);
     assert.equal(JSON.stringify(rec).includes('private.example'), false);
     assert.equal(JSON.stringify(rec).includes('secret:token'), false);
+    assert.equal(JSON.stringify(turns).includes('private.example'), false);
   }
+});
+
+test('a local API-error placeholder cannot erase a preceding completed provider observation', () => {
+  const actual = assistant('us.anthropic.claude-sonnet-4-6');
+  const error = assistant('<synthetic>', { isApiErrorMessage: true });
+  const rec = parse(actual, error);
+  assert.equal(rec.sessionOrigin.thirdPartyProvider, 'amazon-bedrock');
+  assert.equal(rec.responses, 1);
+  assert.equal(rec.exceptions, 1);
+  assert.deepEqual(rec.models, ['us.anthropic.claude-sonnet-4-6']);
 });
 
 test('conflicting provider-specific assistant IDs leave session provider unknown', () => {

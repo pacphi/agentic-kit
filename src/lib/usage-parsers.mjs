@@ -56,7 +56,7 @@ function clip(text, max = 100) {
 }
 
 function boundedClaudeModel(model) {
-  if (typeof model !== 'string' || model.length > 100 || model.includes('://')) return 'unknown';
+  if (typeof model !== 'string' || model.length > 100 || model.includes('//')) return 'unknown';
   return /^[A-Za-z0-9._:/-]+$/u.test(model) || /^claude-[a-z0-9-]+@20[0-9]{6}$/u.test(model)
     ? model : 'unknown';
 }
@@ -790,7 +790,7 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
     if (decoded.role !== 'assistant' || !e.message) continue;
     // A transcript's assistant model is tied to this session. Current global
     // settings and process.env are not historical session evidence.
-    observedProviders.add(claudeProviderFromModelId(boundedClaudeModel(e.message.model)));
+    if (!decoded.isApiError) observedProviders.add(claudeProviderFromModelId(boundedClaudeModel(e.message.model)));
     recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns);
   }
   flushClaudeMessages(rec, msgState, windowLog);

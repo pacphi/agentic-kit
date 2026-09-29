@@ -80,14 +80,22 @@ export function sessionSurfaceLabel(surface) {
 // name. Never retain the raw ID here (it may contain account or route data).
 // https://code.claude.com/docs/en/amazon-bedrock#pin-model-versions
 // https://code.claude.com/docs/en/google-vertex-ai#pin-model-versions
+const BEDROCK_MODEL = /^(?:(?:us|eu|apac|jp|au|ca|sa|us-gov|global)\.)?anthropic\.claude-(?:(?:opus|sonnet|haiku|fable)-[1-9][0-9]?(?:-[1-9][0-9]?)?|[1-9][0-9]?(?:-[1-9][0-9]?)?-(?:opus|sonnet|haiku))(?:(?:-(20[0-9]{6})-v[1-9][0-9]*(?::[0-9]+)?)|(?:-v[1-9][0-9]*(?::[0-9]+)?))?$/u;
+const VERTEX_MODEL = /^claude-(?:(?:opus|sonnet|haiku|fable)-[1-9][0-9]?(?:-[1-9][0-9]?)?|[1-9][0-9]?(?:-[1-9][0-9]?)?-(?:opus|sonnet|haiku))@(20[0-9]{6})$/u;
+
+function validCalendarDate(value) {
+  if (!value) return true;
+  const year = Number(value.slice(0, 4)), month = Number(value.slice(4, 6)), day = Number(value.slice(6));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 export function claudeProviderFromModelId(model) {
   if (typeof model !== 'string' || model.length > 100) return null;
-  if (/^(?:(?:us|eu|apac|jp|au|ca|sa|us-gov|global)\.)?anthropic\.claude-(?:opus|sonnet|haiku)-[0-9][a-z0-9-]*(?:-v[0-9]+:[0-9]+)?$/u.test(model)) {
-    return 'amazon-bedrock';
-  }
-  if (/^claude-(?:opus|sonnet|haiku)-[0-9][a-z0-9-]*@20[0-9]{6}$/u.test(model)) {
-    return 'google-vertex-ai';
-  }
+  const bedrock = BEDROCK_MODEL.exec(model);
+  if (bedrock) return validCalendarDate(bedrock[1]) ? 'amazon-bedrock' : null;
+  const vertex = VERTEX_MODEL.exec(model);
+  if (vertex) return validCalendarDate(vertex[1]) ? 'google-vertex-ai' : null;
   return null;
 }
 
