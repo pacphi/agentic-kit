@@ -8,14 +8,18 @@ import path from 'node:path';
 
 /**
  * Create `<os.tmpdir()>/<prefix>-XXXXXX` and remove it when the test (or, without
- * `t`, the file) finishes. A caller that chdir-ed into it must chdir out first.
+ * `t`, the file) finishes, unless manual cleanup is requested. A caller that
+ * chdir-ed into it must chdir out first.
  * @param {string} prefix
  * @param {import('node:test').TestContext} [t]
+ * @param {{manual?:boolean}} [options] Caller owns removal when manual is true.
  * @returns {string} the real path of the new folder
  */
-export function tempDir(prefix, t) {
+export function tempDir(prefix, t, { manual = false } = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-`)));
   const remove = () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-  if (t) t.after(remove); else after(remove);
+  if (!manual) {
+    if (t) t.after(remove); else after(remove);
+  }
   return dir;
 }
