@@ -2,6 +2,13 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
+- **Updated:** 2026-09-29 — usage schema 25 → 26 delivers bounded session surface/provider
+  evidence, per-turn Codex import ownership, positive component usage without responses,
+  one Claude message charge owner across the bounded two-window pool, separate host-reported
+  reconciliation signals, explicit OpenCode source/cost/coverage semantics and timezone-aware
+  cache reuse. Footprint remains schema 8. The
+  [current accounting contracts](../usage-scorecard-metrics.md#current-accounting-and-cache-contracts)
+  define source bounds and compatibility; historical measurements below are not fresh results.
 - **Updated:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export boundary;
   local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211

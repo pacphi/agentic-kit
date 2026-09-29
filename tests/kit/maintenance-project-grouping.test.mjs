@@ -1,9 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildManagementInventory } from '../../src/lib/maintenance/management/projection.mjs';
 import { runInventoryQuery } from '../../src/lib/maintenance/management/query.mjs';
 import { publicInventoryPage } from '../../src/lib/dashboard/maintenance-api.mjs';
 import { validateMaintenanceV2Query } from '../../src/lib/dashboard/maintenance-security.mjs';
+import { discoverProjectSources } from '../../src/lib/footprint/project-sources.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const options = { installationKey: 'maintenance-grouping-fixture-key', environment: { platform: 'darwin' }, now: () => 1700000000000 };
 const repository = { kind: 'git', repositoryId: 'repository:0123456789abcdef0123', root: '/work/repo',
@@ -61,4 +66,104 @@ test('should_report_session_counts_once_per_project_despite_multiple_installed_r
   const page = publicInventoryPage(runInventoryQuery(inventory, { scope: 'project', presentation: 'focus' }));
   assert.equal(page.navigation.nodes[0].count, 2);
   assert.equal(page.navigation.nodes[0].sessionOrigins[0].sessions, 7);
+});
+test('project census count basis survives discovery, management, and API without changing legacy meanings', (t) => {
+  // Catalog project roots are native absolute paths, just like discovery output.
+  const project = path.join(tempDir('ak-census-grouping', t), 'census-project');
+  const discovered = discoverProjectSources({
+    scanTranscripts: (_root, host) => ({ complete: true, sightings: host === 'claude'
+      ? [{ cwd: project, weight: 2, sessionOrigin: { origin: 'claude-desktop', evidence: 'declared' } }]
+      : [{ cwd: project, weight: 3, sessionOrigin: { origin: 'codex-desktop', evidence: 'declared' } }] }),
+    scanOpencode: () => ({ complete: true, sightings: [] }),
+  });
+  const source = discovered.projects[0];
+  assert.equal(source.path, project);
+  assert.deepEqual(source.sessionOrigins.map(({ countBasis, sessions }) => [countBasis, sessions]),
+    [['declared-session-ids', 2], ['transcript-files', 3]]);
+  const page = publicInventoryPage(runInventoryQuery(build({ projects: [], discoveryProjects: [source] }, [project]),
+    { scope: 'project', presentation: 'focus' }));
+  assert.deepEqual(page.navigation.nodes[0].sessionOrigins,
+    [{ origin: 'claude-desktop', sessions: 2, countBasis: 'declared-session-ids' },
+      { origin: 'codex-desktop', sessions: 3, countBasis: 'transcript-files' }]);
+});
+test('legacy basis and zero recovery keep their exact meaning; invalid basis is omitted', () => {
+  const project = '/legacy-project';
+  const origins = [
+    { origin: 'claude-desktop', sessions: 4, countBasis: 'transcript-files' },
+    { origin: 'codex-desktop', sessions: 2, countBasis: 'not-a-basis' },
+    { origin: 'unknown', sessions: 0, countBasis: 'recovered-project-sighting' },
+  ];
+  const page = publicInventoryPage(runInventoryQuery(build({ projects: [], discoveryProjects: [
+    { path: project, sessionOrigins: origins },
+  ] }, [project]), { scope: 'project', presentation: 'focus' }));
+  assert.deepEqual(page.navigation.nodes[0].sessionOrigins, [
+    origins[0], { origin: 'codex-desktop', sessions: 2 }, origins[2],
+  ]);
+});
+test('surface evidence survives public focus and row DTOs and facets exclude zero recovery observations', () => {
+  const sessionSurfaces = [{ host: 'codex', surface: 'chatgpt-desktop-work', initiator: 'agent', sessions: 2,
+    countBasis: 'transcript-files', rawEvidence: { originator: ['codex_work_desktop'] } },
+  { host: 'claude', surface: 'cloud-session', initiator: 'automation', sessions: 0, countBasis: 'recovered-project-sighting' }];
+  const inventory = build({ projects: [], discoveryProjects: [{ path: '/project', repository, sessionSurfaces }] }, ['/project']);
+  const page = publicInventoryPage(runInventoryQuery(inventory, { scope: 'project', presentation: 'focus', facets: { sessionOrigin: ['chatgpt-desktop-work'] } }));
+  assert.equal(page.total, 1);
+  assert.equal(page.navigation.nodes[0].sessionSurfaces[0].host, 'claude');
+  assert.deepEqual(page.navigation.nodes[0].sessionSurfaces[1].rawEvidence.originator, ['codex_work_desktop']);
+  assert.equal(runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['cloud-session'] } }).total, 0);
+});
+
+for (const stateSource of ['saved preference', 'bookmarked hash']) {
+  test(`legacy desktop filter from ${stateSource} retains its exact membership`, () => {
+    const context = vm.createContext({ URLSearchParams, localStorage: { getItem: () => null } });
+    const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/maintenance-workspace.mjs', import.meta.url), 'utf8')
+      .replace(/^import\s[\s\S]*?from ['"][^'"]+['"];\s*$/gm, '').replace(/\bexport (?=(?:function|var)\b)/g, '');
+    vm.runInContext(source, context);
+    if (stateSource === 'saved preference') context.mntApplyPreferredState({ lastView: { scope: 'project', facets: { sessionOrigin: ['codex-desktop'] } } });
+    else context.mntApplyState(context.mntParseHashParts(['system', 'maintenance', 'inventory?scope=project&facet.sessionOrigin=codex-desktop']));
+    const restored = JSON.parse(JSON.stringify(context.MNT));
+    assert.deepEqual(restored.facets.sessionOrigin, ['codex-desktop']);
+    const rows = [{ path: '/desktop', sessionOrigins: [{ origin: 'codex-desktop', sessions: 3 }] },
+      { path: '/unknown', sessionOrigins: [{ origin: 'unknown', sessions: 1 }] }];
+    const inventory = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    const result = publicInventoryPage(runInventoryQuery(inventory, { scope: restored.scope, facets: restored.facets, presentation: 'focus' }));
+    assert.equal(result.total, 1);
+    assert.equal(result.navigation.nodes[0].sessionOrigins[0].origin, 'codex-desktop');
+    assert.equal(result.navigation.nodes[0].sessionSurfaces, null);
+    rows[0].sessionSurfaces = [{ host: 'codex', surface: 'chatgpt-desktop-work', sessions: 3 }];
+    const refreshed = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    assert.equal(runInventoryQuery(refreshed, { scope: restored.scope, facets: restored.facets }).total, 1,
+      'refreshing to the richer contract must not invalidate the saved legacy filter');
+  });
+}
+
+for (const stateSource of ['saved preference', 'bookmarked hash']) {
+  test(`legacy Unknown filter from ${stateSource} retains membership after surface refresh`, () => {
+    const context = vm.createContext({ URLSearchParams, localStorage: { getItem: () => null } });
+    const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/maintenance-workspace.mjs', import.meta.url), 'utf8')
+      .replace(/^import\s[\s\S]*?from ['"][^'"]+['"];\s*$/gm, '').replace(/\bexport (?=(?:function|var)\b)/g, '');
+    vm.runInContext(source, context);
+    if (stateSource === 'saved preference') context.mntApplyPreferredState({ lastView: { scope: 'project', facets: { sessionOrigin: ['unknown'] } } });
+    else context.mntApplyState(context.mntParseHashParts(['system', 'maintenance', 'inventory?scope=project&facet.sessionOrigin=unknown']));
+    const restored = JSON.parse(JSON.stringify(context.MNT));
+    assert.deepEqual(restored.facets.sessionOrigin, ['unknown']);
+    const rows = ['codex-cli', 'codex-ide', 'unknown'].map((surface) => ({ path: '/' + surface,
+      sessionOrigins: [{ origin: 'unknown', sessions: 1 }] }));
+    rows.push({ path: '/desktop', sessionOrigins: [{ origin: 'codex-desktop', sessions: 1 }] });
+    const query = validateMaintenanceV2Query('inventory', new URLSearchParams('scope=project&facet.sessionOrigin=unknown'));
+    const before = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    assert.equal(runInventoryQuery(before, query).total, 3);
+    rows.forEach((row, i) => { row.sessionSurfaces = [{ host: 'codex', surface: ['codex-cli', 'codex-ide', 'unknown', 'chatgpt-desktop-work'][i], sessions: 1 }]; });
+    const after = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    assert.equal(runInventoryQuery(after, { scope: restored.scope, facets: restored.facets }).total, 3);
+    assert.equal(runInventoryQuery(after, query).total, 3);
+    assert.equal(runInventoryQuery(after, { scope: 'project', facets: { sessionOrigin: ['surface-unknown'] } }).total, 1);
+  });
+}
+
+test('implicit legacy Unknown membership also survives richer surface evidence', () => {
+  const row = { path: '/no-origin' };
+  const query = { scope: 'project', facets: { sessionOrigin: ['unknown'] } };
+  assert.equal(runInventoryQuery(build({ projects: [], discoveryProjects: [row] }, [row.path]), query).total, 1);
+  row.sessionSurfaces = [{ host: 'codex', surface: 'codex-cli', sessions: 1 }];
+  assert.equal(runInventoryQuery(build({ projects: [], discoveryProjects: [row] }, [row.path]), query).total, 1);
 });

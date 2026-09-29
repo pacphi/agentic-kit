@@ -1,6 +1,8 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { SESSION_HOST_LABELS, sessionProviderPresentation } from '../../session-surface.mjs';
+import { surfaceDetailHtml } from './session-presentation.mjs';
 import { formatLocalDateTime } from './datetime.mjs';
 import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
@@ -1103,23 +1105,18 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +'<span class="msub mono">'+esc(sub||resetTxt(resetSec))+"</span></div>";
   }
 
-  // An empty Claude panel is explained by WHICH statusLine a session runs
-  // (#238 M3): the tee lives only in the kit footer. The server sends the
-  // user-level statusLine's class (claudeChannel, never its path); the copy
-  // states Claude Code's precedence rule, because a project's own statusLine
-  // overrides the user-level one — which is how a footer-carrying project
-  // still fills this panel when the user-level script cannot. An unknown or
-  // missing class (an older server) gets the generic sentence.
-  var CLAUDE_PRECEDENCE="a project&rsquo;s own statusLine takes precedence over your user-level one";
+  // The channel describes the resolved settings context; local and managed
+  // settings can override the project and user settings.
+  var CLAUDE_PRECEDENCE="local or managed settings may override the project and user settings; the effective statusLine takes precedence";
   var CLAUDE_SETUP="Set a project up with <code>ak setup --project</code> (<code>ak sync</code> keeps its footer current), then run a Pro/Max session there.";
   var CLAUDE_EMPTY={
-    "kit-footer":"your user-level statusLine carries the kit footer, so limits arrive after the first response "
+    "kit-footer":"the effective statusLine carries the kit footer, so limits arrive after the first response "
       +"of a Claude Code session on a Pro/Max plan. Run one session, then revisit.",
-    "custom":"your user-level statusLine runs a custom script without the kit footer, so it does not report limits "
-      +"to ak. They arrive only from sessions in projects whose own statusLine carries the footer: "+CLAUDE_PRECEDENCE+". "+CLAUDE_SETUP,
-    "none":"you have no user-level statusLine, so only sessions in projects whose own statusLine carries the kit footer "
+    "custom":"the effective statusLine runs a custom script without the kit footer, so it does not report limits "
+      +"to ak. They arrive from sessions whose effective statusLine carries the footer: "+CLAUDE_PRECEDENCE+". "+CLAUDE_SETUP,
+    "none":"there is no effective statusLine, so only sessions whose effective statusLine carries the kit footer "
       +"report limits. "+CLAUDE_SETUP,
-    "project-helper":"your user-level statusLine runs each project&rsquo;s own ruflo helper, so limits arrive from sessions "
+    "project-helper":"the effective statusLine runs each project&rsquo;s own ruflo helper, so limits arrive from sessions "
       +"in projects where that helper carries the kit footer. Run <code>ak sync</code> in such a project to re-inject it, "
       +"then run a Pro/Max session there."
   };
@@ -1328,7 +1325,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // not exist, when in fact it was measured and found absent (ADR-0009 §5).
   function dash(v){return (v==null||v==="")?"—":String(v);}
   function reportedIdentity(v){v=String(v==null?"":v).trim();return v&&!/^unknown$/i.test(v)?v:null;}
-  function identityName(v){var raw=reportedIdentity(v);if(!raw)return"Not recorded";return{claude:"Claude Code",codex:"Codex",opencode:"OpenCode",anthropic:"Anthropic",openai:"OpenAI",openrouter:"OpenRouter",bedrock:"AWS Bedrock",vertex:"Google Vertex AI",foundry:"Microsoft Foundry",gateway:"Custom gateway",ollama:"Ollama",lmstudio:"LM Studio"}[raw.toLowerCase()]||raw;}
+  function identityName(v){return Object.hasOwn(SESSION_HOST_LABELS,v)?SESSION_HOST_LABELS[v]:'Unknown';}
 
   // ── per-session chips ─────────────────────────────────────────────────────
   // Evidence the row already carries, shown only where the transcript
@@ -1403,7 +1400,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       ? ' <span class="sd-conf">(conf '+esc(sx.confidence.toFixed(2))+")</span>" : "";
     var modelList=(Array.isArray(sx.models)?sx.models:[]).filter(function(model){return reportedIdentity(model);});
     var models=modelList.length?modelList.join(", "):"Not recorded";
-    var providerRaw=reportedIdentity(sx.provider),provider=identityName(providerRaw),provenance=reportedIdentity(sx.providerProvenance)||"unknown",providerContext=providerRaw?provenance+" evidence":"not established by source";
+    var providerPresentation=sessionProviderPresentation(sx),provider=providerPresentation.label,providerContext=providerPresentation.basis;
     var toks="in "+fmtTok(sx.input)+" · out "+fmtTok(sx.output)
       +" · cache r "+fmtTok(sx.cacheRead)+" / w "+fmtTok(sx.cacheWrite)
       // Codex-only detail: reasoning tokens are a SUBSET of output (they bill
@@ -1431,7 +1428,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       // codex or opencode transcript can record an interrupt, so a claude row
       // reads "not recorded" rather than a measured-looking 0.
       +" · aborts "+(sx.host==="codex"||sx.host==="opencode"?fmtNum(Number(sx.aborts)||0):"not recorded for this host");
-    var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["posture",posture],["rhythm",esc(rhythm)],["basis",esc(basis)+conf],["tokens",esc(toks)],
+    var rows=[["session surface",surfaceDetailHtml(sx.sessionOrigin||{})],["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["posture",posture],["rhythm",esc(rhythm)],["basis",esc(basis)+conf],["tokens",esc(toks)],
       ["tools",esc(tools)],["flags",esc(flags)]];
     return '<div class="sdetail" id="sd-'+esc(sx.id)+'" hidden>'
       +rows.map(function(r){
@@ -1448,9 +1445,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // the full width without joining the column layout.
   export function sessionRow(sx){
     var host=reportedIdentity(sx.host)||"unknown";
-    var provider=reportedIdentity(sx.provider);
+    var provider=sessionProviderPresentation(sx).label;
     var modelList=(Array.isArray(sx.models)?sx.models:[]).filter(function(model){return reportedIdentity(model);});
-    var identityTip="Execution host: "+identityName(host)+" · Inference provider: "+identityName(provider)+" · Model: "+(modelList.length?modelList.join(", "):"Not recorded");
+    var identityTip="Execution host: "+identityName(host)+" · Inference provider: "+provider+" · Model: "+(modelList.length?modelList.join(", "):"Not recorded");
     var cat=sx.category||"Unclassified";
     var uncl=(cat==="Unclassified");
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";

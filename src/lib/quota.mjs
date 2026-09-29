@@ -32,7 +32,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { configDir, claudeSettingsPath } from './paths.mjs';
+import { configDir, claudeSettingsPath, claudeManagedSettingsPath } from './paths.mjs';
 import { managedHostIds } from './adapters/registries.mjs';
 import { recordedHostPresence } from './providers.mjs';
 
@@ -114,9 +114,9 @@ export function readClaudeLimits({ file = claudeLimitsFile() } = {}) {
 // command line, then the project's .claude/settings.local.json, then its
 // .claude/settings.json, then the user's ~/.claude/settings.json
 // (code.claude.com/docs/en/settings). The dashboard cannot know which project
-// the next session starts in, so it classifies the USER-level statusLine, the
-// one every project without its own inherits, and lets the panel state the
-// precedence rule beside the class.
+// the next session starts in, so it classifies the machine-managed file when
+// present and otherwise the USER-level statusLine, the one every project
+// without its own inherits. Other managed policy channels are not observed.
 //
 // Read-only and path-free: this reads the settings file and, at most, the
 // script files the command names (stat first; regular files under a size cap),
@@ -127,22 +127,33 @@ export function readClaudeLimits({ file = claudeLimitsFile() } = {}) {
 export const CLAUDE_TEE_CHANNELS = Object.freeze(['none', 'kit-footer', 'project-helper', 'custom', 'unknown']);
 const KIT_FOOTER_MARKER = 'ruflo-seg:BEGIN';
 const MAX_STATUSLINE_SCRIPT_BYTES = 4 * 1024 * 1024;
-const MAX_STATUSLINE_SCRIPTS = 8;
-// A script the command names: double-quoted, single-quoted (both may hold
-// spaces), or a bare token. Only the JavaScript family, since the tee is JS.
-const STATUSLINE_SCRIPT_TOKEN = /"([^"]*?\.[cm]?js)"|'([^']*?\.[cm]?js)'|([^\s"'`;|&()=,]+?\.[cm]?js)(?![\w.])/g;
 const HOME_PREFIX = /^(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|%HOME%)(?=[\\/]|$)/;
 // The one project-relative script the kit injects into (fixStatusline).
 const PROJECT_HELPER_SUFFIX = '.claude/helpers/statusline.cjs';
+// The two generated project-helper commands already supported by the classifier.
+// They are known templates, not evidence that arbitrary shell text runs a helper.
+const PROJECT_HELPER_COMMANDS = new Set([
+  'sh -c \'D="${CLAUDE_PROJECT_DIR:-.}"; [ -f "$D/.claude/helpers/statusline.cjs" ] || D="${HOME}"; exec node "$D/.claude/helpers/statusline.cjs"\'',
+  'node -e "const fs=require(\'fs\'),p=require(\'path\');const d=process.env.CLAUDE_PROJECT_DIR||\'.\';const f=p.join(d,\'.claude/helpers/statusline.cjs\');const h=p.join(process.env.USERPROFILE||process.env.HOME||\'.\', \'.claude/helpers/statusline.cjs\');require(fs.existsSync(f)?f:h);"',
+]);
 
-function statusLineScripts(command) {
-  const out = [];
-  for (const m of command.matchAll(STATUSLINE_SCRIPT_TOKEN)) {
-    const token = (m[1] ?? m[2] ?? m[3] ?? '').trim();
-    if (token && !out.includes(token)) out.push(token);
-    if (out.length >= MAX_STATUSLINE_SCRIPTS) break;
-  }
-  return out;
+function directStatusLineScript(command) {
+  // Only a direct Node script (or a directly executable JS script) proves
+  // which file runs. Do not scan arguments, inline programs, shell chains, or
+  // wrapper bodies for plausible paths; none establishes the executed target.
+  const direct = command.trim().match(/^(?:(?:node|node\.exe)(?:\s+--no-warnings)?\s+)?("[^"]+"|'[^']+'|[^\s"']+\.([cm]?js))$/i);
+  if (!direct) return null;
+  const raw = direct[1];
+  const quote = raw[0] === '"' || raw[0] === "'" ? raw[0] : null;
+  const token = quote ? raw.slice(1, -1) : raw;
+  if (!/\.[cm]?js$/i.test(token) || token.startsWith('-')) return null;
+  // A quoted path keeps literal punctuation. In bare command text, shell
+  // operators, globs, and a leading comment marker do not name a script.
+  if (!quote && (token.startsWith('#')
+    || token.includes('[') || token.includes(']')
+    || /[`;|&()<>{}*?]/.test(token.replace(/^\$\{HOME\}/, '$HOME')))) return null;
+  if (quote === '"' && (token.includes('`') || token.includes('$('))) return null;
+  return token;
 }
 
 function scriptCarriesFooter(file, fsImpl) {
@@ -166,27 +177,54 @@ function scriptChannel(token, { fsImpl, home }) {
   return scriptCarriesFooter(expanded, fsImpl) ? 'kit-footer' : 'custom';
 }
 
+function managedStatusLine(file, fsImpl) {
+  if (!file) return { state: 'absent' };
+  let managed;
+  try { managed = JSON.parse(fsImpl.readFileSync(file, 'utf8')); }
+  catch (error) { return { state: error?.code === 'ENOENT' ? 'absent' : 'unknown' }; }
+  if (!managed || typeof managed !== 'object' || Array.isArray(managed)) return { state: 'unknown' };
+  if (!Object.hasOwn(managed, 'statusLine')) return { state: 'absent' };
+  const line = managed.statusLine;
+  // A present null/false value is not a documented way to disable statusLine.
+  // Do not infer effective policy or fall through to a lower-precedence footer.
+  if (line == null || line === false) return { state: 'unknown' };
+  if (!line || typeof line !== 'object' || Array.isArray(line)
+    || (line.type !== undefined && line.type !== 'command')
+    || typeof line.command !== 'string' || !line.command.trim()) return { state: 'unknown' };
+  return { state: 'present', settings: managed };
+}
+
 /**
- * Classify the user-level Claude statusLine by whether it can feed the quota
- * tee: 'none' (no user-level statusLine), 'kit-footer' (its script carries the
+ * Classify the effective local managed/user Claude statusLine by whether it can
+ * feed the quota tee: 'none' (no statusLine), 'kit-footer' (its script carries the
  * footer), 'project-helper' (it runs each project's ruflo helper, so it depends
  * on the project), 'custom' (anything else: another script, an inline command,
- * a missing file), or 'unknown' (the settings file exists but cannot be read).
+ * a missing file), or 'unknown' (a relevant settings file cannot be read or
+ * interpreted). This does not observe managed-settings.d drop-ins, server,
+ * MDM, or SDK managed policy.
  *
- * @param {{ settingsFile?: string, fsImpl?: any, home?: string }} [o]
+ * @param {{ settingsFile?: string, managedSettingsFile?: string|null,
+ *           fsImpl?: any, home?: string, platform?: NodeJS.Platform }} [o]
  * @returns {'none'|'kit-footer'|'project-helper'|'custom'|'unknown'}
  */
 export function classifyClaudeTeeChannel({
-  settingsFile = claudeSettingsPath(), fsImpl = fs, home = os.homedir(),
+  settingsFile = claudeSettingsPath(), managedSettingsFile,
+  fsImpl = fs, home = os.homedir(), platform = process.platform,
 } = {}) {
-  let settings;
-  try { settings = JSON.parse(fsImpl.readFileSync(settingsFile, 'utf8')); }
-  catch (error) { return error?.code === 'ENOENT' ? 'none' : 'unknown'; }
+  const managedFile = managedSettingsFile === undefined
+    ? claudeManagedSettingsPath(platform) : managedSettingsFile;
+  const managed = managedStatusLine(managedFile, fsImpl);
+  if (managed.state === 'unknown') return 'unknown';
+  let settings = managed.settings;
+  if (!settings) {
+    try { settings = JSON.parse(fsImpl.readFileSync(settingsFile, 'utf8')); }
+    catch (error) { return error?.code === 'ENOENT' ? 'none' : 'unknown'; }
+  }
   const command = settings?.statusLine?.command;
   if (typeof command !== 'string' || !command.trim()) return 'none';
-  const classes = statusLineScripts(command).map((token) => scriptChannel(token, { fsImpl, home }));
-  if (classes.includes('kit-footer')) return 'kit-footer';
-  return classes.includes('project-helper') ? 'project-helper' : 'custom';
+  if (PROJECT_HELPER_COMMANDS.has(command.trim())) return 'project-helper';
+  const script = directStatusLineScript(command);
+  return script ? scriptChannel(script, { fsImpl, home }) : 'custom';
 }
 
 // ── Codex (app-server) ──────────────────────────────────────────────────────
@@ -461,15 +499,19 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
  * @param {{ now?: number, claudeFile?: string, codexCacheFile?: string, ttlMs?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string,
  *           enabledHosts?: Record<string, boolean>,
- *           claudeSettingsFile?: string, home?: string,
+ *           claudeSettingsFile?: string, claudeManagedSettingsFile?: string|null,
+ *           home?: string,
  *           codexPresence?: () => 'found'|'not-found'|'unconfirmed' }} [o]
  */
 export async function readLimits({
   now = Date.now(), claudeFile, codexCacheFile, ttlMs, timeoutMs, spawnImpl, bin, enabledHosts,
-  claudeSettingsFile, home, codexPresence,
+  claudeSettingsFile, claudeManagedSettingsFile, home, codexPresence,
 } = {}) {
   const claude = readClaudeLimits({ file: claudeFile ?? claudeLimitsFile() });
-  const claudeChannel = classifyClaudeTeeChannel({ settingsFile: claudeSettingsFile ?? claudeSettingsPath(), home });
+  const claudeChannel = classifyClaudeTeeChannel({
+    settingsFile: claudeSettingsFile ?? claudeSettingsPath(),
+    managedSettingsFile: claudeManagedSettingsFile, home,
+  });
   const presence = (codexPresence ?? (() => recordedHostPresence('codex', { now })))();
   const { limits: codex, unavailable: codexUnavailable } = presence === 'found'
     ? await collectCodexLimitsDetailed({

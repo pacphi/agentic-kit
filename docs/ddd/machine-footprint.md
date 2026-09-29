@@ -646,15 +646,22 @@ declarations and unclassified sightings. `countBasis` distinguishes transcript f
 sessions, recovered-project sightings and mixed observations; a recovered directory is not one
 verified session.
 
-Imported session copies are not sightings. A Codex rollout stamped `external-import-turn-*` is a
-Claude Code transcript that the ChatGPT desktop app imported; it is a copy, and the original Claude
-Code session is counted where its transcript still exists. A folder that only an import names is
-therefore not a project. Discovery skips it before reading its cwd, so it adds no project, host or Session
-origin, and counts it in `importedExcluded` (per host scan and in total). `complete` is unaffected.
+Updated 2026-09-29: imported Codex turns are not sightings. Pure copies add no project, host or
+surface and count in `importedExcluded`; proven native activity in a mixed file can establish a
+sighting and counts in `importedMixed`. Bounded observations that cannot settle ownership count
+in `importedUnresolved` and make coverage incomplete. The budgets and malformed-record behavior
+are specified in [ADR-0052](../adr/0052-codex-usage-attribution.md#3-sessions-codex-imported-from-claude-code-are-not-codex-sessions).
 
-**Proposed change ([ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md)).**
-`sessionOrigins` is to be replaced by session surface and initiator, derived from the same declared
-fields but keeping every raw value.
+Accepted [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md) adds
+`sessionSurfaces` alongside legacy `sessionOrigins`. Claude census counts declared session IDs,
+excluding subagent and bridge-only records; recovery has zero session weight. Raw detail retains
+at most 16 validated tokens per field per classification group and reports truncation. Cloud
+surfaces appear only with observations; dedicated Cowork storage remains uncovered. Old coarse
+Codex desktop origins cannot identify an app mode. Footprint schema remains 8.
+
+Runtime distinguishes Claude Desktop and the ChatGPT desktop app as applications with no host.
+Their bundled CLI sessions require observed process attribution; Codex app-server is a service.
+Application presence alone does not establish an active conversation or historical provider.
 
 `project-identity.mjs` relates directories through canonical Git metadata and, for linked worktrees,
 a verified common directory plus backlink. It preserves unknown association when evidence is

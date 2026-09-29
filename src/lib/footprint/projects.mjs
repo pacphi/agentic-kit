@@ -417,6 +417,7 @@ function missingProject(project, reason, presence = 'absent') {
     source: project.source ?? null,
     repository: project.repository ?? null,
     sessionOrigins: project.sessionOrigins ?? null,
+    sessionSurfaces: project.sessionSurfaces ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
     remote: { status: 'unknown', name: null, raw: null, hostname: null, host: null, slug: null, webUrl: null, reason },
     loc: locNotMeasured(reason),
@@ -449,7 +450,7 @@ function notify(onProgress, payload) {
  * attribution (which hosts saw this project), never as a measurement.
  *
  * @param {{ path: string, label: string, source?: string, hosts?: string[], remote?: object,
- *   repository?: object, sessionOrigins?: Array<{origin:string,sessions:number,evidence?:string[]}> }} project
+ *   repository?: object, sessionSurfaces?: object[], sessionOrigins?: Array<{origin:string,sessions:number,evidence?:string[]}> }} project
  * @param {{ walk?: Function, limits?: object, detect?: Function, loc?: boolean,
  *           asOf?: number|null, fsImpl?: typeof fs }} [options]
  *   `loc: false` skips the stack pass entirely — the expensive part of a project
@@ -567,6 +568,7 @@ export function measureProject(project, {
     source: project.source ?? null,
     repository: project.repository ?? null,
     sessionOrigins: project.sessionOrigins ?? null,
+    sessionSurfaces: project.sessionSurfaces ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
     // collectProjects preflights the remote to choose the stated hosted-repo
     // population. Reuse that exact evidence instead of opening .git/config a
@@ -684,15 +686,15 @@ function aggregateUnrecognized(rows) {
   };
 }
 
-/** The KPI counts a discovery payload carries; absent fields read as zero, so
- *  an older payload (no `importedExcluded`) keeps rendering as it did. */
+/** Import fields absent from an old discovery payload remain unknown. */
 function payloadCounts(payload) {
   return {
     everSeen: payload?.everSeen ?? 0,
     onDisk: payload?.onDisk ?? 0,
     gitRepos: payload?.gitRepos ?? 0,
     unresolved: payload?.unresolved ?? 0,
-    importedExcluded: payload?.importedExcluded ?? 0,
+    importedExcluded: payload?.importedExcluded ?? null,
+    importedMixed: payload?.importedMixed ?? null, importedUnresolved: payload?.importedUnresolved ?? null,
     complete: payload?.complete !== false,
     method: payload?.method ?? null,
     sources: payload?.sources ?? null,
@@ -804,7 +806,8 @@ function buildProjectsSection({ asOf, out, eligible, selected, excluded, counts,
     onDisk: kpi(counts?.onDisk ?? 0),
     gitRepos: kpi(counts?.gitRepos ?? 0),
     unresolved: counts?.unresolved ?? 0,
-    importedExcluded: counts?.importedExcluded ?? 0,
+    importedExcluded: counts?.importedExcluded ?? null,
+    importedMixed: counts?.importedMixed ?? null, importedUnresolved: counts?.importedUnresolved ?? null,
     method: counts?.method ?? null,
     sources: counts?.sources ?? null,
     scanned: out.length,

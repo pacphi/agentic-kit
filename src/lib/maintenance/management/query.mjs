@@ -267,14 +267,23 @@ function channelValues(placement, index) {
   return placement.versions?.channel ? [placement.versions.channel] : [];
 }
 
+// Existing saved filters address legacy origin membership. Keep the coarse
+// origin keys independently labelled even when a refresh adds precise surfaces.
+function sessionOriginFacetValues(placement) {
+  if (!placement.projectId) return [];
+  const legacy = (placement.sessionOrigins ?? []).filter((entry) => entry.sessions > 0).map((entry) => entry.origin);
+  if (!Array.isArray(placement.sessionSurfaces)) return [...new Set(placement.sessionOrigins?.length ? legacy : ['unknown'])];
+  return [...new Set([...placement.sessionSurfaces.filter((entry) => entry.sessions > 0).map((entry) => entry.surface === 'unknown' ? 'surface-unknown' : entry.surface),
+    ...(placement.sessionOrigins?.length ? legacy : ['unknown'])])];
+}
+
 const FACET_EXTRACTORS = Object.freeze({
   family: (placement, index) => [familyFor(placement, index)],
   scope: (placement) => [placement.administrativeScope],
   environment: (placement) => [placement.environmentId],
   project: (placement) => (placement.projectId ? [placement.projectId] : []),
   projectType: (placement) => placement.projectId ? [PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown'] : [],
-  sessionOrigin: (placement) => placement.projectId
-    ? [...new Set(placement.sessionOrigins?.length ? placement.sessionOrigins.map((entry) => entry.origin) : ['unknown'])] : [],
+  sessionOrigin: sessionOriginFacetValues,
   kind: (placement) => [placement.kind],
   consumer: (placement) => (placement.consumerHosts ?? []).filter((host) => ['claude', 'codex', 'opencode'].includes(host)),
   adapter: (placement) => [...new Set([...(placement.consumerHosts ?? []), ...(placement.kind === 'host-adapter' ? [placement.hostNamespace] : [])].filter((host) => typeof host === 'string' && host && !['claude', 'codex', 'opencode', 'agentic-kit'].includes(host)))],
@@ -406,7 +415,7 @@ function buildPlacementRow(placement, index) {
     ...(placement.projectId ? { projectKind: PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown' } : {}),
     ...(placement.projectId ? { repositoryId: placement.repositoryId ?? null, repositoryLabel: placement.repositoryLabel ?? null,
       repositoryEvidence: placement.repositoryEvidence ?? null, repositoryObservedAt: placement.repositoryObservedAt ?? null,
-      sessionOrigins: placement.sessionOrigins ?? [] } : {}),
+      sessionOrigins: placement.sessionOrigins ?? [], sessionSurfaces: placement.sessionSurfaces ?? null } : {}),
     displayName: placement.displayName,
     ...(index.resourcesById.get(placement.resourceId)?.installationSource ? { installationSource: index.resourcesById.get(placement.resourceId).installationSource } : {}),
     ...(description ? { description } : {}),

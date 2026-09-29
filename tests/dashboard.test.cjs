@@ -1297,7 +1297,7 @@ async function main() {
       const r = await get(uiSrv.url);
       contains(r.body, 'var prov=d.byHost||{}');
       contains(r.body, 'var host=reportedIdentity(sx.host)||"unknown"');
-      contains(r.body, 'var provider=reportedIdentity(sx.provider)');
+      contains(r.body, 'var provider=sessionProviderPresentation(sx).label');
       contains(r.body, 'Execution host: ');
       contains(r.body, 'Inference provider: ');
       contains(r.body, '"inference provider"');

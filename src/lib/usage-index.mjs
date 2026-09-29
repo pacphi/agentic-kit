@@ -5,9 +5,11 @@
 //   ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl
 //
 // The corpus is large (1.3 GB on the reference machine) and a finished
-// transcript never changes again, so every file is parsed AT MOST ONCE: the
+// transcript never changes again, so parsing is reused within its local calendar
+// context: the
 // derived per-session record is cached in ~/.config/agentic-kit/usage-index.json
-// keyed by (path, mtime, size). A warm refresh only stats.
+// keyed by (path, mtime, size, localTimeContext). A warm refresh stats source files and validates
+// cached Claude message claims before using them for cross-file accounting.
 //
 // Three rules this module exists to enforce:
 //   1. Engaged time is the UNION of ACTIVE intervals, never the sum of spans.
@@ -36,12 +38,16 @@
 // consumer's existing import path expects them from here.
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
 import { readClaudeWindowLog, statClaudeWindowLedger } from './claude-window-ledger.mjs';
 import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
+import { selectOpencodeSource } from './usage-opencode-source.mjs';
+import { reusableOpencodeObservations } from './usage-opencode-cache.mjs';
+import { opencodeStorageHealth } from './usage-opencode-health.mjs';
 import {
-  defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
+  listSessionsResult as listOpencodeSessionsResult,
   parseSession as parseOpencodeSession, sessionExistsResult as opencodeSessionExistsResult,
   usageNotReportedWarnings,
 } from './usage-opencode.mjs';
@@ -50,6 +56,7 @@ import {
   MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit,
 } from './usage-telemetry.mjs';
 import { parseClaude, parseCodex } from './usage-parsers.mjs';
+import { reconcileClaudeMessages, validClaudeMessageClaims } from './usage-claude-dedup.mjs';
 import { openCodexRollout } from './codex-rollout-reader.mjs';
 import { maskSecrets, applyCodexLedger, aggregate, sessionPayload } from './usage-aggregate.mjs';
 
@@ -183,9 +190,38 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // across providers (rows now carry `provider`); and no mark on completed
 // responses whose provider reported no tokens (`tokensUnreported`). None can be
 // corrected in place, so every cached OpenCode record re-parses.
-export const SCHEMA_VERSION = 25;
+// The unreleased v26 migration also records per-turn imported exclusion evidence.
+// A v26 Claude entry written before cost-state support lacks `claudeCostState`;
+// reparse that entry in place rather than bumping the unreleased schema again.
+// Claude record coverage is also added within v26: entries without its count-only
+// parseStats reparse, so a legacy cache never manufactures a zero unknown count.
+export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
+// OpenCode cost trust and compaction/reconciliation interpretation changed
+// within schema 26. This entry marker requires both semantics, independently
+// of source identity and the separately enforced local-calendar context.
+const OPENCODE_PARSE_SEMANTICS = 'cost-trust-v2-observations-v1';
+const compatibleOpencodeCache = (candidate, entry) => candidate.provider !== 'opencode'
+  || (entry?.parseSemantics === OPENCODE_PARSE_SEMANTICS
+    && entry?.sourceIdentity === candidate.sourceIdentity && !!candidate.sourceIdentity);
+
+/** Local buckets depend on the full zone's historical rules, not today's offset.
+ * Include the runtime rule-data version; an upgrade can change past buckets.
+ * Unknown zones are deliberately non-reusable, including legacy v26 entries. */
+function localTimeContext() {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!zone) return null;
+    return JSON.stringify([zone, process.versions.tz ?? null, process.versions.icu ?? null]);
+  } catch { return null; }
+}
+function compatibleLocalTime(entry, context) {
+  return context !== null && entry?.localTimeContext === context;
+}
 
 const DAY_MS = 86_400_000;
+// Dashboard windows stop at 365 days. One displayed window plus its equal
+// previous window is therefore bounded at 730 days of Claude identity reads.
+const MAX_CLAUDE_IDENTITY_DAYS = 730;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
 // see the carry-forward pruning comment in scan() below.
 const KEEP_MS = 366 * DAY_MS;
@@ -268,9 +304,10 @@ function rootHealth(dir) {
 
 function emptyCodexDiagnostics() {
   return {
-    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0,
-    filesWithTokens: 0, filesWithResponses: 0,
-    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
+    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0, importedMixed: 0, importedTurnsExcluded: 0, importAmbiguousRecords: 0,
+    importOwnershipIncompleteFiles: 0, importedTurnCountIncompleteFiles: 0,
+    filesWithTokens: 0, filesWithResponses: 0, zeroResponseUsageFiles: 0, zeroResponseUnsupportedFiles: 0,
+    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0, totalOnlyTokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0, clippedLines: 0, warnings: [],
   };
 }
@@ -283,6 +320,7 @@ function addCodexParseDiagnostics(target, stats) {
   target.legacyEvents += stats.legacyEvents;
   target.itemCompletedEvents += stats.itemCompletedEvents;
   target.tokenCountEvents += stats.tokenCountEvents;
+  target.totalOnlyTokenCountEvents += stats.totalOnlyTokenCountEvents ?? 0;
   target.prompts += stats.prompts;
   target.responses += stats.responses;
   target.clippedLines += stats.clippedLines ?? 0;
@@ -300,10 +338,10 @@ function addCodexParseDiagnostics(target, stats) {
 
 function finalizeCodexHealth(root, diagnostics) {
   const warnings = [];
-  const tokenFiles = diagnostics.filesWithTokens;
   const responseFiles = diagnostics.filesWithResponses;
-  if (tokenFiles > 0 && responseFiles === 0) warnings.push('zero-response-yield');
-  else if (tokenFiles > responseFiles) warnings.push('partial-response-yield');
+  if (diagnostics.zeroResponseUnsupportedFiles > 0 && responseFiles === 0) warnings.push('zero-response-yield');
+  else if (diagnostics.zeroResponseUnsupportedFiles > 0) warnings.push('partial-response-yield');
+  if (diagnostics.totalOnlyTokenCountEvents > 0) warnings.push('total-only-token-count');
   if (Object.keys(diagnostics.unknownItemTypes).length || diagnostics.unknownItemTypeOverflow > 0) {
     warnings.push('unknown-item-types');
   }
@@ -312,11 +350,13 @@ function finalizeCodexHealth(root, diagnostics) {
   if (diagnostics.unparsedFiles > 0) warnings.push('unparsed-rollouts');
   if (diagnostics.clippedLines > 0) warnings.push('oversized-lines-clipped');
   diagnostics.warnings = warnings;
-  const hasYieldWarning = warnings.includes('zero-response-yield') || warnings.includes('partial-response-yield');
-  const status = root.status === 'ok' && hasYieldWarning
+  const hasUsageWarning = warnings.includes('zero-response-yield') || warnings.includes('partial-response-yield')
+    || warnings.includes('total-only-token-count');
+  const status = root.status === 'ok' && hasUsageWarning
     ? 'degraded' : root.status;
   const reason = status === 'degraded' && root.status === 'ok'
-    ? (warnings.includes('zero-response-yield') ? 'parse-yield-zero' : 'parse-yield-partial') : root.reason;
+    ? (warnings.includes('zero-response-yield') ? 'parse-yield-zero'
+      : warnings.includes('partial-response-yield') ? 'parse-yield-partial' : 'usage-total-only') : root.reason;
   return { ...root, status, reason, diagnostics };
 }
 
@@ -332,6 +372,42 @@ function attachTelemetryHealth(health, common, diagnostics = health.diagnostics)
       common: finalizeTelemetryDiagnostics(common),
     },
   };
+}
+
+function claudeParseHealth(root, common) {
+  if (root.status !== 'ok' || common.unitsSeen === common.unitsParsed) return root;
+  return { ...root, status: 'degraded', reason: 'transcript-parse-incomplete' };
+}
+
+const CLAUDE_RECORD_COUNTERS = ['knownHandledRecords', 'knownIgnoredRecords',
+  'unknownRecords', 'invalidTypeRecords', 'malformedRecords'];
+function validClaudeRecordStats(stats) {
+  return stats && typeof stats === 'object' && !Array.isArray(stats)
+    && Object.keys(stats).length === CLAUDE_RECORD_COUNTERS.length
+    && CLAUDE_RECORD_COUNTERS.every((key) => Number.isSafeInteger(stats[key]) && stats[key] >= 0);
+}
+function emptyClaudeRecordDiagnostics() {
+  return { knownHandledRecords: 0, knownIgnoredRecords: 0, unknownRecords: 0,
+    invalidTypeRecords: 0, malformedRecords: 0 };
+}
+function addClaudeRecordDiagnostics(target, stats, provider) {
+  if (provider !== 'claude' || !validClaudeRecordStats(stats)) return;
+  for (const key of CLAUDE_RECORD_COUNTERS) target[key] += stats[key];
+}
+function claudeRecordCoverage(root, common, counts) {
+  const incomplete = root.status !== 'ok' || common.unitsSeen !== common.unitsParsed
+    || counts.unknownRecords > 0 || counts.invalidTypeRecords > 0 || counts.malformedRecords > 0;
+  return { ...counts, coverage: root.status === 'absent' || (root.status === 'ok' && common.unitsSeen === 0)
+    ? 'not-observed' : common.unitsParsed === 0 ? 'unknown' : incomplete ? 'incomplete' : 'complete' };
+}
+function finalizeClaudeRecordHealth(root, common, counts) {
+  const base = attachTelemetryHealth(claudeParseHealth(root, common), common);
+  const records = claudeRecordCoverage(root, common, counts);
+  const incompleteRecords = root.status === 'ok' && common.unitsSeen === common.unitsParsed
+    && records.coverage === 'incomplete';
+  return { ...base,
+    ...(incompleteRecords ? { status: 'degraded', reason: 'transcript-record-coverage-incomplete' } : {}),
+    diagnostics: { ...base.diagnostics, records } };
 }
 
 function defaultRoots() {
@@ -467,7 +543,8 @@ function parseCodexFile(entry, sink, limits) {
 function parseFile(entry, sink = {}, limits = {}) {
   if (entry.provider === 'opencode') {
     try {
-      const parsed = parseOpencodeSession({ dbFile: entry.dbFile, id: entry.id });
+      const parsed = parseOpencodeSession({ dbFile: entry.dbFile, id: entry.id,
+        maxSessionBytes: limits.maxSessionBytes, maxSessionRows: limits.maxSessionRows });
       // Title hygiene matches the JSONL parsers: the cached index lands on
       // disk, so the same secrets mask applies here.
       if (parsed?.session) parsed.session.title = maskSecrets(parsed.session.title);
@@ -589,6 +666,7 @@ function scanKey(o = {}) {
   return JSON.stringify([
     Number(o.days) || 14, Number(o.lookbackDays) || 0,
     !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '', o.claudeWindowConfigDir || '',
+    localTimeContext(), selectOpencodeSource({ roots: o.roots }),
   ]);
 }
 
@@ -612,11 +690,14 @@ function notify(onProgress, payload) {
  *           pair this with `previous: true` (below) to actually get the
  *           older records back out, via `previous.totals`/`previous.rhythm`,
  *           rather than by hand-splitting a widened `sessions[]`. Undefined
- *           (default) behaves exactly as `days` alone: no widening.
+ *           (default) still discovers Claude files through the equal-length
+ *           preceding identity window; other hosts retain the `days` cutoff.
  * @property {boolean} [previous]   also have `aggregate` project the
  *           equal-length window immediately before the displayed one (see
- *           usage-aggregate.mjs's `previousWindow`); needs `lookbackDays` set
- *           wide enough for those older records to have been read at all.
+ *           usage-aggregate.mjs's `previousWindow`); Claude's equal-length
+ *           predecessor is acquired for identity accounting even without an
+ *           explicit lookback, while other hosts need `lookbackDays` set wide
+ *           enough for their older records to have been read.
  *           Forwarded to `aggregate`'s own `previous` option unchanged.
  * @property {boolean} [prompts]    also have `aggregate` build the prompt
  *           repetition projection (`agg.promptPatterns` — recurring clusters,
@@ -634,9 +715,10 @@ function notify(onProgress, payload) {
  *           statusline's `claude-context-windows/` ledger (tests). Unset reads
  *           the real config dir only for default-root scans; overridden `roots`
  *           read no ledger. `null` disables ledger pairing.
- * @property {{streamAboveBytes?: number, chunkBytes?: number, maxLineBytes?: number}} [readLimits]
+ * @property {{streamAboveBytes?: number, chunkBytes?: number, maxLineBytes?: number, maxSessionBytes?: number, maxSessionRows?: number}} [readLimits]
  *           override where a Codex rollout switches from a whole-string read to
- *           the bounded streaming reader, and that reader's chunk/line limits (tests)
+ *           the bounded streaming reader, its chunk/line limits, and OpenCode session
+ *           acquisition byte/row limits (tests)
  * @property {number} [now]         override "now" (tests)
  * @property {number} [maxAgeMs]    readIndex only: memo TTL
  * @property {object|null} [codexState] override the Codex SQLite thread ledger
@@ -671,19 +753,23 @@ export async function buildIndex(o = {}) {
  *  with defaults — its mere presence (vs `undefined`) is what makes an
  *  override hermetic; see the codex ledger comment below. */
 function discoverOpencodeSource(rawRoots, cutoff) {
-  const ocDb = rawRoots === undefined ? defaultOpencodeDbPath() : (rawRoots?.opencode ?? null);
-  if (!ocDb || !fs.existsSync(ocDb)) return { health: { status: 'absent', reason: null }, candidates: [], ocDb };
+  const selection = selectOpencodeSource({ roots: rawRoots });
+  const ocDb = selection.dbFile;
+  const storageCoverage = opencodeStorageHealth(selection);
+  const sourceHealth = (health) => ({ ...health, storageCoverage });
+  if (!ocDb) return { health: sourceHealth(selection.health), candidates: [], ocDb };
+  if (!fs.existsSync(ocDb)) return { health: sourceHealth({ status: 'absent', reason: null }), candidates: [], ocDb };
   const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
   if (!listed.ok) {
     const health = listed.error.kind === 'absent'
       ? { status: 'absent', reason: 'absent' } : { status: 'degraded', reason: listed.error.kind };
-    return { health, candidates: [], ocDb };
+    return { health: sourceHealth(health), candidates: [], ocDb };
   }
   const candidates = listed.value.map((e) => ({
-    file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
+    file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb, sourceIdentity: selection.sourceIdentity,
     stat: { mtimeMs: e.mtimeMs, size: e.size, updatedMs: e.updatedMs },
   }));
-  return { health: { status: 'ok', reason: null }, candidates, ocDb };
+  return { health: sourceHealth(selection.health), candidates, ocDb };
 }
 
 /** Codex's own per-file bookkeeping for one scan candidate: file counts, the
@@ -695,8 +781,26 @@ function discoverOpencodeSource(rawRoots, cutoff) {
 function recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure }) {
   codexDiagnostics.files++;
   if (cacheHit) codexDiagnostics.cachedFiles++;
-  if (session?.imported === true) { codexDiagnostics.importedExcluded++; return false; }
-  if (session) { addCodexParseDiagnostics(codexDiagnostics, parseStats); return true; }
+  const imports = session?.importEvidence;
+  codexDiagnostics.importedTurnsExcluded += imports?.importedTurns ?? 0;
+  if (imports?.ownershipComplete === false) codexDiagnostics.importOwnershipIncompleteFiles++;
+  if (imports?.importedTurnCountComplete === false) codexDiagnostics.importedTurnCountIncompleteFiles++;
+  codexDiagnostics.importAmbiguousRecords += imports?.ambiguousRecords ?? 0;
+  if (session?.imported === true) {
+    codexDiagnostics.importedExcluded++;
+    codexDiagnostics.clippedLines += parseStats?.clippedLines ?? 0;
+    return false;
+  }
+  if (imports) codexDiagnostics.importedMixed++;
+  if (session) {
+    addCodexParseDiagnostics(codexDiagnostics, parseStats);
+    if (!session.responses && parseStats?.tokenCountEvents > 0) {
+      if (session.usage?.some((row) => row.input > 0 || row.output > 0 || row.cacheRead > 0 || row.cacheWrite > 0))
+        codexDiagnostics.zeroResponseUsageFiles++;
+      else codexDiagnostics.zeroResponseUnsupportedFiles++;
+    }
+    return true;
+  }
   codexDiagnostics.unparsedFiles++;
   const reason = failure.reason ?? 'parse-error';
   codexDiagnostics.unparsedReasons[reason] = (codexDiagnostics.unparsedReasons[reason] ?? 0) + 1;
@@ -739,35 +843,60 @@ function withWindowLedger(entry, windowConfigDir) {
   return { ...entry, windowConfigDir, windowStat: statClaudeWindowLedger(windowConfigDir, entry.id) };
 }
 
+function compatibleCostStateCache(c, hit) {
+  return c.provider !== 'claude' || (Object.hasOwn(hit.session ?? {}, 'claudeCostState')
+    && Object.hasOwn(hit.session ?? {}, 'claudeMessageCoverage')
+    && validClaudeRecordStats(hit.parseStats)
+    && validClaudeMessageClaims(hit.session)
+    && (!hit.session.claudeCostState || Object.hasOwn(hit.session.claudeCostState, 'startMs')));
+}
+
+function parseValidatedCandidate(c, failure, readLimits) {
+  const parsed = parseFile(c, failure, readLimits);
+  const session = parsed?.session ?? null;
+  // A source with malformed accounting cannot enter the cache or global
+  // reconciliation, even when the parser could salvage other fields.
+  return { session: c.provider === 'claude' && session && !validClaudeMessageClaims(session) ? null : session,
+    parseStats: parsed?.parseStats ?? null, observationFingerprint: parsed?.observationFingerprint ?? null };
+}
+
+function withClaudeIdentityEligibility(session, candidate, cutoff) {
+  if (candidate.provider !== 'claude') return session;
+  return { ...session,
+    claudeSourceKey: createHash('sha256').update(candidate.file).digest('hex'),
+    claudeIdentityEligible: Number.isFinite(candidate.stat.mtimeMs) && candidate.stat.mtimeMs >= cutoff
+      && Number.isFinite(session.end) && session.end >= cutoff };
+}
+
 /** Parse (or reuse the cached parse of) one scan candidate, updating the
  *  common cross-host telemetry diagnostics and codex's extra per-file
  *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
  *  bookkeeping — which is genuinely provider-specific (codex tracks file
  *  counts and yield diagnostics no other source has) — is not inlined into
  *  the generic scan loop's own complexity. */
-function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}) {
+function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, claudeRecordDiagnostics, readLimits = {}, timeContext = localTimeContext()) {
   const hit = cache?.entries?.[c.file];
   // `updatedMs` exists only on OpenCode candidates (its rows are rewritten in
   // place, so created-time and count cannot see a finished turn); file-backed
-  // sources key on mtime/size alone.
+  // sources key on mtime/size plus the local calendar context.
   const updated = c.stat.updatedMs === undefined ? {} : { upd: c.stat.updatedMs };
-  const cacheHit = !!(hit && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
+  const cacheHit = !!(compatibleLocalTime(hit, timeContext) && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
     && hit.upd === updated.upd
     && ledgerStillValid(hit, c.windowStat)
+    && compatibleCostStateCache(c, hit)
+    && compatibleOpencodeCache(c, hit)
+    && reusableOpencodeObservations(c, hit, readLimits)
     && (c.provider !== 'codex' || hit.parseStats));
-  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null) };
-  let session = cacheHit ? hit.session : null;
-  let parseStats = cacheHit ? hit.parseStats : null;
+  const key = { localTimeContext: timeContext, mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null),
+    ...(c.provider === 'opencode' ? { parseSemantics: OPENCODE_PARSE_SEMANTICS, sourceIdentity: c.sourceIdentity } : {}) };
   const failure = {};
-  if (!session) {
-    const parsed = parseFile(c, failure, readLimits);
-    session = parsed ? parsed.session : null;
-    parseStats = parsed?.parseStats ?? null;
-  }
+  const { session, parseStats, observationFingerprint } = cacheHit && hit.session
+    ? hit : parseValidatedCandidate(c, failure, readLimits);
   const counted = c.provider !== 'codex'
     || recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure });
   if (counted && commonDiagnostics[c.provider]) {
     recordTelemetryUnit(commonDiagnostics[c.provider], session);
+    addClaudeRecordDiagnostics(claudeRecordDiagnostics, parseStats, c.provider);
     if (c.provider === 'codex') {
       addTelemetryDiagnostics(commonDiagnostics.codex, {
         unknownKinds: parseStats?.unknownItemTypes,
@@ -775,7 +904,11 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
       });
     }
   }
-  return { key, session, parseStats };
+  return { key: observationCacheKey(c, key, observationFingerprint), session, parseStats };
+}
+
+function observationCacheKey(candidate, key, observationFingerprint) {
+  return candidate.provider === 'opencode' ? { ...key, observationFingerprint } : key;
 }
 
 /** Carry forward cached entries outside the window whose source still exists,
@@ -796,10 +929,14 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
  *  Mutates `entries` and `records` in place; returns the possibly-updated
  *  opencode health (a degraded existence check discovered mid-loop must
  *  still be visible to the NEXT entry's check and to the final report). */
-function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth }) {
+function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth, attemptedFiles, timeContext }) {
   if (!cache?.entries) return opencodeHealth;
+  let legacyCacheEntriesExcluded = 0;
+  let timezoneCacheEntriesExcluded = 0;
   for (const [file, e] of Object.entries(cache.entries)) {
-    if (entries[file] || !e?.session) continue;
+    // A candidate that failed reparsing must not be revived just because its
+    // path still stats (it may now be unreadable or no longer be a file).
+    if (entries[file] || attemptedFiles.has(file) || !e?.session) continue;
     const lastActivity = e.session.end ?? e.session.start;
     // No timestamp at all → can't judge age; keep it rather than guess.
     if (lastActivity != null && now - lastActivity > KEEP_MS) continue;
@@ -811,9 +948,15 @@ function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb,
     if (!result) continue;
     entries[file] = result.entry;
     opencodeHealth = result.health;
-    if (result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) records.push(e.session);
+    if (!result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) legacyCacheEntriesExcluded++;
+    if (result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) {
+      // Retain the original marker so a degraded source cannot launder
+      // old buckets into the new timezone on the following refresh.
+      if (compatibleLocalTime(e, timeContext)) records.push(e.session);
+      else timezoneCacheEntriesExcluded++;
+    }
   }
-  return opencodeHealth;
+  return { ...opencodeHealth, legacyCacheEntriesExcluded, timezoneCacheEntriesExcluded };
 }
 
 /** The opencode half of carryForwardCachedEntries — split out to keep both
@@ -822,18 +965,22 @@ function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb,
  *  caller to apply; see carryForwardCachedEntries for why a kept entry is
  *  pushed back into `records` (unlike claude/codex's carry-forward). */
 function carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb) {
-  const dbFile = e.dbFile ?? ocDb;
+  if (!ocDb) return null;
+  const selection = selectOpencodeSource({ roots: { opencode: ocDb } });
+  if (!selection.sourceIdentity || e.sourceIdentity !== selection.sourceIdentity) return null;
+  const dbFile = ocDb;
   const exists = opencodeHealth.status === 'degraded'
     ? null
     : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
   if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
-    return { entry: { ...e, dbFile }, health: opencodeHealth, pushRecord: true };
+    return { entry: { ...e, dbFile }, health: opencodeHealth,
+      pushRecord: compatibleOpencodeCache({ provider: 'opencode', sourceIdentity: selection.sourceIdentity }, e) };
   }
   if (exists && !exists.ok && exists.error.kind !== 'absent') {
     return {
       entry: { ...e, dbFile },
-      health: { status: 'degraded', reason: exists.error.kind },
-      pushRecord: true,
+      health: { ...opencodeHealth, status: 'degraded', reason: exists.error.kind },
+      pushRecord: compatibleOpencodeCache({ provider: 'opencode', sourceIdentity: selection.sourceIdentity }, e),
     };
   }
   return null;
@@ -871,35 +1018,44 @@ async function scan(o = {}) {
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
   const cacheFile = cachePath ?? defaultCachePath();
-  // Widened when the caller passes lookbackDays (a server wanting a
-  // `previous`-window projection, e.g.) — every DISCOVERY/parse use below
-  // (candidates, opencode listing, carry-forward) shares this ONE value, so
-  // widening it here is the entire discovery-side effect. It does NOT reach
-  // `aggregate`'s own cutoff below — see displayCutoff — so the CURRENT
-  // window's `sessions`/`totals` never silently widen with it; only
-  // `aggregate`'s `previous` projection (when requested) reads the extra
-  // records this pulls in. Unset, `lookbackDays ?? days` is exactly `days` —
-  // today's behavior, unchanged.
+  // The display and its equal-length comparison need ONE Claude identity
+  // pool even if the caller does not request the comparison. This fixed pool
+  // cannot depend on `previous` or an explicit, deeper `lookbackDays`, or a
+  // toggle would elect a different owner for the same message. Only Claude
+  // discovery pays the additional read; other hosts retain their original
+  // cutoff. The 730-day ceiling covers the dashboard's supported 365-day
+  // display+comparison maximum and is reported as a cap for wider callers.
   const cutoff = now - (lookbackDays ?? days) * DAY_MS;
+  const requestedDays = Number(days);
+  const identityDays = Math.min(MAX_CLAUDE_IDENTITY_DAYS,
+    2 * Math.max(1, Number.isFinite(requestedDays) ? requestedDays : 14));
+  const identityCutoff = now - identityDays * DAY_MS;
+  const claudeCutoff = Math.min(cutoff, identityCutoff);
 
   // Primary transcript roots: read once at root level (cheap — not the
   // recursive per-file walk listClaude/listCodex still do below).
   const claudeHealth = rootHealth(r.claude);
   const codexHealth = rootHealth(r.codex);
   const windowConfigDir = resolveWindowConfigDir(o, roots);
-  const candidates = [...listClaude(r.claude), ...listCodex(r.codex)]
+  const claudeCandidates = listClaude(r.claude)
     .map((e) => withWindowLedger({ ...e, stat: statSafe(e.file) }, windowConfigDir))
+    .filter((e) => e.stat && e.stat.mtimeMs >= claudeCutoff);
+  const codexCandidates = listCodex(r.codex)
+    .map((e) => ({ ...e, stat: statSafe(e.file) }))
     .filter((e) => e.stat && e.stat.mtimeMs >= cutoff);
+  const candidates = [...claudeCandidates, ...codexCandidates];
 
   const opencodeSource = discoverOpencodeSource(roots, cutoff);
   let opencodeHealth = opencodeSource.health;
   const ocDb = opencodeSource.ocDb;
   candidates.push(...opencodeSource.candidates);
 
+  const timeContext = localTimeContext();
   const cache = force ? null : readCache(cacheFile);
   const entries = {};
   const records = [];
   const codexDiagnostics = emptyCodexDiagnostics();
+  const claudeRecordDiagnostics = emptyClaudeRecordDiagnostics();
   const commonDiagnostics = {
     claude: emptyTelemetryDiagnostics(),
     codex: emptyTelemetryDiagnostics(),
@@ -910,27 +1066,28 @@ async function scan(o = {}) {
 
   notify(onProgress, { scanned: 0, total, phase: 'scan' });
   for (const c of candidates) {
-    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits);
+    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics, claudeRecordDiagnostics, readLimits, timeContext);
     if (session) {
       entries[c.file] = {
         ...key, session,
         ...(parseStats ? { parseStats } : {}),
         ...(c.dbFile ? { dbFile: c.dbFile } : {}),
       };
-      if (!session.imported) records.push(session);
+      if (!session.imported) records.push(withClaudeIdentityEligibility(session, c, identityCutoff));
     }
     scanned++;
     if (scanned % 100 === 0) notify(onProgress, { scanned, total, phase: 'scan' });
   }
 
   opencodeHealth = carryForwardCachedEntries(cache, entries, records, {
-    now, cutoff, ocDb, opencodeHealth,
+    now, cutoff, ocDb, opencodeHealth, timeContext, attemptedFiles: new Set(candidates.map((candidate) => candidate.file)),
   });
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
   // Completed OpenCode responses whose provider reported no token counts: one
   // informational health warning (the sessions themselves are still counted).
   addTelemetryDiagnostics(commonDiagnostics.opencode, {
-    warnings: usageNotReportedWarnings(records.filter((rec) => rec.host === 'opencode')),
+    warnings: [...opencodeSource.health.storageCoverage.warnings,
+      ...usageNotReportedWarnings(records.filter((rec) => rec.host === 'opencode'))],
   });
   notify(onProgress, { scanned: total, total, phase: 'aggregate' });
 
@@ -946,7 +1103,17 @@ async function scan(o = {}) {
   // `previous: true` caller would find its "current" totals silently
   // absorbing what should have been the previous window (the bug this fixes).
   const displayCutoff = now - days * DAY_MS;
-  const result = aggregate(applyCodexLedger(records, ledger), {
+  const unknownEligibility = records.filter((rec) => rec?.provider === 'claude'
+    && typeof rec.claudeIdentityEligible !== 'boolean').length;
+  // A deeper historical request can reveal a Claude file whose mtime/end was
+  // outside the fixed identity pool. Keep its prior history, but do not let a
+  // newly discovered outside-pool session enter the displayed current window.
+  const outsideCurrent = (rec) => rec?.provider === 'claude'
+    && rec.claudeIdentityEligible !== true && rec.end >= displayCutoff;
+  const observed = applyCodexLedger(records, ledger);
+  const currentExcluded = observed.filter(outsideCurrent).length;
+  const reconciled = reconcileClaudeMessages(observed.filter((rec) => !outsideCurrent(rec)));
+  const result = aggregate(reconciled, {
     days, now, cutoff: displayCutoff, deps, previous, prompts,
   });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
@@ -954,7 +1121,16 @@ async function scan(o = {}) {
     warnings: codexSourceHealth.diagnostics.warnings,
   });
   result.sourceHealth = {
-    claude: attachTelemetryHealth(claudeHealth, commonDiagnostics.claude),
+    claude: {
+      ...finalizeClaudeRecordHealth(claudeHealth, commonDiagnostics.claude, claudeRecordDiagnostics),
+      identityCoverage: { horizonDays: identityDays,
+        horizonCoversComparison: unknownEligibility === 0 && 2 * requestedDays <= MAX_CLAUDE_IDENTITY_DAYS,
+        horizonCoversRequestedHistory: unknownEligibility === 0 && Number(lookbackDays ?? days) <= identityDays,
+        outOfPoolRecords: records.filter((rec) => rec?.provider === 'claude' && rec.claudeIdentityEligible !== true).length,
+        unknownEligibilityRecords: unknownEligibility,
+        outsideCurrentExcluded: currentExcluded,
+        basis: 'file-mtime-and-session-end' },
+    },
     codex: attachTelemetryHealth(codexSourceHealth, commonDiagnostics.codex),
     opencode: attachTelemetryHealth(opencodeHealth, commonDiagnostics.opencode),
     codexLedger: codexLedgerHealth,
@@ -988,7 +1164,7 @@ export async function readIndex(o = {}) {
   // `cachePath` per test so their keys already differ. Ruled parked with that
   // reason rather than left implied.
   const key = scanKey({ ...o, days });
-  if (_memo && _memo.key === key && now - _memo.at < maxAgeMs) return _memo.agg;
+  if (localTimeContext() !== null && _memo && _memo.key === key && now - _memo.at < maxAgeMs) return _memo.agg;
   const agg = await buildIndex({ ...o, days });
   _memo = { key, at: now, agg };
   return agg;
@@ -1113,7 +1289,7 @@ export async function readSession(id, o = {}) {
 
   // opencode sessions live in the SQLite store, not a JSONL file — resolve
   // them before the file-locating path (pseudo-key opencode://<id>).
-  const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (o.roots?.opencode ?? null);
+  const ocDb = selectOpencodeSource({ roots: o.roots }).dbFile;
   const ocExists = ocDb && fs.existsSync(ocDb)
     ? opencodeSessionExistsResult({ dbFile: ocDb, id }) : null;
   if (ocExists?.ok && ocExists.value) {

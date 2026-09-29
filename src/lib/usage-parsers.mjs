@@ -14,6 +14,7 @@ import { repoRoot } from './paths.mjs';
 import { windowAt } from './claude-window-ledger.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
+import { recordClaudeCostState } from './usage-cost.mjs';
 import { codexReplayPlan, isCodexReplayLine } from './codex-replay.mjs';
 import {
   newCodexUsageWalk, noteCodexWalkModel, noteCodexWalkResponse, walkCodexTokenCount, codexWalkRows,
@@ -22,8 +23,9 @@ import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
 import { promptSemantics } from './usage-prompt-semantics.mjs';
-import { observeUsageProject, usageSessionOrigin } from './usage-project-evidence.mjs';
-import { isCodexImportedLine } from './codex-import-marker.mjs';
+import { observeUsageProject, usageRecordOrigin, importedUsageRecordOrigin } from './usage-project-evidence.mjs';
+import { isCodexImportedLine, newCodexTurnOwnership, codexTurnOwner, codexImportEvidence } from './codex-import-marker.mjs';
+import { claudeProviderFromModelId } from './session-surface.mjs';
 
 export { promptSemantics } from './usage-prompt-semantics.mjs';
 
@@ -52,6 +54,12 @@ function punchKey(ms) {
 function clip(text, max = 100) {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+function boundedClaudeModel(model) {
+  if (typeof model !== 'string' || model.length > 100 || model.includes('//')) return 'unknown';
+  return /^[A-Za-z0-9._:/-]+$/u.test(model) || /^claude-[a-z0-9-]+@20[0-9]{6}$/u.test(model)
+    ? model : 'unknown';
 }
 
 /**
@@ -176,8 +184,10 @@ function applyProject(rec, res) {
 
 // ── transcript parsing ──────────────────────────────────────────────────────
 
-/** Split JSONL into parsed objects, skipping anything that will not parse. */
-function* jsonLines(raw) {
+/** Split JSONL into parsed records. Codex retains its conservative object-only
+ * framing; Claude also observes valid non-object JSON for shape diagnostics. */
+function* jsonLines(raw, stats = null, includeNonObjects = false) {
+  if (stats) stats.malformedRecords = 0;
   // Scanned lazily, not split up front: a caller that needs only the first
   // line (the subagent replay pre-pass) must not pay for the whole file.
   let pos = 0;
@@ -186,10 +196,18 @@ function* jsonLines(raw) {
     const end = found < 0 ? raw.length : found;
     const start = pos;
     pos = end + 1;
-    if (end === start || raw.charCodeAt(start) !== 123 /* '{' */) continue;
+    if (end === start) continue;
+    if (includeNonObjects && !raw.slice(start, end).trim()) continue;
+    if (!includeNonObjects && raw.charCodeAt(start) !== 123 /* '{' */) {
+      if (stats && raw.slice(start, end).trim()) stats.malformedRecords++;
+      continue;
+    }
     let obj;
-    try { obj = JSON.parse(raw.slice(start, end)); } catch { continue; }
-    if (obj && typeof obj === 'object') yield obj;
+    try { obj = JSON.parse(raw.slice(start, end)); } catch {
+      if (stats) stats.malformedRecords++;
+      continue;
+    }
+    if (includeNonObjects || (obj && typeof obj === 'object')) yield obj;
   }
 }
 
@@ -202,12 +220,18 @@ export function blankSession(id, provider) {
     id, provider, host: provider, inferenceProvider: null, providerProvenance: 'unknown',
     title: '', project: 'unknown', start: null, end: null,
     projectEvidence: null, sessionOrigin: { origin: 'unknown', evidence: 'desktop-origin-not-declared' },
-    prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, models: [], tools: {},
+    prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, parentSessionId: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
     // Codex-only detail (v6): reasoning tokens inside output, and the last
     // rate-limit snapshot the rollout carried. Claude sessions keep the zero
     // and the null — absent, not unknown.
     reasoningOutput: 0, rateLimits: null,
+    // Codex host observations. Missing telemetry remains null; compactions
+    // count completed context replacements, never extra token spend.
+    codexEffort: null, firstTokenMs: null, compactions: 0,
+    compactionEvidence: { lowerBound: 0, upperBound: 0 },
+    claudeCostState: null,
+    claudeMessageCoverage: null,
     // v11: cross-host permission posture (usage-modes.normalizeMode), a
     // response-latency histogram, THIS session's own engaged seconds, model
     // context-window detail, and codex's explicit-abort count. Every field
@@ -649,6 +673,18 @@ function collectClaudeToolNames(rec, toolUses) {
 /** Did this decoded usage carry any token evidence at all? */
 const hasClaudeUsage = (u) => u.input + u.output + u.cacheRead + u.cacheWrite > 0;
 
+function claudeCrossFileIdentity(e) {
+  const messageId = e.message.id;
+  const requestId = e.requestId;
+  // These are the two observed Claude API ID forms. An arbitrary/malformed
+  // string is not proof that two files hold one provider message.
+  const rawId = typeof messageId === 'string' && /^msg_[A-Za-z0-9_-]{1,252}$/u.test(messageId)
+    ? ['message', messageId] : typeof requestId === 'string' && /^req_[A-Za-z0-9_-]{1,252}$/u.test(requestId)
+      ? ['request', requestId] : null;
+  const model = boundedClaudeModel(e.message.model);
+  return rawId ? sha(JSON.stringify(['claude', claudeProviderFromModelId(model), model, ...rawId]), 64) : null;
+}
+
 /**
  * Stage one assistant transcript line under its API message id. Claude Code
  * writes ONE line per content block (thinking / text / each tool_use) and
@@ -658,26 +694,36 @@ const hasClaudeUsage = (u) => u.input + u.output + u.cacheRead + u.cacheWrite > 
  * A later line with no token evidence never displaces an earlier one that had
  * some (honest-absent, same rule as the context sample below). A line with no
  * id at all is its own message: nothing is dropped and nothing is merged with
- * an unrelated line. Dedup is scoped to ONE transcript — the same id can
- * reappear in a subagent's file, and that cross-file overlap is not attempted.
+ * an unrelated line. A validated API identity is also retained as a hash for
+ * scan-wide accounting after every file has been parsed or loaded from cache.
  */
-function stageClaudeMessage(msgState, decoded, at, model) {
-  const key = decoded.messageId ?? `line:${msgState.seq++}`;
+function stageClaudeMessage(msgState, decoded, at, model, recordedAtMs, identity) {
+  const key = identity ?? `line:${msgState.seq++}`;
   const prior = msgState.groups.get(key);
   if (prior && hasClaudeUsage(prior.usage) && !hasClaudeUsage(decoded.usage)) return;
   // Re-set keeps the Map's first-seen insertion order, so flush order is stable.
-  msgState.groups.set(key, { at, model, usage: decoded.usage });
+  msgState.groups.set(key, { at, model, usage: decoded.usage, recordedAtMs, identity });
 }
 
 /** Account every staged message exactly once: response count, punchcard,
  *  the per-day/model usage row and the context sample — all from the message's
  *  last line. Runs after the whole transcript has been read. */
 function flushClaudeMessages(rec, msgState, windowLog) {
-  for (const { at, model, usage } of msgState.groups.values()) {
+  for (const { at, model, usage, recordedAtMs, identity } of msgState.groups.values()) {
+    if (hasClaudeUsage(usage)) {
+      if (recordedAtMs === null) rec.claudeMessageCoverage.missingTimestampMessages++;
+      else {
+        rec.claudeMessageCoverage.firstAtMs = Math.min(rec.claudeMessageCoverage.firstAtMs ?? recordedAtMs, recordedAtMs);
+        rec.claudeMessageCoverage.lastAtMs = Math.max(rec.claudeMessageCoverage.lastAtMs ?? recordedAtMs, recordedAtMs);
+      }
+    }
     rec.responses++;
     const pk = punchKey(at);
     rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
     addUsage(rec, localDay(at), model, { ...usage, responses: 1 });
+    if (identity) rec.claudeMessages.push({ identity, at, day: localDay(at), model,
+      usage: { input: usage.input, output: usage.output, cacheRead: usage.cacheRead,
+        cacheWrite: usage.cacheWrite, cacheWrite1h: usage.cacheWrite1h ?? 0 } });
     // Context pressure: the tokens actually IN the model's window for this
     // message (fresh input plus what got served from cache) — the last message
     // wins so the field reflects the LAST completion, not a running total.
@@ -700,7 +746,7 @@ function flushClaudeMessages(rec, msgState, windowLog) {
  *  latency/model/tool accounting plus its turn row. Usage, response count,
  *  punchcard and context sample are STAGED per message id here and accounted
  *  once by flushClaudeMessages. */
-function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns) {
+function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns, identity) {
   noteSpan(rec, ms);
   const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
 
@@ -734,10 +780,10 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
     latState.pendingMs = null;
   }
 
-  const model = typeof decoded.model === 'string' ? decoded.model : 'unknown';
+  const model = boundedClaudeModel(decoded.model);
   if (!rec.models.includes(model)) rec.models.push(model);
 
-  stageClaudeMessage(msgState, decoded, at, model);
+  stageClaudeMessage(msgState, decoded, at, model, Number.isFinite(ms) ? ms : null, identity);
 
   const tools = collectClaudeToolNames(rec, decoded.toolUses);
   if (withTurns) {
@@ -748,14 +794,37 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
   }
 }
 
+// Established Claude Code bookkeeping records with no message usage. New
+// record types are never added implicitly to this list.
+const CLAUDE_IGNORED_RECORD_TYPES = new Set(['bridge-session', 'file-history-snapshot', 'queue-operation',
+  'atis-latch', 'last-prompt', 'attachment', 'mode', 'permission-mode',
+  'agent-name', 'agent-setting', 'system', 'progress', 'summary']);
+function claudeRecordCounter(type) {
+  if (typeof type !== 'string' || !type) return 'invalidTypeRecords';
+  if (type === 'user' || type === 'assistant' || type === 'cost-state' || type === 'ai-title') return 'knownHandledRecords';
+  return CLAUDE_IGNORED_RECORD_TYPES.has(type) ? 'knownIgnoredRecords' : 'unknownRecords';
+}
+function* knownClaudeLines(raw, stats) {
+  for (const e of jsonLines(raw, stats, true)) {
+    const counter = claudeRecordCounter(e?.type);
+    stats[counter]++;
+    if (counter !== 'invalidTypeRecords' && counter !== 'unknownRecords') yield e;
+  }
+}
+
 /**
- * Parse one Claude transcript. Returns `{ session, turns }`; `turns` is only
- * populated when `withTurns` (the reader path) — the scan path does not need
- * message bodies and holding them would balloon memory over 3,000 files.
+ * Parse one Claude transcript. Returns `{ session, turns, parseStats }`;
+ * `turns` is only populated when `withTurns` (the reader path) — the scan path
+ * does not need message bodies and holding them would balloon memory.
  */
 export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = null }) {
   const rec = blankSession(id, 'claude');
-  rec.sessionOrigin = usageSessionOrigin(raw, 'claude');
+  const parseStats = { knownHandledRecords: 0, knownIgnoredRecords: 0,
+    unknownRecords: 0, invalidTypeRecords: 0, malformedRecords: 0 };
+  rec.claudeMessages = [];
+  rec.claudeMessageCoverage = { firstAtMs: null, lastAtMs: null, missingTimestampMessages: 0 };
+  rec.sessionOrigin = usageRecordOrigin(raw, 'claude');
+  const observedProviders = new Set();
   const turns = [];
   const titleState = { firstPrompt: '', aiTitle: '' };
   // Open by the most recent human prompt, closed by the first real assistant
@@ -764,7 +833,11 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
   // Assistant lines staged per API message id — see stageClaudeMessage.
   const msgState = { groups: new Map(), seq: 0 };
 
-  for (const e of jsonLines(raw)) {
+  for (const e of knownClaudeLines(raw, parseStats)) {
+    if (e.type === 'cost-state') {
+      rec.claudeCostState = recordClaudeCostState(rec.claudeCostState, e, id);
+      continue;
+    }
     const ms = toMs(e.timestamp);
     if (e.type === 'ai-title') { if (typeof e.aiTitle === 'string') titleState.aiTitle = e.aiTitle; continue; }
     if (typeof e.attributionSkill === 'string' && !rec.skill) rec.skill = e.attributionSkill;
@@ -780,18 +853,28 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
     }
 
     if (decoded.role !== 'assistant' || !e.message) continue;
-    recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns);
+    // A transcript's assistant model is tied to this session. Current global
+    // settings and process.env are not historical session evidence.
+    if (!decoded.isApiError) observedProviders.add(claudeProviderFromModelId(boundedClaudeModel(e.message.model)));
+    // The hash preserves API identity across copied files without persisting
+    // a raw provider ID in the cache. Different ID kinds/providers cannot meet.
+    recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns, claudeCrossFileIdentity(e));
   }
   flushClaudeMessages(rec, msgState, windowLog);
 
+  if (observedProviders.size === 1 && !observedProviders.has(null)) {
+    rec.sessionOrigin.thirdPartyProvider = observedProviders.values().next().value;
+    rec.sessionOrigin.thirdPartyProviderBasis = 'assistant-model-id';
+  }
+
   rec.title = maskSecrets(titleState.aiTitle || clip(titleState.firstPrompt)) || '(untitled)';
   if (rec.project === 'unknown') applyProject(rec, projectLabel(null, dirName));
-  return { session: seal(rec), turns };
+  return { session: seal(rec), turns, parseStats };
 }
 
 function codexParseStats() {
   return {
-    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
+    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0, totalOnlyTokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
     // Oversized rollout lines the streaming reader clipped instead of parsing
     // (codex-rollout-reader.mjs); always 0 for a rollout read as a string.
@@ -839,20 +922,26 @@ function recordCodexUnknownType(stats, type) {
  *  `handleCodexTurnContext`'s own `rec.project === 'unknown'` check — a
  *  DIFFERENT gate that coincides with this one in the common case but is
  *  not "the same rule" as this latch. */
-function handleCodexMeta(rec, metaState, decoded) {
+function handleCodexMeta(rec, metaState, decoded, payload) {
   if (metaState.seen) return;
   metaState.seen = true;
   if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
   if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
   if (typeof decoded.cwd === 'string') rec.projectEvidence = observeUsageProject(decoded.cwd);
   if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
+  // Observed Codex shape: source.subagent.thread_spawn.parent_thread_id.
+  // Accept only a UUID-shaped identifier; arbitrary source objects are never
+  // copied into the usage record or used to infer a parent.
+  const parentId = payload?.source?.subagent?.thread_spawn?.parent_thread_id;
+  if (typeof parentId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(parentId)
+      && parentId !== rec.id) rec.parentSessionId = parentId;
   if (decoded.provider) {
     rec.inferenceProvider = decoded.provider;
     rec.providerProvenance = 'observed';
   }
 }
 
-function handleCodexTurnContext(rec, decoded, payload) {
+function handleCodexTurnContext(rec, decoded, payload, captureEffort = true) {
   if (!rec.projectEvidence && typeof decoded.cwd === 'string') rec.projectEvidence = observeUsageProject(decoded.cwd);
   if (typeof decoded.model === 'string' && !rec.models.includes(decoded.model)) rec.models.push(decoded.model);
   if (decoded.provider) {
@@ -874,6 +963,11 @@ function handleCodexTurnContext(rec, decoded, payload) {
     : payload.sandbox_policy;
   const m = normalizeMode({ host: 'codex', approvalPolicy: payload.approval_policy, sandboxPolicy: sandbox });
   if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
+  if (captureEffort && ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(payload.effort)) {
+    rec.codexEffort ??= { last: null, counts: {} };
+    rec.codexEffort.last = payload.effort;
+    rec.codexEffort.counts[payload.effort] = (rec.codexEffort.counts[payload.effort] ?? 0) + 1;
+  }
 }
 
 /** Normalize one token_count event's rate-limit windows (primary/secondary),
@@ -916,7 +1010,15 @@ function applyCodexRateLimit(rec, rl, ms) {
  *  thread's own usage nor a context or rate-limit observation of it. */
 function handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay) {
   stats.tokenCountEvents++;
-  walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay);
+  const total = decoded.usage.total;
+  if (!replay && Number.isFinite(Number(total?.total_tokens)) && Number(total.total_tokens) > 0
+      && !['input_tokens', 'cached_input_tokens', 'output_tokens'].some((field) =>
+        Number.isFinite(Number(total[field])) && Number(total[field]) > 0)) {
+    // A total alone cannot establish input, cache or output, so it cannot be
+    // priced or folded into a component row. Preserve the observed gap.
+    stats.totalOnlyTokenCountEvents++;
+  }
+  walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay, usageState.importOwnership ? decoded.usage.last : null);
   if (replay) return;
   // Codex re-emits an identical token_count (measured: ~2.8% of events) with
   // the SAME cumulative total when no new model call happened; that is a
@@ -956,7 +1058,16 @@ function handleCodexTaskStarted(rec, latState, payload) {
  *  awaiting approval overnight arrives as a multi-hour "response" that the
  *  prompt-gap path would have discarded. A non-null `error` counts as an
  *  exception regardless of whether the fallback sample fires. */
-function handleCodexTaskComplete(rec, latState, payload) {
+function handleCodexTaskComplete(rec, latState, payload, captureFirstToken = true) {
+  const first = payload.time_to_first_token_ms;
+  if (captureFirstToken && typeof first === 'number' && Number.isFinite(first) && first >= 0
+      && first <= MAX_LATENCY_SAMPLE_SECONDS * 1000) {
+    rec.firstTokenMs ??= { count: 0, total: 0, min: first, max: first, provenance: 'host-observed' };
+    rec.firstTokenMs.count++;
+    rec.firstTokenMs.total += first;
+    rec.firstTokenMs.min = Math.min(rec.firstTokenMs.min, first);
+    rec.firstTokenMs.max = Math.max(rec.firstTokenMs.max, first);
+  }
   const duration = Number(payload.duration_ms);
   if (latState.turnStartedAt !== null && Number.isFinite(duration)
     && duration / 1000 <= MAX_LATENCY_SAMPLE_SECONDS) {
@@ -1066,8 +1177,8 @@ const CODEX_TOOL_ITEM_TYPES = new Set([
 /** `item_completed` item types the host emits that are UNDERSTOOD and are
  *  neither a message nor a tool: model reasoning, sub-agent lifecycle notes,
  *  image views, extension calls, web searches and context compaction. They
- *  carry no usage or turn evidence this parser needs, so they are recognised
- *  and dropped. Without this list every scan raised the `unknown-item-types`
+ *  carry no token usage; a completed compaction is separately counted as
+ *  context evidence. Without this list every scan raised the `unknown-item-types`
  *  warning permanently (six kinds landed in the 32-kind cap), which taught
  *  readers to ignore the one diagnostic meant to flag a genuinely new shape.
  *  Only a type in NEITHER set is unknown. */
@@ -1087,8 +1198,15 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   // thread's: they must not open latency windows, sample a context window or
   // count the parent's aborts against the child.
   if (replay && ['task_started', 'task_complete', 'turn_aborted'].includes(payload.type)) return;
-  if (payload.type === 'task_started') { handleCodexTaskStarted(rec, latState, payload); return; }
-  if (payload.type === 'task_complete') { handleCodexTaskComplete(rec, latState, payload); return; }
+  if (payload.type === 'task_started') {
+    noteCodexCompactionTurn(usageState, payload.turn_id);
+    handleCodexTaskStarted(rec, latState, payload);
+    return;
+  }
+  if (payload.type === 'task_complete') {
+    handleCodexTaskComplete(rec, latState, payload, !usageState.unprovable);
+    return;
+  }
   if (payload.type === 'turn_aborted') {
     rec.aborts++;
     // An interrupted turn leaves no valid latency evidence behind it: a
@@ -1103,6 +1221,9 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   if (decoded.generation === 'legacy') stats.legacyEvents++;
   else if (decoded.generation === 'item') stats.itemCompletedEvents++;
   if (decoded.unknownItemType) {
+    if (!replay && !usageState.unprovable && decoded.unknownItemType === 'ContextCompaction') {
+      noteCodexCompaction(usageState, 'item', payload.turn_id);
+    }
     // A type this parser tallies is a type it UNDERSTANDS. Recording it as an
     // unknown kind too made the four tool items simultaneously "tools" in the
     // scorecard and "unknown kinds" in sourceHealth — raising the
@@ -1133,17 +1254,52 @@ function rawPayload(e) {
   return e?.payload && typeof e.payload === 'object' ? e.payload : {};
 }
 
+/** Keep IDs transient. Top-level `compacted` has no turn ID, so its nearest
+ * preceding task-start segment is only pairing evidence, not proof of a
+ * one-to-one relationship with ContextCompaction. */
+function noteCodexCompactionTurn(state, turnId) {
+  const key = `turn-${++state.turnSequence}`;
+  state.currentCompactionTurn = key;
+  if (typeof turnId === 'string' && turnId.length <= 256) state.compactionTurnIds.set(turnId, key);
+}
+
+function noteCodexCompaction(state, shape, turnId = null) {
+  // An item ID without a matching observed task_start cannot establish a
+  // separate turn from a nearby ID-less top-level compacted envelope.
+  const explicitKey = typeof turnId === 'string' && turnId.length <= 256
+    ? state.compactionTurnIds.get(turnId) : null;
+  const key = explicitKey ?? state.currentCompactionTurn ?? 'unscoped';
+  const counts = state.compactionTurns.get(key) ?? { completed: 0, item: 0 };
+  counts[shape]++;
+  state.compactionTurns.set(key, counts);
+}
+
+function finalizeCodexCompactions(rec, state) {
+  let lowerBound = 0;
+  let upperBound = 0;
+  for (const { completed, item } of state.compactionTurns.values()) {
+    lowerBound += Math.max(completed, item);
+    upperBound += completed + item;
+  }
+  rec.compactions = lowerBound;
+  rec.compactionEvidence = { lowerBound, upperBound };
+}
+
 /** One line of a Codex rollout, dispatched on its decoded type. */
 function processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns) {
   const decoded = decodeCodexRecord(e);
-  if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded); return; }
+  const replay = isCodexReplayLine(usageState.boundary, e);
+  if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded, rawPayload(e)); return; }
   if (decoded.type === 'turnContext') {
-    handleCodexTurnContext(rec, decoded, rawPayload(e));
+    if (!replay) handleCodexTurnContext(rec, decoded, rawPayload(e), !usageState.unprovable);
     noteCodexWalkModel(usageState.walk, decoded.model);
     return;
   }
+  if (e.type === 'compacted') {
+    if (!replay && !usageState.unprovable) noteCodexCompaction(usageState, 'completed');
+    return;
+  }
   if (e.type !== 'event_msg') return;
-  const replay = isCodexReplayLine(usageState.boundary, e);
   handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns, replay);
 }
 
@@ -1153,12 +1309,15 @@ function processCodexLine(rec, turns, stats, titleState, usageState, latState, m
  *  Codex activity inflated Codex responses and prompts and diluted its
  *  coverage figures. `imported` is set ONLY on these records, and the scan
  *  reports how many it excluded (`importedExcluded`) rather than dropping them
- *  silently. Parsing stops at the first imported line — nothing after it is
- *  read. */
+ *  silently. The whole source is examined for genuine later turns. */
 function importedCodexSession(rec, stats) {
+  rec = { ...blankSession(rec.id, 'codex'), threadSource: rec.threadSource,
+    ...(rec.parentSessionId ? { parentSessionId: rec.parentSessionId } : {}), importEvidence: rec.importEvidence };
   rec.imported = true;
+  rec.sessionOrigin = importedUsageRecordOrigin();
   rec.title = '(imported Claude session)';
-  return { session: seal(rec), turns: [], parseStats: { ...stats, imported: true } };
+  return { session: seal(rec), turns: [], parseStats: { ...codexParseStats(),
+    importEvidence: rec.importEvidence, clippedLines: stats.clippedLines, imported: true } };
 }
 
 /** The session's usage rows, from the walk (codex-usage-walk.mjs): one per
@@ -1178,6 +1337,20 @@ function finalizeCodexUsage(rec, walk) {
   // recorded as detail, never added into any token sum, or the total would
   // double-count exactly the reasoning share.
   rec.reasoningOutput = reasoningOutput;
+}
+
+/** Bind a mixed session only to its first declaration and native cwd evidence. */
+function finalizeMixedCodexOrigin(rec, firstMeta) {
+  // The first session declaration is valid origin evidence only after own
+  // activity is established. Replayed/later metadata never replaces it.
+  const p = firstMeta?.payload ?? {};
+  rec.sessionOrigin = usageRecordOrigin(JSON.stringify({ type: 'session_meta', payload: {
+    originator: p.originator, source: p.source, thread_source: p.thread_source,
+  } }), 'codex');
+  if (!rec.projectEvidence && typeof p.cwd === 'string') {
+    rec.projectEvidence = observeUsageProject(p.cwd);
+    applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
+  }
 }
 
 /**
@@ -1204,24 +1377,31 @@ function finalizeCodexUsage(rec, walk) {
  * so its prompts stay out of human-prompt figures. A subagent whose replay
  * cannot be separated (no ordinals at all) reports no usage, as before.
  *
- * A rollout Codex imported from a Claude Code transcript
- * (`external-import-turn-N`) is not Codex activity at all — see
- * importedCodexSession.
+ * Imported turns (`external-import-turn-N`) never count. Identified native
+ * turns in the same file can count; missing boundaries remain unattributable.
  */
 export function parseCodex(raw, { id, withTurns = false }) {
   // `raw` is the rollout text, or a streaming source (openCodexRollout) for one
   // too large to hold as a string: `{ head, lines, stats }`. Both feed the SAME
   // walk below, so the two paths cannot drift.
+  const readStats = { malformedRecords: 0 };
   const source = typeof raw === 'string'
-    ? { head: raw, lines: { [Symbol.iterator]: () => jsonLines(raw) } }
+    ? { head: raw, stats: readStats, lines: { [Symbol.iterator]: () => jsonLines(raw, readStats) } }
     : raw;
   const rec = blankSession(id, 'codex');
-  rec.sessionOrigin = usageSessionOrigin(source.head, 'codex');
+  rec.sessionOrigin = usageRecordOrigin(source.head, 'codex');
   const turns = [];
   const stats = codexParseStats();
   const lines = source.lines;
   const plan = codexReplayPlan(lines);
-  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary };
+  let hasImports = false;
+  for (const e of lines) { if (isCodexImportedLine(e)) { hasImports = true; break; } }
+  const ownership = newCodexTurnOwnership({ hasImports });
+  let firstMeta = null;
+  let genuineActivity = false;
+  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary,
+    unprovable: plan.unprovable, importOwnership: hasImports, compactionTurns: new Map(),
+    compactionTurnIds: new Map(), currentCompactionTurn: null, turnSequence: 0 };
   const titleState = { firstPrompt: '' };
   // Opened by task_started (turn start remembered), closed either by a
   // prompt→agent-message gap sample or by task_complete's own duration_ms
@@ -1234,13 +1414,48 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const metaState = { seen: false };
 
   for (const e of lines) {
-    if (isCodexImportedLine(e)) return importedCodexSession(rec, stats);
     const ms = toMs(e.timestamp);
+    if (hasImports) {
+      const nativeBefore = ownership.nativeRecords;
+      const owner = codexTurnOwner(ownership, e);
+      const replay = plan.unprovable || isCodexReplayLine(plan.boundary, e);
+      if (replay) ownership.nativeRecords = nativeBefore;
+      if (e.type === 'session_meta') {
+        if (!firstMeta) firstMeta = e;
+        // Keep the first identity, but a copied cwd is not project evidence.
+        const payload = { ...rawPayload(e), cwd: undefined };
+        handleCodexMeta(rec, metaState, decodeCodexRecord({ ...e, payload }), payload);
+        continue;
+      }
+      if (owner !== 'native' || replay) {
+        const decoded = decodeCodexRecord(e);
+        if (decoded.type === 'tokenCount') {
+          // Excluded snapshots still advance the cumulative baseline.
+          walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, true, localDay);
+        }
+        latState.pendingPromptMs = null;
+        latState.turnStartedAt = null;
+        continue;
+      }
+      if (e.type === 'event_msg' && ['user_message', 'agent_message', 'item_completed', 'token_count'].includes(e.payload?.type)) genuineActivity = true;
+    }
     noteSpan(rec, ms);
     processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns);
   }
 
+  if (hasImports) {
+    const malformedRecords = source.stats?.malformedRecords ?? 0;
+    rec.importEvidence = { ...codexImportEvidence(ownership), malformedRecords,
+      ownershipComplete: ownership.ownershipComplete && !plan.unprovable
+        && (source.stats?.clippedLines ?? 0) === 0 && malformedRecords === 0 };
+    if (!rec.importEvidence.ownershipComplete) rec.importEvidence.nativeRecords = 0;
+    stats.importEvidence = rec.importEvidence;
+    stats.clippedLines = source.stats?.clippedLines ?? 0;
+    if (!genuineActivity || !rec.importEvidence.ownershipComplete) return importedCodexSession(rec, stats);
+    finalizeMixedCodexOrigin(rec, firstMeta);
+  }
   finalizeCodexUsage(rec, usageState.walk);
+  finalizeCodexCompactions(rec, usageState);
   stats.clippedLines = source.stats?.clippedLines ?? 0;
   rec.title = maskSecrets(clip(titleState.firstPrompt)) || '(untitled)';
   return { session: seal(rec), turns, parseStats: stats };
