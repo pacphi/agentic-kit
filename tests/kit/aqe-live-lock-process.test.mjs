@@ -4,7 +4,7 @@ import { mkdtempSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createProcessScope } from '../live/aqe-live-lock-process.mjs';
-import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { spawnEnv, envValue } from './helpers/home-sandbox.mjs';
 import { ownerRecord, writeOwner, readOwner, prepareRunRootHolds,
   inspectRunRootHolds } from '../../scripts/run-roots.mjs';
 
@@ -64,6 +64,35 @@ test('requires explicit sandbox env and passes it to the child', async () => {
     assert.equal(observed.home, env.HOME);
     assert.equal(observed.tmp, env.TMPDIR);
     assert.equal(observed.state, env.XDG_STATE_HOME);
+  } finally {
+    await scope.closeAll();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Windows bootstrap validation accepts preserved mixed-case names without adding duplicates', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-windows-env-'));
+  const home = path.join(root, 'home');
+  mkdirSync(home);
+  const env = spawnEnv(home, {}, { platform: 'win32', env: {
+    SYSTEMROOT: process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows',
+    COMSPEC: process.env.ComSpec ?? process.env.COMSPEC ?? 'C:\\Windows\\System32\\cmd.exe',
+    PaThExT: process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD',
+    Path: process.env.PATH ?? '',
+  } });
+  assert.equal(env.SystemRoot, undefined);
+  assert.equal(env.ComSpec, undefined);
+  assert.equal(envValue(env, 'SystemRoot', 'win32'), env.SYSTEMROOT);
+  const scope = createProcessScope(new AbortController().signal, { platform: 'win32' });
+  try {
+    assert.throws(() => scope.launch(process.execPath, [], { env: { ...env, COMSPEC: '' } }),
+      /requires Windows process env/);
+    const run = scope.launch(process.execPath, ['-e', 'console.log("bootstrapped")'], { env });
+    const result = await scope.wait(run, 2000);
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /bootstrapped/);
+    assert.equal(Object.keys(env).filter((key) => key.toUpperCase() === 'SYSTEMROOT').length, 1);
+    assert.equal(Object.keys(env).filter((key) => key.toUpperCase() === 'COMSPEC').length, 1);
   } finally {
     await scope.closeAll();
     rmSync(root, { recursive: true, force: true });

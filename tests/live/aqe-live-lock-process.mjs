@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { acquireRunRootHold, releaseRunRootHold } from '../../scripts/run-roots.mjs';
+import { envValue } from '../kit/helpers/home-sandbox.mjs';
 
 const CLOSE_LIMIT_MS = 10_000;
 
@@ -14,7 +15,7 @@ function closedWithin(run, ms) {
   ]).finally(() => clearTimeout(timer));
 }
 
-export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS } = {}) {
+export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS, platform = process.platform } = {}) {
   // Register uncertainty with the enclosing guarded runner before any child starts.
   const hold = acquireRunRootHold();
   const runs = new Set();
@@ -31,13 +32,16 @@ export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS } = {
       throw Error('call-owned child requires an explicit sandbox env');
     }
     const env = options.env;
+    const missing = (key) => {
+      const value = envValue(env, key, platform);
+      return typeof value !== 'string' || !value;
+    };
     const required = ['HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'XDG_CONFIG_HOME',
       'XDG_STATE_HOME', 'APPDATA', 'LOCALAPPDATA'];
-    if (required.some((key) => typeof env[key] !== 'string' || !env[key])) {
+    if (required.some(missing)) {
       throw Error('call-owned child requires sandbox home, temp, and state env');
     }
-    if (process.platform === 'win32' && ['SystemRoot', 'ComSpec', 'PATHEXT']
-      .some((key) => typeof env[key] !== 'string' || !env[key])) {
+    if (platform === 'win32' && ['SystemRoot', 'ComSpec', 'PATHEXT'].some(missing)) {
       throw Error('call-owned child requires Windows process env');
     }
     const child = spawn(command, args, { ...options, env, stdio: ['ignore', 'pipe', 'pipe'] });
