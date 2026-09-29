@@ -124,6 +124,15 @@ Both branches are also on origin.
 | D-16 | B0-16: Ruflo checks its target tables before `quick_check`, so a corrupt store without AgentDB tables reads as "table missing" | Accept it; no action | Add it to the next approved rUv upstream round | **A.** Low impact, and no user has reported it |
 | D-17 | B0-4: the AQE coverage-gap analysis over the changed files | Drop it | Run it once, in V7 | **A.** Every branch already passes the 70/70/70 coverage gate |
 
+### D-18 and D-19 The live session view (#256)
+
+Two of #256's three questions are yours to answer; they need no machine evidence. V3 carries out the answers. The third question, a plain-folder bind observed on a real machine, is V3's own work.
+
+| D | Item | A | B | Recommended, and why |
+|---|---|---|---|---|
+| D-18 | A transcript that re-enters the live window after a restart is read from its start | Document it: the live view shows the file's content from its start again. V3 first confirms that the re-read changes no total; if it does, B applies | Resume from a remembered offset per file | **A.** A stored offset per file is new state to keep correct, and it earns its cost only if the re-read changes a number |
+| D-19 | The structured live-events input has fixture evidence only, because nothing produces such a file | Label it experimental in the docs and keep the fixtures | Build a real producer | **A.** No host writes the format today; building a producer is new scope, not remediation |
+
 ### Already resolved (no decision needed)
 
 | Item | Evidence |
@@ -159,8 +168,9 @@ In order. Steps 1–4 come after alpha.60 is published and installed (D-2).
    ```
 
    Six other logs have no record in the ledger, so whether to remove them is your call: `/tmp/ak6a-unit-run.log`, `/tmp/unit-run-final.log`, `/tmp/unit-run-node22-final.log`, `/tmp/unit-run-node22.log`, `/tmp/unit-run1.log` and `/tmp/unit-run22.log`.
-5. **After V4 merges:** merge the stray store (D-7), at the end of a session.
-6. **After V5 hands over its list:** remove the temp backlog by hand from its reviewed literal-path list. Today `$TMPDIR` holds 34,010 `ak-*` entries, including three legacy `ak-suite-*` roots.
+5. **Whenever it happens (#254):** if the dashboard's session badge sticks on "CONNECTING", capture a browser network trace: DevTools → Network, the event-stream request, while it is stuck. Attach it to #254. Without a trace the stall cannot be diagnosed; the server opens the stream in about 1.6 ms.
+6. **After V4 merges:** merge the stray store (D-7), at the end of a session.
+7. **After V5 hands over its list:** remove the temp backlog by hand from its reviewed literal-path list. Today `$TMPDIR` holds 34,010 `ak-*` entries, including three legacy `ak-suite-*` roots.
 
 ---
 
@@ -174,7 +184,7 @@ Seven branches. V2 has two PRs, so there are eight PRs in total. Effort is given
 | V2 `docs/taxonomy-reorg` (PR A) and `docs/archive-link-repair` (PR B) | L + M | 6–8 h + 4–5 h | 30 min | Tasks 1–2 alongside V1; Task 3 onward after V1 merges (D-3 A) |
 | V3 `feat/dashboard-refresh` | L | 10 h | 15 min | V2 PR A |
 | V4 `fix/follow-ups-v2` | L | 14 h | 20 min | V2 PR A |
-| V5 `test/runner-hygiene` | M | 8 h | 0 (then §2 step 6) | V2 PR A (and V1, which also edits `scripts/run-tests.mjs`) |
+| V5 `test/runner-hygiene` | M | 8 h | 0 (then §2 step 7) | V2 PR A (and V1, which also edits `scripts/run-tests.mjs`) |
 | V6 `fix/usage-accuracy` | L | 15 h | 10 min | V2 PR A; its UI commits after V3 |
 | V7 `chore/v2-close-out` | S | 3 h | 15 min | everything else merged |
 
@@ -235,9 +245,11 @@ If D-3 is B, PR A runs at V7's point, after every other branch has merged. v1's 
   - `mntSyncHash`/`mntApplyHashState` re-derive their state from `location.hash` (B6a-12). Fix this if 6c-2 touches that code; otherwise open a small issue.
 - **B6a-9.** 6c-5 records in ADR-0063 that two dashboard tabs share one server process's module state. If 6c-1's tests build the `ruflo-components` path, they also cover its cwd case; if not, drop that part by ruling.
 - **D-15.** ADR-0048's status line records where its human-evaluation gates went.
+- **The live view (#256).** Carry out D-18 and D-19 in the live-view docs (and the offset change if D-18 is B). Observe a plain-folder (non-Git) bind once on a real machine, and fix what the observation shows.
+- **The "CONNECTING" stall (#254), only if §2 step 5 has produced a trace by the time V3 starts:** diagnose from the trace and fix it here, since the fix touches the same dashboard client code. Otherwise V3 leaves #254 alone.
 - **Pre-PR.** Re-check the `codex app-server` read-only flags against the newest Codex.
 
-**Closes:** B6b-3, B6b-8, B6b-13 and B6b-19 (their dashboard halves), B6b-18, B6a-9, B6a-12, B0-22 and B0-23.
+**Closes:** B6b-3, B6b-8, B6b-13 and B6b-19 (their dashboard halves), B6b-18, B6a-9, B6a-12, B0-22, B0-23 and #256 (plus #254 if a trace arrived).
 
 ### V4 `fix/follow-ups-v2`: every small product, CLI and upstream item
 
@@ -287,7 +299,7 @@ One unit commit per line, test-first. The source text is the Branch 9 plan where
 - Task 7 re-checks Ruflo's proven-config paths against the newest Ruflo in the support window.
 - The controller switches the task-brief template to `node scripts/run-tests.mjs focus` once Task 12 lands (B9-20).
 
-**Hand-off:** Task 13's reviewed literal-path list becomes §2 step 6.
+**Hand-off:** Task 13's reviewed literal-path list becomes §2 step 7.
 
 **Closes:** B6a-7, B9-11, B9-13, B9-14, B9-20, LQ-1 and LQ-4.
 
@@ -300,6 +312,8 @@ One unit commit per line, test-first. The source text is the Branch 9 plan where
    - "Cloud session" appears only when at least one such session was recorded.
    - Discover and record the real third-party provider of Claude sessions (Amazon Bedrock, Google Vertex, OpenRouter or another host) from environment, settings and model-id evidence; unknown stays unknown, and the provider shows in the detail view.
    - ADR-0060 records that the role lenses are deferred to v5.
+
+   - Views that report project discovery or usage origins say that Cowork sessions are not covered yet (ADR-0060 §5; the first half of #257). The Cowork source itself comes after v2.
 
    ADR-0060 then becomes Accepted (B1-5).
 3. Decision 12 (B1-4): exclusion becomes per turn. Imported turns never count; later real turns in the 6 affected rollouts count as Codex usage in the ChatGPT desktop app and give their folder a genuine Desktop origin.
@@ -316,8 +330,15 @@ One unit commit per line, test-first. The source text is the Branch 9 plan where
 1. Branch 9 Task 9 plus 13b: the comment-label guard over the whole tree. It needs no allowlist now that 6b has merged (B6a-5).
 2. Re-run the Appendix A check: every row marked for a v2 branch must be closed, or moved to a named issue.
 3. Add v2's summary entry to the decision log, run the docs alignment check, and archive the plans (V2, point 5).
-4. Issues: post the #239 comment (D-5), close #262 with its 10-run table, and confirm #240's state.
+4. Issues: post the #239 comment (D-5), close #262 with its 10-run table, and confirm #240's state. Close #254 as not reproducible if no trace arrived during v2, inviting a reopen with a trace. Update #257 to say its disclosure half shipped in V6.
 5. Update the auto-memory, record v2's attended-time total in the ledger, and cut the final release (D-2).
+
+### After v2 (not in this program)
+
+Two of the issues punted from v1 are new capability, not remediation. They start once v2's definition of done is met:
+
+1. **#255, the worker early-warning monitor** (#239 P0-3). It needs a design track first: brainstorm, spec, ADR, then a test-first build against recorded worker transcripts. The thresholds are costly to get wrong, so they get their own design pass.
+2. **#257, Cowork as a discovery source** (the second half). Research where Cowork keeps its session records on each platform and which fields identify the project folder, reading only enumerated values and counts, then add it as an optional source. V6 ships the "not covered" disclosure in the meantime.
 
 ---
 
@@ -330,7 +351,7 @@ One unit commit per line, test-first. The source text is the Branch 9 plan where
 | 1b | after V1 merges | V2 PR A Tasks 3–9 (the moves) → merge; no other PR open | — | ≈ 30 min |
 | 2 | after PR A merges | V3, V4, V5, V6 (all but its UI commits), V2 PR B | all five | ≈ 45 min |
 | 3 | after V3 merges | alpha.61; V6's UI commits → V6 merges | V4 and V5 if still open | ≈ 10 min |
-| 4 | after every other branch merges | V7; the final release; §2 steps 5–6 | — | ≈ 45 min |
+| 4 | after every other branch merges | V7; the final release; §2 steps 6–7 | — | ≈ 45 min |
 
 **Named interrupts (the only times you are asked mid-flight):**
 
@@ -411,7 +432,7 @@ Each of the 189 row ids appears exactly once; a script checked the ids against t
 | B0-19 | DONE | Windows CI green on #241 through #263 |
 | B0-20 | SUPERSEDED | #241's squash dropped them; briefs forbid trailer-like lines |
 | B0-22, B0-23 | V3 | Client fixes |
-| B0-24 | issue #256 | The controller adds the evidence in Wave 0 |
+| B0-24 | issue #256 → V3 | The controller adds the evidence in Wave 0; V3 closes #256 (D-18, D-19) |
 | B0-25 | D-5 | — |
 | B1-1, B1-2 | DONE | #244 (`5f5ca175`) |
 | B1-3 | §2 step 3 | Snapshot still schema 7 |
@@ -461,15 +482,15 @@ Each of the 189 row ids appears exactly once; a script checked the ids against t
 | B6b-21, B6b-22, B6b-25 | V4 | Items A.3, A.1, C.6 |
 | B6b-24 | DONE (PR body) and D-2 (release notes) | #263's body |
 | UA-1, UA-3, UA-4, UA-5 | V6 | — |
-| UA-2 | issue #257 | — |
+| UA-2 | issue #257: disclosure in V6; the source after v2 | See "After v2" |
 | B9-1, B9-4, B9-8, B9-17 | DONE | #259 (`172f2307`): orchestrator restore, "Partial data" card, round-trip prune, `docs/SETUP.md:126` and the `docs/UPGRADING.md` section of 2026-09-28 |
 | B9-2, B9-3, B9-12, B9-15, B9-16, B9-18 | V4 | Items B.8, B.4, B.3, C.3, B.11, C.1 |
-| B9-5 | issue #254 | — |
-| B9-6 | issue #255 | — |
+| B9-5 | issue #254: evidence-gated (§2 step 5) | V3 fixes it if a trace arrives; V7 closes it otherwise |
+| B9-6 | issue #255: after v2 | See "After v2" |
 | B9-7 | DECLINED | B9-OQ1 |
 | B9-9 | DECLINED | B9-R12 |
-| B9-10 | issue #256 | — |
-| B9-11, B9-13, B9-14, B9-20 | V5 | B9-14 then goes to §2 step 6 |
+| B9-10 | issue #256 → V3 | D-18, D-19 and one real-machine observation |
+| B9-11, B9-13, B9-14, B9-20 | V5 | B9-14 then goes to §2 step 7 |
 | B9-19 | DONE | #261 (`0fa5e489`) |
 | LQ-1, LQ-4 | V5 | — |
 | LQ-2, LQ-3 | V4 | Items B.6, B.10 |
