@@ -34,11 +34,12 @@ import {
   addUsage, blankSession, noteContextSample, noteLatencySample, notePromptFingerprint,
 } from './usage-parsers.mjs';
 import { normalizeMode } from './usage-modes.mjs';
+import { xdgBase } from './paths.mjs';
 import { observeUsageProject } from './usage-project-evidence.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
 export function defaultOpencodeDbPath() {
-  const home = process.env.XDG_DATA_HOME ?? null;
+  const home = xdgBase('XDG_DATA_HOME', null);
   return home
     ? `${home}/opencode/opencode.db`
     : `${process.env.HOME ?? process.env.USERPROFILE}/.local/share/opencode/opencode.db`;
