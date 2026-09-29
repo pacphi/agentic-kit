@@ -241,8 +241,16 @@ import { ago } from './intelligence.mjs';
     };
   }
 
+  var mntLastSyncedHash=null;
   export function mntSyncHash(){
-    try{if(history.replaceState)history.replaceState(null,"",mntHash());}catch(e){}
+    var current=String(location.hash||"");
+    if(current&&!/^#system\/(?:maintenance|catalog)(?:\/|$)/.test(current))return;
+    if(mntLastSyncedHash!==null&&current!==mntLastSyncedHash){
+      var state=mntApplyHashState();
+      if(state&&state.hasState)mntApplyState(state);
+    }
+    var next=mntHash();
+    try{if(history.replaceState)history.replaceState(null,"",next);mntLastSyncedHash=next;}catch(e){}
   }
 
   // ── Preferences (owner-private; URL state overrides it on load, MNT-PRV-006) ─

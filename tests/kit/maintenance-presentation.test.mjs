@@ -69,6 +69,20 @@ test('Maintenance writes are blocked during the shared Refresh operation', () =>
   }, ['mntWritesBlocked']);
   assert.equal(api.mntWritesBlocked(), true);
 });
+test('Maintenance hash synchronization adopts an externally changed destination', () => {
+  const location = { hash: '#system/maintenance/inventory?scope=across' };
+  const history = { replaceState(_state, _title, hash) { location.hash = hash; } };
+  const api = client('maintenance-workspace', { location, history, localStorage: { setItem() {} } }, ['MNT', 'mntSyncHash']);
+  api.mntSyncHash();
+  location.hash = '#system/maintenance/guidance?scope=project';
+  api.mntSyncHash();
+  assert.equal(api.MNT.destination, 'guidance');
+  assert.equal(api.MNT.scope, 'project');
+  assert.match(location.hash, /^#system\/maintenance\/guidance\?scope=project/);
+  location.hash = '#usage/score';
+  api.mntSyncHash();
+  assert.equal(location.hash, '#usage/score');
+});
 test('an existing inventory does not mask a running or failed refresh', () => {
   const api = client('maintenance-operation', {}, ['mntBuildStatusOf']);
   assert.equal(api.mntBuildStatusOf({ scanRequired: false, lastRefresh: { status: 'running' } }), 'running');
