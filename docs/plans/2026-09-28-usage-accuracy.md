@@ -1,10 +1,14 @@
 # Usage accuracy execution plan
 
-- **Status:** Active
 - **Branch:** `fix/usage-accuracy`, based on `develop@e2f9dcae0554ff63921df618a819fd5e6afe80d2`
 - **Scope sources:** [v2 V6](2026-09-28-remediation-program-v2.md),
   [v1 Wave 4](2026-09-26-remediation-program.md),
   [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md).
+
+## Status
+
+Active. Unit 1 is implemented on this branch; each later unit requires a separate
+dispatch, RED/GREEN evidence and capture commit.
 
 ## Gates and ownership
 
@@ -41,6 +45,39 @@ footprint discovery files until integration; V6 task 1 owns only `session-surfac
 | 22 | Shared labels across Usage, System Projects, Maintenance and Intelligence; unknown has one label and designations use separate axes. | View assertions; **after V3 merges into develop**, then integrate develop. |
 | 23 | Show imported exclusion count in Intelligence census, System Projects and `ak system`; disclose Cowork source coverage is absent. | Three render assertions and source-bound counts; after V3 and unit 7. |
 | 24 | Accept ADR-0060 and align DDD/docs to verified implementation. | Docs links and drift checks; controller-owned shared edits after all prior units. |
+
+## Source and test map for later units
+
+These are the current source and regression entrypoints, not permission to edit a
+file owned by another lane. Confirm each boundary against the integrated tree at
+dispatch, especially after V4 and V3 land. Add a focused test when existing tests
+do not cover the reproduced failure.
+
+| Unit | Candidate source | Test entrypoint |
+|---|---|---|
+| 2 | `src/lib/usage-parsers.mjs`, `usage-project-evidence.mjs`, `usage-index.mjs` | `tests/kit/usage-index.test.mjs`, `usage-codex-attribution.test.mjs` |
+| 3 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-codex-attribution.test.mjs`, `usage-classify.test.mjs` |
+| 4 | `src/lib/usage-parsers.mjs`, `footprint/project-sources.mjs` | `tests/kit/usage-claude-dedup.test.mjs`, `dashboard-project-identity.test.mjs` |
+| 5 | `src/lib/footprint/runtime.mjs`, `project-census.mjs` | `tests/kit/footprint-collectors.test.mjs`, `system-summary.test.mjs` |
+| 6 | `src/lib/usage-parsers.mjs`, `usage-local-provider.mjs` | `tests/kit/usage-provenance.test.mjs`, `usage-local-pricing.test.mjs` |
+| 7 | `src/lib/codex-import-marker.mjs`, `usage-parsers.mjs`, `footprint/project-sources.mjs` | `tests/kit/project-sources-imports.test.mjs`, `usage-codex-attribution.test.mjs` |
+| 8 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-codex-attribution.test.mjs`, `usage-codex-large-rollout.test.mjs` |
+| 9 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-telemetry.test.mjs`, `usage-index.test.mjs` |
+| 10 | `src/lib/usage-parsers.mjs`, `usage-insights.mjs` | `tests/kit/usage-codex-attribution.test.mjs`, `usage-context.test.mjs` |
+| 11 | `src/lib/usage-parsers.mjs`, `usage-cost.mjs` | `tests/kit/usage-telemetry.test.mjs`, `usage-claude-window-pairing.test.mjs` |
+| 12 | `src/lib/usage-parsers.mjs`, `usage-index.mjs` | `tests/kit/usage-claude-dedup.test.mjs`, `usage-index.test.mjs` |
+| 13 | `src/lib/usage-index.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-index.test.mjs`, `usage-claude-window-pairing.test.mjs` |
+| 14 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-index.test.mjs`, `usage-telemetry.test.mjs` |
+| 15 O-6 | `src/lib/usage-opencode.mjs`, `usage-cost.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
+| 16 O-9 | `src/lib/usage-opencode.mjs`, `usage-opencode-bounds.mjs` | `tests/kit/usage-index-opencode.test.mjs`; recover requirement first |
+| 17 O-10 | `src/lib/usage-opencode.mjs`, `usage-index.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
+| 18 O-11 | `src/lib/usage-opencode.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
+| 19 O-12 | `src/lib/usage-opencode.mjs`, `usage-parsers.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
+| 20 | `src/lib/quota.mjs` | `tests/kit/quota.test.mjs`, `usage-limits-empty-state.test.mjs` |
+| 21 | `src/lib/quota.mjs` | `tests/kit/quota.test.mjs` |
+| 22 | `src/lib/dashboard/client/usage.mjs`, `system-projects.mjs`, `intelligence.mjs`, `maintenance-filters.mjs` | `tests/kit/dashboard-project-groups.test.mjs`, `intelligence-table-groups.test.mjs`, `maintenance-dashboard-client-labels.test.mjs` |
+| 23 | `src/lib/dashboard/client/intelligence.mjs`, `system-projects.mjs`, `src/commands/system.mjs` | `tests/kit/dashboard-intel-integration.test.mjs`, `system-command.test.mjs` |
+| 24 | `docs/adr/0060-session-surface-initiator-and-product-names.md`, relevant DDD guide | `tests/kit/docs-layout.test.mjs` and Markdown lint |
 
 Units 9–19 each require a current real-data reproduction before implementation; the
 reference-machine numbers in ADR-0060 are historical, not current results. Unit 1 does
