@@ -2,8 +2,8 @@
 
 ## Status
 
-Approved in conversation on 2026-09-28. Implementation is on
-`fix/ci-windows-test-speed-262`.
+Approved in conversation on 2026-09-28. Implemented locally on
+`fix/ci-windows-test-speed-262`; Windows CI timing proof remains pending.
 
 ## Outcome
 
@@ -21,11 +21,14 @@ Node 22 `Unit + statusline tests` step. The 36 current AQE merge tests passed in
 Windows-specific critical path; they do not establish that Defender or coverage
 is the cause.
 
-`tests/kit/aqe-store-merge.test.mjs` builds three AQE 3.14.4 stores per typical
-test, repeatedly executing the captured schema statement by statement. Node
-runs tests in that file serially. `scripts/run-tests.mjs` instruments the kit
-`.mjs` command with 70% line, branch and function floors on all nine matrix
-legs; the seven statusline/admin `.cjs` commands run separately.
+After the fixture and file split, those same 36 tests passed in 0.63 seconds
+locally on macOS Node 26. This is local evidence, not a Windows speed result.
+
+Before this change, `tests/kit/aqe-store-merge.test.mjs` built three AQE 3.14.4
+stores per typical test, repeatedly executing the captured schema statement by
+statement. Node ran those tests in one file serially. The runner instrumented
+the kit `.mjs` command with 70% line, branch and function floors on all nine
+matrix legs; the seven statusline/admin `.cjs` commands ran separately.
 
 ## Fixture contract
 
@@ -71,5 +74,5 @@ coverage enabled. No test or real-state tripwire is removed.
 
 ADR-0062 is Accepted (2026-09-27). This design changes test construction and
 CI instrumentation, not the store merge contract it describes. ADR-0014 is
-Implemented (updated 2026-09-09) and promises local `pnpm test` coverage on the
-kit `.mjs` suite; the default stays in place.
+Implemented (updated 2026-09-28) and promises default local `pnpm test`
+coverage on the kit `.mjs` suite; CI's single coverage leg is documented there.

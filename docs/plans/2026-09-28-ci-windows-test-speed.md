@@ -46,40 +46,40 @@ one designated leg.
 **Interface:** `buildStore(dir, options)` retains the current synchronous
 fixture behavior. Other existing helpers are exported for the split in Task 2.
 
-- [ ] Write parity tests that import the new helper and compare both schema
+- [x] Write parity tests that import the new helper and compare both schema
   variants with a sequential reference loader from the captured SQL fixture.
-- [ ] Run the parity test and observe failure because the helper is missing.
-- [ ] Build closed templates in one DDL transaction, copy the main DB, set WAL
+- [x] Run the parity test and observe failure because the helper is missing.
+- [x] Build closed templates in one DDL transaction, copy the main DB, set WAL
   on the private copy, and insert rows in one transaction.
-- [ ] Run the parity and all merge tests through the guarded test runner.
-- [ ] Commit `test(aqe): reuse closed schema templates for merge fixtures`.
+- [x] Run the parity and all merge tests through the guarded test runner.
+- [x] Commit `test(aqe): reuse closed schema templates for merge fixtures`.
 
 ## Task 2: File-level parallelism
 
 **Files:** Split `tests/kit/aqe-store-merge.test.mjs` into three concern-based
 `.test.mjs` files, keeping shared fixtures in the Task 1 helper.
 
-- [ ] Record the sorted current test names and count (36) as the migration
+- [x] Record the sorted current test names and count (36) as the migration
   oracle before moving tests.
-- [ ] Move test blocks without changing assertions: preview/refusal,
+- [x] Move test blocks without changing assertions: preview/refusal,
   apply/archive, and starter patterns/CLI.
-- [ ] Compare sorted names/counts with the oracle and run each file alone,
+- [x] Compare sorted names/counts with the oracle and run each file alone,
   then run the guarded full unit suite.
-- [ ] Commit `refactor(test): parallelize AQE merge cases by file`.
+- [x] Commit `refactor(test): parallelize AQE merge cases by file`.
 
 ## Task 3: Single coverage leg
 
 **Files:** Modify `scripts/run-tests.mjs`,
 `tests/kit/run-tests-runner.test.mjs`, and `.github/workflows/ci.yml`.
 
-- [ ] Add runner tests: default unit suite retains four coverage flags;
+- [x] Add runner tests: default unit suite retains four coverage flags;
   `AK_TEST_COVERAGE=0` removes only those flags; another value keeps coverage.
-- [ ] Run focused tests and observe the explicit-zero case fail.
-- [ ] Select coverage flags per run, while preserving all test commands and the
+- [x] Run focused tests and observe the explicit-zero case fail.
+- [x] Select coverage flags per run, while preserving all test commands and the
   real-state tripwire. Set the opt-out in CI except Ubuntu/Node 24.
-- [ ] Run focused tests, the guarded full unit suite, static checks, and
+- [x] Run focused tests, the guarded full unit suite, static checks, and
   workflow validation.
-- [ ] Commit `fix(ci): collect unit coverage on one matrix leg`.
+- [x] Commit `fix(ci): collect unit coverage on one matrix leg`.
 
 ## Task 4: Windows proof and handoff
 
