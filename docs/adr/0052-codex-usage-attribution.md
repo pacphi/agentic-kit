@@ -124,7 +124,9 @@ real data lives in the Claude transcript.
 The in-rollout marker (`payload.turn_id` prefix) is the signal; the import map is not a
 runtime dependency. Exclusion is per turn. A valid native `task_started` or identified
 `turn_context` opens native ownership; explicit record IDs must agree with that boundary.
-Missing or conflicting IDs in mixed files remain unattributable. A foreign completion does
+Missing or conflicting IDs in mixed files remain unattributable. An absent context ID may
+enrich an identified turn, but an explicitly invalid boundary ID breaks adjacency and marks
+ownership incomplete. A foreign completion does
 not close the active turn. Replayed parent history still cannot count as child activity.
 Marker text in messages and later `session_meta` declarations establish no ownership.
 
@@ -140,9 +142,12 @@ Files without proven own activity remain `imported: true` with unknown/imported-
 and are cached but excluded. Mixed files retain `importEvidence`: `importedTurns`,
 `importedRecords`, `ambiguousRecords` and `nativeRecords`, with no turn IDs or copied content.
 The unique imported-turn set retains at most 4,096 bounded IDs; `importedTurnCountComplete`
-marks a lower-bound count when capped. A mixed streaming source with clipped lines cannot
-prove ownership across omitted metadata: it is excluded with `ownershipComplete: false`
-and the existing clipped-line diagnostic, pending a complete readable source. A subagent
+marks a lower-bound count when capped. Mixed sources with clipped lines, skipped nonblank
+records or explicitly invalid turn-boundary IDs are conservatively excluded in their entirety
+with `ownershipComplete: false`, pending a complete readable source. String and streaming
+readers expose the last pass's skipped-record count as `importEvidence.malformedRecords`;
+clipping retains its existing diagnostic. This may omit proven activity before a gap but
+cannot carry native ownership across unreadable copied-turn metadata. A subagent
 whose replay cannot be separated also has incomplete ownership. Source-health counters
 `importOwnershipIncompleteFiles` and `importedTurnCountIncompleteFiles` retain these gaps
 even when the file is excluded or served from cache.
@@ -155,7 +160,8 @@ Discovery first reads its usual 256 KiB/40-line head. Import-marked heads additi
 at most a 256 KiB head and a 2 MiB tail, capped at 20,000 records per window and 512 MiB of
 additional reads per scan. An unread middle resets ownership. Positive native activity can
 establish a mixed sighting; imported-only exclusion requires a complete, unambiguous read.
-A sampled subagent without a complete replay boundary remains unresolved. Sources and the
+Malformed envelopes or explicitly invalid turn-boundary IDs also leave an import candidate
+unresolved. A sampled subagent without a complete replay boundary remains unresolved. Sources and the
 discovery summary expose `importedMixed` and `importedUnresolved`; unresolved imports make
 `complete` and `sessionCountComplete` false and cannot trigger encoded-directory recovery.
 These are bounded observations, not an exhaustive turn census.

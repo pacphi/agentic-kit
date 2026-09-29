@@ -184,7 +184,8 @@ function applyProject(rec, res) {
 // ── transcript parsing ──────────────────────────────────────────────────────
 
 /** Split JSONL into parsed objects, skipping anything that will not parse. */
-function* jsonLines(raw) {
+function* jsonLines(raw, stats = null) {
+  if (stats) stats.malformedRecords = 0;
   // Scanned lazily, not split up front: a caller that needs only the first
   // line (the subagent replay pre-pass) must not pay for the whole file.
   let pos = 0;
@@ -193,9 +194,16 @@ function* jsonLines(raw) {
     const end = found < 0 ? raw.length : found;
     const start = pos;
     pos = end + 1;
-    if (end === start || raw.charCodeAt(start) !== 123 /* '{' */) continue;
+    if (end === start) continue;
+    if (raw.charCodeAt(start) !== 123 /* '{' */) {
+      if (stats && raw.slice(start, end).trim()) stats.malformedRecords++;
+      continue;
+    }
     let obj;
-    try { obj = JSON.parse(raw.slice(start, end)); } catch { continue; }
+    try { obj = JSON.parse(raw.slice(start, end)); } catch {
+      if (stats) stats.malformedRecords++;
+      continue;
+    }
     if (obj && typeof obj === 'object') yield obj;
   }
 }
@@ -1250,8 +1258,9 @@ export function parseCodex(raw, { id, withTurns = false }) {
   // `raw` is the rollout text, or a streaming source (openCodexRollout) for one
   // too large to hold as a string: `{ head, lines, stats }`. Both feed the SAME
   // walk below, so the two paths cannot drift.
+  const readStats = { malformedRecords: 0 };
   const source = typeof raw === 'string'
-    ? { head: raw, lines: { [Symbol.iterator]: () => jsonLines(raw) } }
+    ? { head: raw, stats: readStats, lines: { [Symbol.iterator]: () => jsonLines(raw, readStats) } }
     : raw;
   const rec = blankSession(id, 'codex');
   rec.sessionOrigin = usageRecordOrigin(source.head, 'codex');
@@ -1307,7 +1316,11 @@ export function parseCodex(raw, { id, withTurns = false }) {
   }
 
   if (hasImports) {
-    rec.importEvidence = { ...codexImportEvidence(ownership), ownershipComplete: !plan.unprovable && (source.stats?.clippedLines ?? 0) === 0 };
+    const malformedRecords = source.stats?.malformedRecords ?? 0;
+    rec.importEvidence = { ...codexImportEvidence(ownership), malformedRecords,
+      ownershipComplete: ownership.ownershipComplete && !plan.unprovable
+        && (source.stats?.clippedLines ?? 0) === 0 && malformedRecords === 0 };
+    if (!rec.importEvidence.ownershipComplete) rec.importEvidence.nativeRecords = 0;
     stats.importEvidence = rec.importEvidence;
     stats.clippedLines = source.stats?.clippedLines ?? 0;
     if (!genuineActivity || !rec.importEvidence.ownershipComplete) return importedCodexSession(rec, stats);

@@ -15,7 +15,11 @@ function recordsIn(buffer, { dropFirst, dropLast }) {
   for (const line of lines) {
     if (!line.trim()) continue;
     if (records.length >= MAX_RECORDS) { complete = false; break; }
-    try { records.push(JSON.parse(line)); } catch { complete = false; records.push(null); }
+    try {
+      const record = JSON.parse(line);
+      if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error('invalid envelope');
+      records.push(record);
+    } catch { complete = false; records.push(null); }
   }
   return { records, complete };
 }
@@ -61,9 +65,10 @@ function classifyWindows(groups, complete) {
   for (const [index, records] of groups.entries()) {
     if (index) state = newCodexTurnOwnership();
     for (const record of records) {
-      if (record === null) { state = newCodexTurnOwnership(); ambiguous = true; continue; }
+      if (record === null) return { kind: 'unresolved', complete: false };
       const before = state.nativeRecords;
       const owner = codexTurnOwner(state, record);
+      if (!state.ownershipComplete) return { kind: 'unresolved', complete: false };
       if (owner !== 'native' || isCodexReplayLine(replay.boundary, record)) continue;
       if (record?.type === 'turn_context' && !cwd && typeof record.payload?.cwd === 'string') cwd = record.payload.cwd;
       if (state.nativeRecords > before) genuine = true;

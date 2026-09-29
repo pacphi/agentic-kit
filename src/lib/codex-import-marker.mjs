@@ -37,7 +37,7 @@ export function isImportedCodexRollout(headLines) {
  * a foreign completion never closes the active turn. Missing IDs in a mixed
  * file cannot open a native turn. No IDs or payloads escape the state. */
 export function newCodexTurnOwnership({ hasImports = true } = {}) {
-  return { hasImports, activeId: null, activeOwner: hasImports ? 'ambiguous' : 'native',
+  return { hasImports, ownershipComplete: true, activeId: null, activeOwner: hasImports ? 'ambiguous' : 'native',
     importedIds: new Set(), importedTurnCountComplete: true, importedRecords: 0, ambiguousRecords: 0, nativeRecords: 0 };
 }
 
@@ -45,6 +45,14 @@ const validTurnId = (id) => typeof id === 'string' && id.length > 0
   && id.length <= 256 && !/\s/u.test(id);
 
 function noteBoundary(state, p, imported) {
+  // Absence can mean an enriching context. An explicitly invalid declaration
+  // cannot preserve adjacency to the prior native turn in a mixed source.
+  if (state.hasImports && Object.hasOwn(p, 'turn_id') && !validTurnId(p.turn_id)) {
+    state.activeId = null;
+    state.activeOwner = 'ambiguous';
+    state.ownershipComplete = false;
+    return;
+  }
   if (!validTurnId(p.turn_id) && p.type !== 'task_started') return;
   state.activeId = validTurnId(p.turn_id) ? p.turn_id : null;
   state.activeOwner = imported ? 'imported' : state.activeId ? 'native'
