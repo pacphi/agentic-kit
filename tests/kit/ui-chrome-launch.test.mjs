@@ -61,3 +61,44 @@ test('launchChrome removes its temp folder when Chrome fails to start', async (t
   await assert.rejects(launchChrome(), /no chrome/);
   assert.equal(fs.existsSync(dir), false);
 });
+
+test('launchChrome excludes credentials and caller env while retaining launch options', async (t) => {
+  const { chromium } = await import('playwright');
+  const { launchChrome } = await import('../ui/helpers/launch-chrome.mjs');
+  const injected = ['AK_CHROME_SECRET_SENTINEL', 'AQE_EMBEDDER_PROVIDER', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR'];
+  const original = Object.fromEntries(injected.map((key) => [key, process.env[key]]));
+  for (const key of injected) process.env[key] = `sentinel-${key}`;
+  t.after(() => {
+    for (const key of injected) {
+      if (original[key] === undefined) delete process.env[key];
+      else process.env[key] = original[key];
+    }
+  });
+  let seen;
+  t.mock.method(chromium, 'launch', async (options) => { seen = options; return { close: async () => {} }; });
+  const browser = await launchChrome({ headless: false, args: ['--disable-gpu'], env: { AK_CHROME_SECRET_SENTINEL: 'override' } });
+  try {
+    assert.equal(seen.headless, false);
+    assert.deepEqual(seen.args, ['--disable-gpu']);
+    assert.equal(seen.env.AK_CHROME_SECRET_SENTINEL, undefined);
+    for (const key of injected) {
+      assert.equal(seen.env[key], undefined, `${key} should not reach Chrome`);
+    }
+    for (const key of ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'APPDATA', 'LOCALAPPDATA']) {
+      assert.ok(seen.env[key].startsWith(seen.env.TMPDIR), `${key} should be private`);
+    }
+  } finally { await browser.close(); }
+});
+
+test('Chrome environment selects Windows names without duplicate case variants', async () => {
+  const { chromeEnv } = await import('../ui/helpers/launch-chrome.mjs');
+  const env = chromeEnv({ Path: 'first', PATH: 'second', display: ':8', SystemRoot: 'C:\\Windows',
+    temp: 'real-temp', TOKEN: 'secret' }, 'private-temp', 'win32');
+  assert.equal(env.Path, 'second');
+  assert.equal(env.SystemRoot, 'C:\\Windows');
+  assert.equal(env.TEMP, 'private-temp');
+  assert.equal(env.TMP, 'private-temp');
+  assert.equal(Object.keys(env).filter((key) => key.toUpperCase() === 'PATH').length, 1);
+  assert.equal(Object.keys(env).filter((key) => key.toUpperCase() === 'TEMP').length, 1);
+  assert.equal(env.TOKEN, undefined);
+});

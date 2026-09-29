@@ -4,7 +4,7 @@
 
 Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Tasks 10/5/7 and Task 11 were independently accepted. Task 12 adds guarded `focus <files…>` and a bounded POSIX interrupted-run proof: a completed focus run retains an interrupted root while its child lives, after that child exits, and while another runner is live. Default sibling handling remains list-only on every platform; native Windows/Linux behavior is unmeasured. No backlog removal, push, PR or merge has occurred. The creator census is complete: 647 sites classified, zero unresolved current lifecycles.
 
-LQ1 source inspection refutes the claimed missing selector propagation: the runner copies its input environment and removes only `FORCE_COLOR`. A guarded-child sentinel regression is green on the original implementation and fails when that copy is removed. LQ4 Chrome environment narrowing is in progress.
+LQ1 source inspection refutes the claimed missing selector propagation: the runner copies its input environment and removes only `FORCE_COLOR`. A guarded-child sentinel regression is green on the original implementation and fails when that copy is removed. LQ4 now uses an explicit Chrome launch environment with a private home and temp root; the local macOS system Chrome passed the full guarded UI suite (495 dashboard checks, 15 Node UI tests). Guarded unit, TypeScript and targeted ESLint gates passed. Native Windows and Linux Chrome behavior remains unmeasured.
 
 ## Contract and dependencies
 
