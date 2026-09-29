@@ -22,7 +22,7 @@ import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
 import { promptSemantics } from './usage-prompt-semantics.mjs';
-import { observeUsageProject, usageSessionOrigin } from './usage-project-evidence.mjs';
+import { observeUsageProject, usageRecordOrigin, importedUsageRecordOrigin } from './usage-project-evidence.mjs';
 import { isCodexImportedLine } from './codex-import-marker.mjs';
 
 export { promptSemantics } from './usage-prompt-semantics.mjs';
@@ -755,7 +755,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
  */
 export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = null }) {
   const rec = blankSession(id, 'claude');
-  rec.sessionOrigin = usageSessionOrigin(raw, 'claude');
+  rec.sessionOrigin = usageRecordOrigin(raw, 'claude');
   const turns = [];
   const titleState = { firstPrompt: '', aiTitle: '' };
   // Open by the most recent human prompt, closed by the first real assistant
@@ -1157,6 +1157,7 @@ function processCodexLine(rec, turns, stats, titleState, usageState, latState, m
  *  read. */
 function importedCodexSession(rec, stats) {
   rec.imported = true;
+  rec.sessionOrigin = importedUsageRecordOrigin();
   rec.title = '(imported Claude session)';
   return { session: seal(rec), turns: [], parseStats: { ...stats, imported: true } };
 }
@@ -1216,7 +1217,7 @@ export function parseCodex(raw, { id, withTurns = false }) {
     ? { head: raw, lines: { [Symbol.iterator]: () => jsonLines(raw) } }
     : raw;
   const rec = blankSession(id, 'codex');
-  rec.sessionOrigin = usageSessionOrigin(source.head, 'codex');
+  rec.sessionOrigin = usageRecordOrigin(source.head, 'codex');
   const turns = [];
   const stats = codexParseStats();
   const lines = source.lines;

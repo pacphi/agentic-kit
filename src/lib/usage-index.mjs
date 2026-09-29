@@ -183,7 +183,7 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // across providers (rows now carry `provider`); and no mark on completed
 // responses whose provider reported no tokens (`tokensUnreported`). None can be
 // corrected in place, so every cached OpenCode record re-parses.
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
