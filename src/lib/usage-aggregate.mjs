@@ -791,7 +791,14 @@ function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
     acc.cacheSaved += cacheSavedFor(row, rec, deps, rates);
     const rowCost = foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
     if (providerUsage) {
-      const p = bucket(providerUsage, row.provider ?? 'unknown');
+      // Only per-row accounting belongs here. A full bucket also has session
+      // minutes/confidence initialized to zero; spreading it over the session
+      // row below would erase those measured session fields.
+      const provider = row.provider ?? 'unknown';
+      const p = providerUsage[provider] ??= {
+        responses: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+        tokens: 0, cost: 0,
+      };
       p.responses += row.responses;
       p.input += row.input; p.output += row.output;
       p.cacheRead += row.cacheRead; p.cacheWrite += row.cacheWrite;

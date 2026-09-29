@@ -113,6 +113,9 @@ test('scan aggregates opencode sessions: host bucket, provider bucket, tokens, a
   assert.ok(agg.byHost.opencode, 'byHost gains the opencode bucket');
   assert.equal(agg.byHost.opencode.cost, 0.5);
   assert.ok(agg.byProvider.opencode, 'byProvider gains the observed provider bucket');
+  assert.ok(s.minutes > 0, 'the fixture has measured duration');
+  assert.equal(agg.byProvider.opencode.minutes, s.minutes, 'single-provider duration follows the session');
+  assert.equal(agg.byProvider.opencode.confidence, 0.9, 'classifier confidence survives provider folding');
   assert.equal(agg.totals.cost, 0.5);
   assert.equal(agg.byModel['kimi-k3'].cost, 0.5);
   rm(sb.dir);
@@ -160,7 +163,14 @@ test('one OpenCode session partitions provider usage on cold and warm scans with
       });
       assert.equal(agg.byHost.opencode.sessions, 1);
       assert.equal(agg.byHost.opencode.responses, 3);
+      assert.ok(agg.sessions[0].minutes > 0, 'the fixture has measured duration');
       assert.deepEqual(Object.keys(agg.byProvider).sort(), ['alpha', 'beta']);
+      for (const provider of ['alpha', 'beta']) {
+        assert.equal(agg.byProvider[provider].minutes, agg.sessions[0].minutes,
+          'each provider session count carries the session duration');
+        assert.equal(agg.byProvider[provider].confidence, 0.9,
+          'each provider session count carries classifier confidence');
+      }
       assert.deepEqual(
         ['sessions', 'responses', 'input', 'output', 'cacheRead', 'cacheWrite', 'tokens', 'cost']
           .map((key) => agg.byProvider.alpha[key]),
