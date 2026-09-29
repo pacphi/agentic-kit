@@ -159,27 +159,23 @@ async function fetchSelfCandidate(tags, cachedBest, fetchLatest) {
   return { best, observed, answered };
 }
 
-/** The self record to save after a lookup, or null to save nothing. A live
- *  winner is an observation. When every lookup failed, the record stays and
- *  `last` is restamped, so the next lookup waits one TTL window; `observedAt`
- *  keeps when the recorded best was seen (a record written before it existed
- *  takes the previous `last`). A partial answer that leaves a cached candidate
- *  winning renews nothing. Neither does a failure when the recorded best is
- *  one this install cannot use (a `next` candidate on a stable install): such
- *  a record is never fresh, so a restamp would only rewrite kit.json on every
- *  call, and dropping the candidate would make an empty record look fresh and
- *  stop the lookup for a TTL window once the registry is back. */
-function selfRecord(cached, usable, { best, observed, answered }, now = Date.now()) {
+/** `last` and `observedAt` describe the winning candidate; `attempt` only
+ *  throttles a lookup that could not update it. The attempt's ordered tag set
+ *  prevents a stable-channel retry from suppressing an untried next channel. */
+function selfRecord(cached, usable, { best, observed, answered }, tags, now = Date.now()) {
   if (observed) return { last: now, best, observedAt: now };
-  if (answered || (cached?.best && !usable)) return null;
-  return { ...cached, last: now, observedAt: cached?.observedAt ?? cached?.last };
+  if (answered || (cached?.best && !usable)) {
+    return { ...cached, attempt: { at: now, tags } };
+  }
+  const { attempt: _priorAttempt, ...prior } = cached ?? {};
+  return { ...prior, last: now, observedAt: cached?.observedAt ?? cached?.last };
 }
 
 /** Look the kit up on its channels; with `record`, save what selfRecord keeps.
  *  Returns the winning candidate. */
 async function lookUpSelf(cfg, cached, { tags, cachedBest, fetchLatest, record }) {
   const candidate = await fetchSelfCandidate(tags, cachedBest, fetchLatest);
-  const entry = record ? selfRecord(cached, cachedBest, candidate) : null;
+  const entry = record ? selfRecord(cached, cachedBest, candidate, tags) : null;
   if (entry) {
     cfg.versionCheck = { ...cfg.versionCheck, self: entry };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
@@ -191,8 +187,9 @@ async function lookUpSelf(cfg, cached, { tags, cachedBest, fetchLatest, record }
  *  (pkgRoot). Prerelease installs also consult the `next` dist-tag —
  *  prereleases publish there, so `latest` alone would never see them; the
  *  higher of latest/next wins. Cached in kit.json alongside versionCheck.
- *  Failed lookups preserve eligible cached evidence (see selfRecord); `force`
- *  retries within the TTL. cacheOnly=true reports the recorded best with no
+ *  Failed lookups preserve eligible cached evidence (see selfRecord); an
+ *  `attempt` stamp limits partial/unusable retries to once per tag set and TTL.
+ *  `force` retries within the TTL. cacheOnly=true reports the recorded best with no
  *  network and no write (`ak sync --skip self`); record=false reports what the
  *  lookup found without saving it (ADR-0063).
  *  @param {{ pkgRoot?: string, force?: boolean, cacheOnly?: boolean, record?: boolean,
@@ -208,8 +205,14 @@ export async function selfDrift({ pkgRoot, force = false, cacheOnly = false, rec
   const tags = installed?.includes('-') ? ['latest', 'next'] : ['latest'];
   const cachedBest = cached?.best && tags.includes(cached.best.tag) && isValidSemver(cached.best.version)
     ? cached.best : null;
-  const fresh = !force && cached?.last && Date.now() - cached.last < ttlMs
-    && (!cached.best || cachedBest);
+  const now = Date.now();
+  const attempt = cached?.attempt;
+  const attemptFresh = Number.isSafeInteger(attempt?.at) && attempt.at > 0 && attempt.at <= now
+    && Array.isArray(attempt.tags) && attempt.tags.length === tags.length
+    && tags.every((tag, index) => attempt.tags[index] === tag)
+    && now - attempt.at < ttlMs;
+  const fresh = !force && ((cached?.last && now - cached.last < ttlMs
+    && (!cached.best || cachedBest)) || attemptFresh);
   const best = fresh || cacheOnly ? cachedBest : await lookUpSelf(cfg, cached, { tags, cachedBest, fetchLatest, record });
   return {
     pkg: KIT_PKG,
