@@ -140,3 +140,30 @@ do not cover the reproduced failure.
 Units 9–19 each require a current real-data reproduction before implementation; the
 reference-machine numbers in ADR-0060 are historical, not current results. Unit 1 does
 not read personal transcripts, change parser/cache schemas, or implement any view.
+
+
+## Unit 18 candidate: OpenCode compaction and reconciliation
+
+The parser reads bounded compaction parts and selected session metadata. A user
+compaction request plus an error-free assistant summary with a finish value and
+that actual parent link establishes one completed observation per request.
+Requests alone, orphan summaries and in-flight markers retain uncertainty in the
+lower/upper bounds. Failed or aborted summaries do not establish completion.
+The OpenCode aggregate projection now retains those bounds; Codex and Claude
+projections retain their existing behavior.
+
+Session counters are diagnostic only. Exact OpenCode v1.18.33 source shows that
+session totals accumulate step-finish parts, but assistant tokens hold the latest
+step. Reconciliation therefore requires completed valid messages, exactly one
+matching valid step per assistant, populated valid session counters, and no V2
+rows in that session. Multiple or missing steps, incomplete metadata, unsupported
+versions/token bases and untrusted hosted zero costs remain unknown. Matching or
+mismatching counters never replace or add to message usage. No steps are billed a
+second time. The cache marker extends cost-trust-v2 with observations-v1; schema
+26, source identity and timezone checks remain intact.
+
+The bounded local metadata sample contained three sessions, no compaction parts,
+no in-flight markers and no populated session counters. Its database digest was
+unchanged. This is not positive affected-user evidence; synthetic fixtures cover
+the supported and failure cases. Unit 18 awaits independent review; Unit 19 has
+not started. Detailed commands and evidence are in the ignored task18 report.

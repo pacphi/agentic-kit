@@ -144,7 +144,7 @@ test('degraded OpenCode retains old timezone evidence without contributing stale
   const entry = structuredClone(initial.entries[0]);
   entry.session.id = 'oc-fixture';
   entry.session.host = entry.session.provider = 'opencode';
-  entry.parseSemantics = 'cost-trust-v2';
+  entry.parseSemantics = 'cost-trust-v2-observations-v1';
   entry.dbFile = path.join(dir, 'broken.db');
   cache.entries['opencode://oc-fixture'] = entry;
   fs.writeFileSync(entry.dbFile, 'not a database');

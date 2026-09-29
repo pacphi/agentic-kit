@@ -1,3 +1,4 @@
+import { opencodeObservationProjection } from './usage-opencode-observations.mjs';
 import { rowCostEvidence, sessionCostEvidence, acquisitionSummary, reconcileClaudeCostState } from './usage-cost.mjs';
 import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 import { classifySessionSurface } from './session-surface.mjs';
@@ -933,7 +934,7 @@ function buildSessionRow(rec, usage, verdict) {
     // records (the schema bump re-derives those).
     reasoningOutput: rec.reasoningOutput ?? 0,
     rateLimits: rec.rateLimits ?? null,
-    ...codexObservationProjection(rec),
+    ...(rec.host === 'opencode' ? opencodeObservationProjection(rec) : codexObservationProjection(rec)),
     ...v11Projection(rec),
     // v16: what this session's operator actually typed. The underscore-prefixed
     // members are working material for the window fold (per-host lengths and

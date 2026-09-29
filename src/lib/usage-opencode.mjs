@@ -23,6 +23,7 @@
 // Subagent sessions (parent_id set) keep their tokens: opencode child sessions
 // record their OWN messages, not a replay of the parent's — the codex
 // double-count rule does not apply (different storage semantics).
+import { availableOpencodeMetadata, opencodeObservations } from './usage-opencode-observations.mjs';
 import { withDb } from './sqlite.mjs';
 import { sessionAcquisitionCoverage } from './usage-opencode-bounds.mjs';
 // Shared record shape/accumulator with parseClaude/parseCodex — see their
@@ -371,22 +372,9 @@ function processMessageRow(rec, turns, row, { withTurns, partsByMessage }) {
   recordAssistantMessage(rec, turns, { data, rowId: row.id, at, withTurns, partsByMessage });
 }
 
-/** The `part` rows a parse needs. `withTurns` wants every part (text, tool and
- *  reasoning, for both roles) to build turn rows; the scan path wants only the
- *  USER text parts, which is all a prompt fingerprint reads — the assistant
- *  bodies it would otherwise pull in are the bulk of the store and are never
- *  looked at there.
- *
- *  This is the one place the scan path reads message BODIES at all, so its cost
- *  was measured rather than assumed. The live store on this machine is too
- *  small to time (2 sessions, 2 parts; ~5 µs/session, where the two
- *  `json_extract` predicates cannot pay for themselves because there is nothing
- *  to exclude). Benchmarked instead against a synthetic store at realistic scale
- *  — 300 sessions, 18k messages, 63k parts, 75 MB — the filtered query runs
- *  **45 µs/session and materializes 0.6 MB**, against 125 µs/session and 61 MB
- *  for the unfiltered join the reader path uses: 2.8x faster, and ~100x less
- *  text pulled into memory. Only the fingerprints are retained; the text itself
- *  is discarded with the row. */
+/** Scan reads user text for fingerprints and compaction/step-finish metadata
+ * for observations. Step-finish usage is never added to message usage.
+ * Detail additionally reads text/reasoning/tool bodies for transcript turns. */
 function loadTextParts(db, id, withTurns) {
   if (withTurns) {
     return db.prepare(`
@@ -398,9 +386,10 @@ function loadTextParts(db, id, withTurns) {
   return db.prepare(`
     SELECT p.message_id AS message_id, p.data AS data
     FROM part p JOIN message m ON m.id = p.message_id
-    WHERE m.session_id = ?
-      AND json_extract(m.data, '$.role') = 'user'
-      AND json_extract(p.data, '$.type') = 'text'
+    WHERE m.session_id = ? AND (
+      (json_extract(m.data, '$.role') = 'user'
+       AND json_extract(p.data, '$.type') IN ('text', 'compaction'))
+      OR json_extract(p.data, '$.type') = 'step-finish')
     ORDER BY p.rowid ASC
   `).all(id);
 }
@@ -458,13 +447,14 @@ export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, m
       delete rec.stamps;
       return { session: rec, turns: [] };
     }
-    const srow = db.prepare('SELECT id, parent_id, directory, title FROM session WHERE id = ?').get(id);
+    const columns = ['id', 'parent_id', 'directory', 'title', ...availableOpencodeMetadata(db)];
+    const srow = db.prepare(`SELECT ${columns.join(', ')} FROM session WHERE id = ?`).get(id);
     if (!srow) return null;
     const msgRows = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC, id ASC').all(id);
     const partsByMessage = buildPartsIndex(loadTextParts(db, id, withTurns));
 
     const rec = initSessionRecord(srow);
-    Object.assign(rec, { acquisitionCoverage });
+    Object.assign(rec, { acquisitionCoverage }, opencodeObservations(db, srow, msgRows, partsByMessage));
     const turns = [];
     for (const row of msgRows) processMessageRow(rec, turns, row, { withTurns, partsByMessage });
     // A session can switch providers, including to a row with no providerID.

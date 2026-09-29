@@ -195,10 +195,10 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // Claude record coverage is also added within v26: entries without its count-only
 // parseStats reparse, so a legacy cache never manufactures a zero unknown count.
 export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
-// OpenCode cost interpretation changed within schema 26. This entry-level
-// marker distinguishes a new parse from an older coalesced row, including
-// rows where every reported cost happened to be trusted.
-const OPENCODE_PARSE_SEMANTICS = 'cost-trust-v2';
+// OpenCode cost trust and compaction/reconciliation interpretation changed
+// within schema 26. This entry marker requires both semantics, independently
+// of source identity and the separately enforced local-calendar context.
+const OPENCODE_PARSE_SEMANTICS = 'cost-trust-v2-observations-v1';
 const compatibleOpencodeCache = (candidate, entry) => candidate.provider !== 'opencode'
   || (entry?.parseSemantics === OPENCODE_PARSE_SEMANTICS
     && entry?.sourceIdentity === candidate.sourceIdentity && !!candidate.sourceIdentity);
