@@ -7,7 +7,9 @@
 
 ## Status
 
-Active. Units 1–11, 20 and 21 are accepted. Unit 11 captures Claude Code's
+Active. All 23 source units are independently accepted. Unit 24 documentation is a
+candidate awaiting independent review. Final integration gates, whole-branch review and
+archival remain controller-owned. Unit 11 captures Claude Code's
 latest valid cumulative `cost-state` checkpoint as a separate reconciliation
 signal. It reports provable time or token scope differences while preserving
 message-derived cost totals. The observed checkpoint has no end time or serving
@@ -40,8 +42,7 @@ is accepted. Unit 14 adds count-only Claude record coverage for known handled,
 known ignored, unknown, invalid-type and malformed JSON lines. A v26 cache entry
 without those counters reparses; unknown or malformed records degrade source
 health without changing message usage or cost. The bounded real-data sample and
-focused verification are in the ignored task14 handoff report. Unit 14 awaits
-independent review before Unit 16.
+focused verification are in the ignored task14 handoff report. Unit 14 and Units 15–19 are independently accepted.
 
 Pricing retains its existing local `row.day` contract (`usage-parsers.localDay`,
 `pricing.costOf`, and the cache-saving probes documented in usage metrics). Cold
@@ -56,9 +57,8 @@ usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin
 fields as raw evidence for local detail. The classifier now retains those tokens
 without inferring a product or provider; malformed, oversized and non-string
-values remain excluded. This narrow policy follow-up does not accept all of
-ADR-0060 or add a UI. Later units still require separate dispatch, RED/GREEN
-evidence and capture commits.
+values remain excluded. Units 22/23 delivered the local detail UI and count/coverage disclosures. Unit 24 records
+ADR-0060 acceptance against those implemented contracts, subject to documentation review.
 
 Unit 6 records Amazon Bedrock or Google Vertex AI only when a Claude assistant
 message carries a provider-specific model ID. Conflicting or ordinary IDs leave
@@ -66,29 +66,26 @@ the provider unknown. Historical transcripts do not capture launch environment
 or settings, so current configuration cannot identify their serving provider;
 OpenRouter, other gateways and private endpoints remain unknown without bound
 session evidence. The detail stays under `sessionOrigin.thirdPartyProvider` with
-`thirdPartyProviderBasis: assistant-model-id` when known. Units 22/23 own display.
+`thirdPartyProviderBasis: assistant-model-id` when known. Units 22/23 implement display.
 
 ## Gates and ownership
 
-Start production edits only after exact-head develop push CI succeeds. Use one RED fixture
-before each source change, a focused GREEN run, and a unit commit for each item. Verify
-typecheck, lint, relevant regressions and the state tripwire before review. The controller
-owns shared manifests, ADR acceptance, integration, push, PR, merge and release. No real
-personal transcript contents enter fixtures or reports; real-data reproductions report
-enumerated values and counts only. The V4 XDG work owns `usage-opencode` and adjacent
-footprint discovery files until integration; V6 task 1 owns only `session-surface.mjs`,
-`footprint/session-origin.mjs` and their tests. V6 UI integrates develop after V3.
+All source units have completed their assigned implementation and independent review. Unit 24
+owns the affected ADR bodies and living guides in the assigned worktree. The controller owns
+shared indexes/manifests, final integration gates, whole-branch review, plan archival and any
+separately authorized publication. Unit 24 runs documentation gates only. No private transcript
+content, raw identifiers, paths or observed costs enter public documentation.
 
 ## Capture units
 
 | Unit | Source boundary and acceptance | Focused evidence / dependency |
 |---|---|---|
-| 1 | Shared raw-value → surface → initiator → label vocabulary; bounded raw evidence, unknown and provider separate. Adapt footprint origin with legacy fields retained. | ADR table fixtures, first declaration, privacy, identity and imports regressions. This dispatch only. |
+| 1 | Shared raw-value → surface → initiator → label vocabulary; bounded raw evidence, unknown and provider separate. Adapt footprint origin with legacy fields retained. | ADR table fixtures, first declaration, privacy, identity and imports regressions. Accepted. |
 | 2 | Parser and usage cache integration, exactly one schema 25→26 bump. Carry new fields and rebuild old cache. | Parser, cache migration and aggregate tests; after unit 1. Footprint schema stays 8. |
 | 3 | Full Codex `thread_source` classification, subagent/reviewer rollup and unpriced Auto-review models (X-7). | Per-value parser fixtures and counts; after unit 2. |
 | 4 | Count Claude by `sessionId`, exclude subagent and bridge transcripts, and remeasure source-bound census. | Duplicate/session fixtures plus enumerated-count reproduction; after unit 2. |
 | 5 | Runtime census symmetry for Claude.app and ChatGPT.app; attribute bundled CLIs to observed sessions. | Runtime fixtures on both app forms; after units 2–4. |
-| 6 | Third-party Claude provider from observed environment, settings or model ID; unknown remains unknown and provider is a separate detail field. Cloud label renders only for observations. | Evidence-precedence and unknown fixtures; after unit 2. |
+| 6 | Third-party Claude provider from session-bound provider-specific assistant model ID; unknown remains unknown and provider is a separate detail field. Cloud label renders only for observations. | Evidence-precedence and unknown fixtures; after unit 2. |
 | 7 | Imported turn exclusion per turn; later genuine Codex turns count and establish an actual app origin (decision 12/B1-4). | Mixed import/real-turn fixture and enumerated-count reproduction; after unit 2. |
 | 8 | Token-bearing Codex record with zero responses: count it or document exact unsupported shape (UA-5). | Minimal shape reproduction and reconciliation; after unit 2. |
 | 9 | O-7 session `byProvider` last-wins repair. | Count-only reproduction, provider totals; after parser integration. |
@@ -97,19 +94,18 @@ footprint discovery files until integration; V6 task 1 owns only `session-surfac
 | 12 | C-8 cross-file message-id dedup. | Duplicate message fixture and count-only sample; after parser integration. |
 | 13 | C-9 local-timezone day bucketing frozen in cache. | Boundary-day fixtures in two zones; after cache integration. |
 | 14 | C-11 unknown-record counter. | Known/unknown record fixtures; after parser integration. |
-| 15–19 | O-6, O-9, O-10, O-11, O-12, each in a separate commit. | Recover the exact audit requirements first; then current count-only reproduction. Candidate topics are cost trust, database discovery, V2/legacy storage, compaction/reconciliation, and sidechain exclusion. These descriptions are hypotheses, not acceptance criteria. Wait for V4 ownership to clear. |
+| 15–19 | O-6, O-9, O-10, O-11, O-12, each in a separate commit. | Accepted: cost trust and cache semantics, explicit database selection, V2/legacy coverage warnings, bounded compaction/reconciliation and child fingerprint exclusion. |
 | 20 | StatusLine classifier reads local managed settings. | Settings fixture and classifier regression; independently reordered before V4 integration. Other managed policy channels remain unobserved. |
 | 21 | Shell wrapper around footer helper is `custom` (UA-4). | Wrapper fixture; after unit 20. |
 | 22 | Shared labels across Usage, System Projects, Maintenance and Intelligence; unknown has one label and designations use separate axes. | View assertions; **after V3 merges into develop**, then integrate develop. |
 | 23 | Show imported exclusion count in Intelligence census, System Projects and `ak system`; disclose Cowork source coverage is absent. | Three render assertions and source-bound counts; after V3 and unit 7. |
-| 24 | Accept ADR-0060 and align DDD/docs to verified implementation. | Docs links and drift checks; controller-owned shared edits after all prior units. |
+| 24 | Accept ADR-0060 and align DDD/docs to verified implementation. | Docs links and drift checks; assigned documentation writer after all prior units; controller owns shared indexes. |
 
-## Source and test map for later units
+## Source and test map
 
-These are the current source and regression entrypoints, not permission to edit a
-file owned by another lane. Confirm each boundary against the integrated tree at
-dispatch, especially after V4 and V3 land. Add a focused test when existing tests
-do not cover the reproduced failure.
+This table preserves the initial candidate boundaries. Exact delivered files and source-bound
+results are in the private unit reports; the candidates grant no new edit authority. All source
+units are accepted and only the documentation candidate remains under review.
 
 | Unit | Candidate source | Test entrypoint |
 |---|---|---|
@@ -126,23 +122,22 @@ do not cover the reproduced failure.
 | 12 | `src/lib/usage-parsers.mjs`, `usage-index.mjs` | `tests/kit/usage-claude-dedup.test.mjs`, `usage-index.test.mjs` |
 | 13 | `src/lib/usage-index.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-index.test.mjs`, `usage-claude-window-pairing.test.mjs` |
 | 14 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-index.test.mjs`, `usage-telemetry.test.mjs` |
-| 15 O-6 | `src/lib/usage-opencode.mjs`, `usage-cost.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
-| 16 O-9 | `src/lib/usage-opencode.mjs`, `usage-opencode-bounds.mjs` | `tests/kit/usage-index-opencode.test.mjs`; recover requirement first |
-| 17 O-10 | `src/lib/usage-opencode.mjs`, `usage-index.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
-| 18 O-11 | `src/lib/usage-opencode.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
-| 19 O-12 | `src/lib/usage-opencode.mjs`, `usage-parsers.mjs` | `tests/kit/usage-opencode.test.mjs`; recover requirement first |
+| 15 O-6 | `src/lib/usage-opencode.mjs`, `usage-cost.mjs` | `tests/kit/usage-opencode.test.mjs`; accepted |
+| 16 O-9 | `src/lib/usage-opencode.mjs`, `usage-opencode-bounds.mjs` | `tests/kit/usage-index-opencode.test.mjs`; accepted |
+| 17 O-10 | `src/lib/usage-opencode.mjs`, `usage-index.mjs` | `tests/kit/usage-opencode.test.mjs`; accepted |
+| 18 O-11 | `src/lib/usage-opencode.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-opencode.test.mjs`; accepted |
+| 19 O-12 | `src/lib/usage-opencode.mjs`, `usage-parsers.mjs` | `tests/kit/usage-opencode.test.mjs`; accepted |
 | 20 | `src/lib/quota.mjs` | `tests/kit/quota.test.mjs`, `usage-limits-empty-state.test.mjs` |
 | 21 | `src/lib/quota.mjs` | `tests/kit/quota.test.mjs` |
 | 22 | `src/lib/dashboard/client/usage.mjs`, `system-projects.mjs`, `intelligence.mjs`, `maintenance-filters.mjs` | `tests/kit/dashboard-project-groups.test.mjs`, `intelligence-table-groups.test.mjs`, `maintenance-dashboard-client-labels.test.mjs` |
 | 23 | `src/lib/dashboard/client/intelligence.mjs`, `system-projects.mjs`, `src/commands/system.mjs` | `tests/kit/dashboard-intel-integration.test.mjs`, `system-command.test.mjs` |
 | 24 | `docs/adr/0060-session-surface-initiator-and-product-names.md`, relevant DDD guide | `tests/kit/docs-layout.test.mjs` and Markdown lint |
 
-Units 9–19 each require a current real-data reproduction before implementation; the
-reference-machine numbers in ADR-0060 are historical, not current results. Unit 1 does
-not read personal transcripts, change parser/cache schemas, or implement any view.
+Units 9–19 recorded bounded source observations and synthetic affected-row evidence in their
+unit reports. A sample without an affected row is not proof of current-user impact. Reference
+counts in ADR-0060 remain historical. No new real-data probe runs in Unit 24.
 
-
-## Unit 18 candidate: OpenCode compaction and reconciliation
+## Unit 18 accepted: OpenCode compaction and reconciliation
 
 The parser reads bounded compaction parts and selected session metadata. A user
 compaction request plus an error-free assistant summary with a finish value and
@@ -168,7 +163,6 @@ unchanged. This is not positive affected-user evidence; synthetic fixtures cover
 the supported and failure cases. Detailed commands and evidence are in the
 ignored task18 report.
 
-
 Unit 18 review fixes bind warm reuse to a SHA-256 digest of the selected session's
 observation metadata, relevant message fields, compaction/step-finish parts, and
 V2 scope presence. Both the probe and parser stay within the same per-session
@@ -183,8 +177,7 @@ existing rule that they do not become ordinary zero-cost session rows. Neither
 path manufactures responses, tokens or billing. Unit 18 was accepted before
 Unit 19 began.
 
-
-## Unit 19 candidate: OpenCode child prompt fingerprints
+## Unit 19 accepted: OpenCode child prompt fingerprints
 
 OpenCode sessions with a nonempty `parent_id` retain prompts, turns, tokens,
 provider costs and subagent classification, but produce no prompt fingerprints.
@@ -197,6 +190,5 @@ checks remain intact. Schema 26 is unchanged.
 Synthetic native-schema tests cover matching and distinct parent/child text,
 child-only historical windows, absent parent rows, scan/read parity, stale warm
 cache consumption and retained provider usage. The prior bounded preflight found
-no child sessions; it does not establish current-user impact. Unit 19 awaits
-independent review before Unit 24. Commands and results are in the ignored
+no child sessions; it does not establish current-user impact. Unit 19 is independently accepted; Unit 24 is the documentation candidate. Commands and results are in the ignored
 task19 report.

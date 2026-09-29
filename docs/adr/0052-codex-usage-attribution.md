@@ -20,6 +20,10 @@
   remains unsupported: it supplies no input/cache/output split or price. Source health
   discloses such events as `total-only-token-count` and reports zero-response records with
   counted components separately from those without attributable component rows.
+- **Updated:** 2026-09-29 — accepted V6 also classifies guardian reviews and other thread sources,
+  rolls up verified acyclic parent links, retains effort and host-reported first-token timing,
+  and exposes compaction bounds. Auto-review models without supported prices are unpriced.
+  The delivered cache migration is 25 → 26; earlier v23 evidence below describes the original fix.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),
@@ -213,7 +217,7 @@ tools and `FunctionCallOutput` the known set. Only a type in none of them warns.
 
 ## Consequences
 
-- Cache schema **v23**: every cached Codex record and its `parseStats` re-derive.
+- Original implementation cache schema **v23**: every cached Codex record and its `parseStats` re-derive.
   Earlier records carry the wrong imports, subagent usage, replay counts,
   last-wins totals, single-day/model rows and permanent diagnostics.
 - Codex subagent sessions now have real tokens and cost. Cost totals, the
@@ -246,8 +250,9 @@ subagent and previously dropped usage is now priced.
 
 ## Not done (recorded follow-ups)
 
-- Guardian-review classification, unread host fields, and the context-coverage
-  denominator remain as audited; this ADR does not change them.
+- Guardian-review classification, effort, first-token timing and compaction evidence are now
+  captured. Compaction lower/nullable upper bounds preserve uncertain pairing. This does not
+  establish support for every unread host field or change the context-coverage denominator.
 - A stream tee or push channel for live oversized rollouts is out of scope.
 - The cause of counter restarts is unknown (decision 4).
 - A subagent with no ordinals still reports no usage (decision 2).

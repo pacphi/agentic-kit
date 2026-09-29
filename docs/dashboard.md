@@ -237,6 +237,24 @@ or proof of subscription billing. Claude Code writes one transcript line per con
 repeats the message's usage on each, so Claude tokens, cost, responses and context samples count
 each API message once.
 
+**Evidence and compatibility (updated 2026-09-29).** Surface, initiator and provider are
+separate from host and Git scope. Local session/project detail exposes bounded declared origin
+tokens and observed provider basis; Unknown remains explicit, and provider metadata is not
+network attestation. Legacy desktop filters retain their labeled membership. A coarse legacy
+Codex desktop snapshot gives a ChatGPT desktop app family note without guessing its mode.
+Cloud choices require observations; dedicated Cowork storage remains uncovered. Census views
+show imported exclusions, mixed/unresolved observations, count basis and incomplete coverage.
+Runtime distinguishes desktop applications from their observed CLI sessions.
+
+Usage counts proven native intervals in mixed imports and positive Codex token components even
+without responses. Claude copied messages have one charge owner across the bounded current and
+previous window pool; session-local observations remain qualified. OpenCode unknown/nonlocal
+positive-token zero cost is unpriced. Source warnings remain visible without current-window
+activity, and ambiguous databases require explicit selection. Older caches may rebuild; old
+OpenCode child fingerprints are ignored by prompt metrics while usage remains. See the
+[current contracts](usage-scorecard-metrics.md#current-accounting-and-cache-contracts) for exact
+bounds, timezone behavior and the version-limited OpenCode reconciliation signal.
+
 **Two hero rows.** The first carries sessions, api-equivalent cost, tokens, engaged time, and cache
 read. Each tile pairs its figure with a change against the previous window of the same length and a
 per-day sparkline, so the number and its direction arrive together. The change is read
@@ -279,9 +297,9 @@ own nested transcript, so that cost is discovered, priced, and included; a forke
 rollout opens with its parent's replayed history, so only what follows the replay is counted — the
 subagent's own tokens are priced and the parent is never billed twice. A subagent from a host that
 records no event ordinals cannot have its replay separated and reads `$0.00`, which means not
-measurable rather than cheap. Codex sessions imported from Claude Code are not Codex activity and are
-excluded from every Codex figure. The panel does not rank window cost by inference provider: a transcript host is not a vendor.
-Codex and OpenCode can record a serving provider, while Claude history lacks that field;
+measurable rather than cheap. Copied turns imported from Claude Code are excluded from Codex figures; proven native
+turns in mixed files remain eligible, with unresolved ownership disclosed. The panel does not rank window cost by inference provider: a transcript host is not a vendor.
+Codex and OpenCode can record a serving provider, while Claude may expose provider-specific assistant model metadata;
 identity is reported per session on
 the Sessions detail strip — beside the provenance backing it — rather than as a window axis.
 

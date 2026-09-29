@@ -133,20 +133,21 @@ missing price.
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
-## Session surface language (mostly proposed)
+## Session surface language
 
-These terms are proposed by [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md).
-Only **Imported session copy** is implemented so far, and only in usage and project discovery. For
-the rest, the implemented contract is ADR-0050's **session origin** (`claude-desktop`,
-`codex-desktop` or `unknown`), which an imported copy never supplies.
+Updated 2026-09-29 to match accepted
+[ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md). Git scope, host, surface,
+initiator and provider are separate dimensions. Legacy origin keys remain compatibility evidence.
 
 | Term | Meaning |
 |------|---------|
 | Session surface | The product surface that started a session, read from the host's own declared field (Claude `entrypoint`; Codex `originator` with `source`) and shown by its official name, such as Claude Code CLI, Claude Desktop, ChatGPT desktop app · Codex, or Codex CLI |
-| Initiator | Who started a session: a person, automation (scripts, SDKs, non-interactive runs, CI), an agent (a subagent or reviewer spawned by another session), or an imported copy |
-| Imported session copy | A session one tool copied from another, such as a Claude Code transcript the ChatGPT desktop app imported as a Codex thread; excluded from usage, origin and project counts and reported as a count |
-| Raw surface value | The exact declared value a surface was derived from; always kept, and shown for any value the vocabulary does not recognize |
+| Initiator | Who started a session: a person, automation (scripts, SDKs, non-interactive runs, CI), an agent (a subagent or reviewer spawned by another session), an imported copy, or Unknown |
+| Imported session copy | A session one tool copied from another, such as a Claude Code transcript the ChatGPT desktop app imported as a Codex thread; whose copied turns are excluded from usage and project/origin sightings; proven native turns in mixed files remain eligible, with exclusion and incompleteness counts |
+| Raw surface value | A named declaration token retained only under the approved 80-character validation rule; unfamiliar valid tokens can appear in local detail without inferring a product or provider |
 | Tool workspace | A folder a tool creates for its own work outside the user's projects, such as `~/.codex/.chatgpt-projects/…` or `~/Documents/Codex/…`; an explanation attribute, never a surface |
+| Session count basis | The counted unit: declared session IDs, transcript files, database sessions, recovered sightings or mixed observations; zero-weight recovery is not a verified session |
+| Provider evidence basis | Recorded provider ID or provider-specific assistant model ID; observed metadata, not network attestation |
 | Desktop application | Claude Desktop or the ChatGPT desktop app; an application that can start sessions, not a host |
 
 Say **session surface** for where a session came from; the Live event `surface` field (native, ruflo,
