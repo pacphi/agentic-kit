@@ -1446,7 +1446,7 @@ git commit -m "docs(archive): lint and link-check the archive like the rest of d
 
 Generated 2026-09-28 against `main@82d1211b` and rehearsed end to end in a throwaway clone. In the plan's own order, it committed Tasks 1–2 and then applied Tasks 4, 6 (READMEs) and 7 (rules):
 
-- 121 moves and renames: 88 into archive, plans and proposals; 29 lower-case guide renames; `MAINTAINER.md`; two docker guides; `explainer.html`.
+- 123 moves and renames: 90 into archive, plans and proposals; 29 lower-case guide renames; `MAINTAINER.md`; two docker guides; `explainer.html`.
 - 359 links in 100 files and 254 mention lines rewritten, with no empty folder left. The Phase 1 tool and guard files were committed first and came through untouched.
 - `pages.yml` pointed at `docs/explainer.html`, and staging the site from it worked.
 - 0 errors in the CI-equivalent link check (1,609 links, fragments included), and exactly the 12 Appendix B links in the archive-only check.
@@ -1545,6 +1545,8 @@ Task 3 refreshes the map. `move` rows are `git mv`ed; `redirect` rows only retar
 | `docs/superpowers/plans/2026-09-27-branch-4b-upstream-watch-actions.md` | `docs/archive/2026-09-27-superpowers-plan-branch-4b-upstream-watch-actions.md` | move |
 | `docs/superpowers/plans/2026-09-27-branch-5-aqe-store-integrity.md` | `docs/archive/2026-09-27-superpowers-plan-branch-5-aqe-store-integrity.md` | move |
 | `docs/superpowers/plans/2026-09-27-branch-6a-evidence-store.md` | `docs/archive/2026-09-27-superpowers-plan-branch-6a-evidence-store.md` | move |
+| `docs/superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md` | `docs/archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md` | move |
+| `docs/superpowers/plans/2026-09-28-branch-9-follow-ups.md` | `docs/archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md` | move |
 | `docs/superpowers/plans/2026-09-28-upstream-watch-ledger-branch.md` | `docs/archive/2026-09-28-superpowers-plan-upstream-watch-ledger-branch.md` | move |
 | `docs/superpowers/specs/2026-09-28-upstream-watch-ledger-branch-design.md` | `docs/archive/2026-09-28-superpowers-spec-upstream-watch-ledger-branch-design.md` | move |
 | `MAINTAINER.md` | `docs/maintainer.md` | move |
