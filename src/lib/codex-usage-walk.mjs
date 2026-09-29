@@ -36,6 +36,7 @@ const snapshotOf = (t) => Object.fromEntries(FIELDS.map((f) => [f, Number(t?.[f]
 
 /**
  * @typedef {object} CodexUsageWalk
+ * @property {boolean} excludedBaseline
  * @property {boolean} unattributable
  * @property {Record<string, number>|null} prev
  * @property {string|null} model
@@ -51,6 +52,7 @@ const snapshotOf = (t) => Object.fromEntries(FIELDS.map((f) => [f, Number(t?.[f]
 export function newCodexUsageWalk({ unattributable = false } = {}) {
   return {
     unattributable,
+    excludedBaseline: false,
     prev: null,        // the previous cumulative snapshot, replayed ones included
     model: null,       // the model of the turn_context in effect
     lastMs: null,      // the last finite event time seen on a token_count
@@ -94,13 +96,20 @@ export function noteCodexWalkResponse(walk, ms, dayOf) {
  * the running total; an own one books its delta on `ms`'s day under the current
  * model.
  */
-export function walkCodexTokenCount(walk, total, ms, replay, dayOf) {
+export function walkCodexTokenCount(walk, total, ms, replay, dayOf, last = null) {
   if (!total) return;
   const cur = snapshotOf(total);
   const prev = walk.prev;
   walk.prev = cur;
   if (Number.isFinite(ms)) walk.lastMs = ms;
-  const restarted = prev !== null && MONOTONIC.some((f) => cur[f] < prev[f]);
+  // A first native call can reset ABOVE the copied baseline. Matching
+  // last/total counters prove that reset; an identical re-emission does not.
+  const lastSnapshot = last ? snapshotOf(last) : null;
+  const explicitReset = walk.excludedBaseline && lastSnapshot && prev !== null
+    && FIELDS.every((f) => cur[f] === lastSnapshot[f])
+    && FIELDS.some((f) => cur[f] !== prev[f]);
+  const restarted = prev !== null && (explicitReset || MONOTONIC.some((f) => cur[f] < prev[f]));
+  walk.excludedBaseline = replay;
   if (restarted) walk.segments++;
   if (replay || walk.unattributable) return;
   const base = prev === null || restarted ? ZERO : prev;

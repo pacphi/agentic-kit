@@ -23,7 +23,7 @@ import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
 import { promptSemantics } from './usage-prompt-semantics.mjs';
 import { observeUsageProject, usageRecordOrigin, importedUsageRecordOrigin } from './usage-project-evidence.mjs';
-import { isCodexImportedLine } from './codex-import-marker.mjs';
+import { isCodexImportedLine, newCodexTurnOwnership, codexTurnOwner, codexImportEvidence } from './codex-import-marker.mjs';
 import { claudeProviderFromModelId } from './session-surface.mjs';
 
 export { promptSemantics } from './usage-prompt-semantics.mjs';
@@ -938,7 +938,7 @@ function applyCodexRateLimit(rec, rl, ms) {
  *  thread's own usage nor a context or rate-limit observation of it. */
 function handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay) {
   stats.tokenCountEvents++;
-  walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay);
+  walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay, usageState.importOwnership ? decoded.usage.last : null);
   if (replay) return;
   // Codex re-emits an identical token_count (measured: ~2.8% of events) with
   // the SAME cumulative total when no new model call happened; that is a
@@ -1175,13 +1175,15 @@ function processCodexLine(rec, turns, stats, titleState, usageState, latState, m
  *  Codex activity inflated Codex responses and prompts and diluted its
  *  coverage figures. `imported` is set ONLY on these records, and the scan
  *  reports how many it excluded (`importedExcluded`) rather than dropping them
- *  silently. Parsing stops at the first imported line — nothing after it is
- *  read. */
+ *  silently. The whole source is examined for genuine later turns. */
 function importedCodexSession(rec, stats) {
+  rec = { ...blankSession(rec.id, 'codex'), threadSource: rec.threadSource,
+    ...(rec.parentSessionId ? { parentSessionId: rec.parentSessionId } : {}), importEvidence: rec.importEvidence };
   rec.imported = true;
   rec.sessionOrigin = importedUsageRecordOrigin();
   rec.title = '(imported Claude session)';
-  return { session: seal(rec), turns: [], parseStats: { ...stats, imported: true } };
+  return { session: seal(rec), turns: [], parseStats: { ...codexParseStats(),
+    importEvidence: rec.importEvidence, clippedLines: stats.clippedLines, imported: true } };
 }
 
 /** The session's usage rows, from the walk (codex-usage-walk.mjs): one per
@@ -1201,6 +1203,20 @@ function finalizeCodexUsage(rec, walk) {
   // recorded as detail, never added into any token sum, or the total would
   // double-count exactly the reasoning share.
   rec.reasoningOutput = reasoningOutput;
+}
+
+/** Bind a mixed session only to its first declaration and native cwd evidence. */
+function finalizeMixedCodexOrigin(rec, firstMeta) {
+  // The first session declaration is valid origin evidence only after own
+  // activity is established. Replayed/later metadata never replaces it.
+  const p = firstMeta?.payload ?? {};
+  rec.sessionOrigin = usageRecordOrigin(JSON.stringify({ type: 'session_meta', payload: {
+    originator: p.originator, source: p.source, thread_source: p.thread_source,
+  } }), 'codex');
+  if (!rec.projectEvidence && typeof p.cwd === 'string') {
+    rec.projectEvidence = observeUsageProject(p.cwd);
+    applyProject(rec, projectLabel(p.cwd, null, repoRootOf(p.cwd)));
+  }
 }
 
 /**
@@ -1227,9 +1243,8 @@ function finalizeCodexUsage(rec, walk) {
  * so its prompts stay out of human-prompt figures. A subagent whose replay
  * cannot be separated (no ordinals at all) reports no usage, as before.
  *
- * A rollout Codex imported from a Claude Code transcript
- * (`external-import-turn-N`) is not Codex activity at all — see
- * importedCodexSession.
+ * Imported turns (`external-import-turn-N`) never count. Identified native
+ * turns in the same file can count; missing boundaries remain unattributable.
  */
 export function parseCodex(raw, { id, withTurns = false }) {
   // `raw` is the rollout text, or a streaming source (openCodexRollout) for one
@@ -1244,7 +1259,12 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const stats = codexParseStats();
   const lines = source.lines;
   const plan = codexReplayPlan(lines);
-  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary };
+  let hasImports = false;
+  for (const e of lines) { if (isCodexImportedLine(e)) { hasImports = true; break; } }
+  const ownership = newCodexTurnOwnership({ hasImports });
+  let firstMeta = null;
+  let genuineActivity = false;
+  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary, importOwnership: hasImports };
   const titleState = { firstPrompt: '' };
   // Opened by task_started (turn start remembered), closed either by a
   // prompt→agent-message gap sample or by task_complete's own duration_ms
@@ -1257,12 +1277,42 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const metaState = { seen: false };
 
   for (const e of lines) {
-    if (isCodexImportedLine(e)) return importedCodexSession(rec, stats);
     const ms = toMs(e.timestamp);
+    if (hasImports) {
+      const nativeBefore = ownership.nativeRecords;
+      const owner = codexTurnOwner(ownership, e);
+      const replay = plan.unprovable || isCodexReplayLine(plan.boundary, e);
+      if (replay) ownership.nativeRecords = nativeBefore;
+      if (e.type === 'session_meta') {
+        if (!firstMeta) firstMeta = e;
+        // Keep the first identity, but a copied cwd is not project evidence.
+        const payload = { ...rawPayload(e), cwd: undefined };
+        handleCodexMeta(rec, metaState, decodeCodexRecord({ ...e, payload }), payload);
+        continue;
+      }
+      if (owner !== 'native' || replay) {
+        const decoded = decodeCodexRecord(e);
+        if (decoded.type === 'tokenCount') {
+          // Excluded snapshots still advance the cumulative baseline.
+          walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, true, localDay);
+        }
+        latState.pendingPromptMs = null;
+        latState.turnStartedAt = null;
+        continue;
+      }
+      if (e.type === 'event_msg' && ['user_message', 'agent_message', 'item_completed', 'token_count'].includes(e.payload?.type)) genuineActivity = true;
+    }
     noteSpan(rec, ms);
     processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns);
   }
 
+  if (hasImports) {
+    rec.importEvidence = { ...codexImportEvidence(ownership), ownershipComplete: !plan.unprovable && (source.stats?.clippedLines ?? 0) === 0 };
+    stats.importEvidence = rec.importEvidence;
+    stats.clippedLines = source.stats?.clippedLines ?? 0;
+    if (!genuineActivity || !rec.importEvidence.ownershipComplete) return importedCodexSession(rec, stats);
+    finalizeMixedCodexOrigin(rec, firstMeta);
+  }
   finalizeCodexUsage(rec, usageState.walk);
   stats.clippedLines = source.stats?.clippedLines ?? 0;
   rec.title = maskSecrets(clip(titleState.firstPrompt)) || '(untitled)';

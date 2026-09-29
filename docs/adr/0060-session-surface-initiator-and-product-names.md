@@ -136,10 +136,19 @@ Desktop** and **ChatGPT desktop app**; they are applications, not hosts.
 
 ### 3. Imported copies are excluded everywhere, and counted
 
-ADR-0052's rule extends to project discovery and every origin view: a rollout stamped
-`external-import-turn-*` (or listed in the imports ledger when present) contributes no project
-sighting, origin, facet count or Runtime attribution. Each view reports how many it excluded, labelled
-"Imported from Claude Code" (or Cursor, or Cowork, from the ledger's source path).
+ADR-0052's rule extends to project discovery and origin views **per turn**. The portable
+signal is `payload.turn_id` beginning `external-import-turn`; an import map is not required.
+Copied turns contribute no usage or project/origin sighting. A later proven native turn can
+establish the first declared app surface and a genuine project; unknown or conflicting turn
+boundaries remain excluded with diagnostics. A Desktop declaration is not inferred for
+other declared products. First session identity and parent replay exclusion remain intact.
+
+Pure imports remain unknown/imported-copy. Mixed usage rows retain import-exclusion counts.
+Discovery distinguishes confirmed exclusions (`importedExcluded`), proven mixed observations
+(`importedMixed`) and bounded observations that cannot settle ownership (`importedUnresolved`).
+The latter make coverage incomplete, without inventing a project from an encoded directory.
+See ADR-0052 §3 for exact byte/record budgets and cumulative-counter rules. Unit 23 owns
+complete rendering of these disclosures. Optional ledger source labels remain follow-on work.
 
 ### 4. One vocabulary module and one label table
 
@@ -178,10 +187,9 @@ in full.
 - Whether "Cloud session" should appear at all in local views, given none was observed locally.
 - Whether the "on 3P" attribute is worth showing.
 - How ADR-0057's role lenses consume surface and initiator.
-- Whether a later turn inside an imported copy that is not itself an import (6 of 924 rollouts on
-  2026-09-27, with real token usage) counts as the importing app's own session. Decided 2026-09-27
-  (audit decision 12): it counts, excluded per turn in Branch 8
-  ([ADR-0052](0052-codex-usage-attribution.md), "Not done").
+- Decision 12 is implemented per turn in V6 Unit 7. The historical 6-of-924 observation
+  must not be read as a current count or proof that every snapshot was native usage. See
+  [ADR-0052](0052-codex-usage-attribution.md) for the current reproduction and limitations.
 
 ## Verification (when implemented)
 
@@ -197,8 +205,9 @@ declaration fields: unfamiliar values that satisfy the 80-character token valida
 product or provider inference. The usage parser, aggregate and schema 26 cache carry these values;
 local detail display is staged for Unit 22. This does not accept the rest of the ADR.
 
-§3 is implemented for project discovery and the System projects note (2026-09-27): an imported copy
-gives no project, host or origin, and discovery counts it in `importedExcluded`. The per-source
+§3 excludes copied turns in usage and discovery (V6 Unit 7): pure copies give no project,
+host or origin; mixed files retain genuine activity and exclusion evidence. Discovery reports
+confirmed exclusions, mixed observations and unresolved bounded observations separately. The per-source
 labels from the imports ledger, Runtime attribution, the rest of §1, §2 and §4–§6 remain follow-on work
 (the audit record's Addendum 3).
 

@@ -183,6 +183,7 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // across providers (rows now carry `provider`); and no mark on completed
 // responses whose provider reported no tokens (`tokensUnreported`). None can be
 // corrected in place, so every cached OpenCode record re-parses.
+// The unreleased v26 migration also records per-turn imported exclusion evidence.
 export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
 
 const DAY_MS = 86_400_000;
@@ -268,7 +269,8 @@ function rootHealth(dir) {
 
 function emptyCodexDiagnostics() {
   return {
-    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0,
+    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0, importedMixed: 0, importedTurnsExcluded: 0, importAmbiguousRecords: 0,
+    importOwnershipIncompleteFiles: 0, importedTurnCountIncompleteFiles: 0,
     filesWithTokens: 0, filesWithResponses: 0,
     legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0, clippedLines: 0, warnings: [],
@@ -695,7 +697,17 @@ function discoverOpencodeSource(rawRoots, cutoff) {
 function recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure }) {
   codexDiagnostics.files++;
   if (cacheHit) codexDiagnostics.cachedFiles++;
-  if (session?.imported === true) { codexDiagnostics.importedExcluded++; return false; }
+  const imports = session?.importEvidence;
+  codexDiagnostics.importedTurnsExcluded += imports?.importedTurns ?? 0;
+  if (imports?.ownershipComplete === false) codexDiagnostics.importOwnershipIncompleteFiles++;
+  if (imports?.importedTurnCountComplete === false) codexDiagnostics.importedTurnCountIncompleteFiles++;
+  codexDiagnostics.importAmbiguousRecords += imports?.ambiguousRecords ?? 0;
+  if (session?.imported === true) {
+    codexDiagnostics.importedExcluded++;
+    codexDiagnostics.clippedLines += parseStats?.clippedLines ?? 0;
+    return false;
+  }
+  if (imports) codexDiagnostics.importedMixed++;
   if (session) { addCodexParseDiagnostics(codexDiagnostics, parseStats); return true; }
   codexDiagnostics.unparsedFiles++;
   const reason = failure.reason ?? 'parse-error';

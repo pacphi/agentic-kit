@@ -18,18 +18,15 @@
 //
 // Content boundary. This is DISCOVERY, invariant 9's candidate-path source, not
 // a measurement: it reads a session's cwd and explicit launch-origin declaration
-// from the bounded head. The same read `native-transcript-discovery.mjs` already
+// from bounded head metadata (and bounded import continuation windows). The read `native-transcript-discovery.mjs` already
 // performs for Observability at the same trust boundary. No message, prompt or
 // tool payload is retained or emitted; every figure the System area
 // renders is measured downstream by walk.mjs-backed collectors from the paths
 // this module returns.
 //
-// Cost. The corpus here is ~3,200 transcripts. Each file is opened once and
-// only its HEAD is read (HEAD_BYTES, JSON-parsed up to HEAD_MAX_LINES non-blank
-// lines) — a session's cwd is recorded in its opening records or not at all, so
-// reading further would cost the whole corpus to learn nothing. A file that
-// cannot be read or parsed is counted and skipped; one bad transcript never
-// aborts the walk (invariant 6).
+// Cost. Ordinary files use HEAD_BYTES and HEAD_MAX_LINES. Import-marked
+// heads additionally use codex-import-discovery's bounded head/tail windows,
+// record cap and shared byte budget. Missing ranges remain explicitly unknown.
 import fs from 'node:fs';
 import path from 'node:path';
 import { claudeDir, codexDir } from '../paths.mjs';
@@ -40,6 +37,7 @@ import { presenceOf, statNode, UNKNOWN, walkTree } from './walk.mjs';
 import { inspectProjectIdentity } from './project-identity.mjs';
 import { transcriptSessionOrigin } from './session-origin.mjs';
 import { isImportedCodexRollout } from '../codex-import-marker.mjs';
+import { inspectCodexImport, IMPORT_SCAN_BYTES } from './codex-import-discovery.mjs';
 
 /** Hosts in the order every payload lists them. */
 export const PROJECT_SOURCE_HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
@@ -68,7 +66,7 @@ const DECODE_STAT_BUDGET = 512;
 /** The one-line statement of what was counted and how, so no surface can render
  *  these numbers without being able to say where they came from. */
 export const PROJECT_SOURCE_METHOD =
-  'eligible Claude and Codex transcript head cwd evidence, plus every OpenCode session '
+  'eligible Claude and Codex bounded transcript cwd evidence, plus every OpenCode session '
   + 'directory, de-duplicated by resolved real path; Claude sessions use declared sessionId';
 
 // ── transcript heads ──────────────────────────────────────────────────────────
@@ -237,6 +235,12 @@ function rootStatus(walkResult) {
   return presence === 'present' ? 'ok' : presence;
 }
 
+function completeSessionScan(result, unreadable, unknown, imports) {
+  return result.complete !== false && unreadable === 0 && unknown === 0 && imports === 0;
+}
+
+function hasCodexImports(host, lines) { return host === 'codex' && isImportedCodexRollout(lines); }
+
 /**
  * Every cwd named by the transcripts under `root`, plus the counts a liner note
  * needs to state what was and was not recoverable.
@@ -274,6 +278,8 @@ export function scanTranscriptCwds(root, host, {
     unresolved: 0,
     recoveredFromDirName: 0,
     importedExcluded: 0,
+    importedMixed: 0,
+    importedUnresolved: 0,
     sessions: 0,
     duplicateSessionFiles: 0,
     subagentExcluded: 0,
@@ -298,6 +304,9 @@ export function scanTranscriptCwds(root, host, {
   let empty = 0;
   let unreadable = 0;
   let importedExcluded = 0;
+  let importedMixed = 0;
+  let importedUnresolved = 0;
+  const importBudget = { remaining: IMPORT_SCAN_BYTES };
   let duplicateSessionFiles = 0;
   let subagentExcluded = 0;
   let nonConversationExcluded = 0;
@@ -316,11 +325,16 @@ export function scanTranscriptCwds(root, host, {
     const lines = readHead(file, { fsImpl, headBytes, maxLines });
     if (lines === null) { unreadable += 1; continue; }
     if (lines.length === 0) { empty += 1; continue; }
-    // An imported copy of a Claude Code transcript is not a Codex session: it
-    // names the folder the Claude session ran in and declares the ChatGPT
-    // desktop app as originator. It gives no project, host or origin and is
-    // counted, never dropped silently (ADR-0052 §3, ADR-0060 §3).
-    if (host === 'codex' && isImportedCodexRollout(lines)) { importedExcluded += 1; continue; }
+    // Imported turns do not establish project/origin evidence. Look for own
+    // activity within fixed read budgets before excluding a whole file.
+    let genuineCwd = null;
+    if (hasCodexImports(host, lines)) {
+      const imported = inspectCodexImport(file, { fsImpl, headBytes, budget: importBudget });
+      if (imported.kind === 'imported') { importedExcluded++; continue; }
+      if (imported.kind === 'unresolved') { importedUnresolved++; continue; }
+      importedMixed++;
+      genuineCwd = imported.cwd;
+    }
     let weight = 1;
     if (host === 'claude') {
       const records = [...parsedHeadRecords(lines)];
@@ -355,7 +369,7 @@ export function scanTranscriptCwds(root, host, {
         group.newestMtimeMs = mtimeMs;
       }
     }
-    const cwd = firstCwd(lines, host);
+    const cwd = genuineCwd || firstCwd(lines, host);
     if (!cwd) { withoutCwd += 1; continue; }
     withCwd += 1;
     sightings.push({ cwd, mtimeMs, origin: 'cwd', weight,
@@ -386,17 +400,18 @@ export function scanTranscriptCwds(root, host, {
     unresolved,
     recoveredFromDirName,
     importedExcluded,
+    importedMixed,
+    importedUnresolved,
     sessions: host === 'claude' ? seenClaudeIds.size : undefined,
     duplicateSessionFiles,
     subagentExcluded,
     nonConversationExcluded,
     unknownSessionFiles,
-    sessionCountComplete: unreadable === 0 && unknownSessionFiles === 0
-      && result.complete !== false,
+    sessionCountComplete: completeSessionScan(result, unreadable, unknownSessionFiles, importedUnresolved),
     sightings,
     // Transcripts we could not read, and project directories whose path could
     // not be recovered, both mean the project list is a floor.
-    complete: result.complete !== false && unreadable === 0 && unresolved === 0,
+    complete: completeSessionScan(result, unreadable, unresolved, importedUnresolved),
   };
 }
 
@@ -485,7 +500,8 @@ function gitPresence(projectPath, fsImpl) {
  *                     exists: boolean, isGitRepo: boolean, lastSeenMs: number|null,
  *                     sessions: number }>,
  *   everSeen: number, onDisk: number, gitRepos: number, unresolved: number,
- *   importedExcluded: number, complete: boolean, method: string,
+ *   importedExcluded: number, importedMixed: number, importedUnresolved: number,
+ *   complete: boolean, method: string,
  *   sources: Record<'claude'|'codex'|'opencode', object>,
  * }} `everSeen` counts projects INCLUDING vanished ones; `onDisk` counts the
  *   measurable subset. `complete: false` means at least one transcript or
@@ -589,6 +605,8 @@ export function discoverProjectSources({
     gitRepos: projects.filter((project) => project.isGitRepo).length,
     unresolved,
     importedExcluded,
+    importedMixed: sources.codex?.importedMixed ?? 0,
+    importedUnresolved: sources.codex?.importedUnresolved ?? 0,
     complete: PROJECT_SOURCE_HOSTS.every((host) => sources[host]?.complete !== false),
     method: PROJECT_SOURCE_METHOD,
     sources,

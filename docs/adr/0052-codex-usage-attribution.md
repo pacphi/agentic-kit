@@ -121,16 +121,44 @@ lists them). Their turns are stamped `external-import-turn-N`, they have no
 "responses" and a large share of prompts, priced at model `unknown`, $0, while the
 real data lives in the Claude transcript.
 
-The in-rollout marker (the `turn_id` prefix) is the signal, so detection works
-without the imports file. Parsing stops at the first such line; the record is kept
-out of aggregation, out of every yield statistic, and counted in
-`diagnostics.importedExcluded` (796 on the reference machine). Nothing is dropped
-silently. The record itself is still cached, so a rescan is cheap.
+The in-rollout marker (`payload.turn_id` prefix) is the signal; the import map is not a
+runtime dependency. Exclusion is per turn. A valid native `task_started` or identified
+`turn_context` opens native ownership; explicit record IDs must agree with that boundary.
+Missing or conflicting IDs in mixed files remain unattributable. A foreign completion does
+not close the active turn. Replayed parent history still cannot count as child activity.
+Marker text in messages and later `session_meta` declarations establish no ownership.
 
-Project discovery applies the same marker to each rollout's bounded head (256 KiB, 40 lines): an
-imported copy names no project, host or Desktop origin, and the scan reports how many it set aside
-(`importedExcluded`, 924 on the reference machine on 2026-09-27, every marker on the rollout's
-second line).
+Copied prompts, responses, tools, context and tokens are excluded. Excluded cumulative
+snapshots advance the baseline; native snapshots book only their deltas. Decreasing counters
+or an explicit first native `last_token_usage == total_token_usage` reset start a new segment
+(the latter excludes identical re-emissions). First session identity remains authoritative.
+A native turn's cwd can establish its genuine project; otherwise the first declared cwd is
+eligible only after own activity is proved. The first declared app surface applies, without
+assuming every mixed file came from Desktop.
+
+Files without proven own activity remain `imported: true` with unknown/imported-copy origin
+and are cached but excluded. Mixed files retain `importEvidence`: `importedTurns`,
+`importedRecords`, `ambiguousRecords` and `nativeRecords`, with no turn IDs or copied content.
+The unique imported-turn set retains at most 4,096 bounded IDs; `importedTurnCountComplete`
+marks a lower-bound count when capped. A mixed streaming source with clipped lines cannot
+prove ownership across omitted metadata: it is excluded with `ownershipComplete: false`
+and the existing clipped-line diagnostic, pending a complete readable source. A subagent
+whose replay cannot be separated also has incomplete ownership. Source-health counters
+`importOwnershipIncompleteFiles` and `importedTurnCountIncompleteFiles` retain these gaps
+even when the file is excluded or served from cache.
+Usage diagnostics expose `importedExcluded`, `importedMixed`, `importedTurnsExcluded` and
+`importAmbiguousRecords`; the ambiguous count discloses excluded records without proved
+ownership. Aggregate rows and session detail preserve the same evidence. Schema 26 remains
+the single unreleased migration; no personal cache is rebuilt during implementation.
+
+Discovery first reads its usual 256 KiB/40-line head. Import-marked heads additionally read
+at most a 256 KiB head and a 2 MiB tail, capped at 20,000 records per window and 512 MiB of
+additional reads per scan. An unread middle resets ownership. Positive native activity can
+establish a mixed sighting; imported-only exclusion requires a complete, unambiguous read.
+A sampled subagent without a complete replay boundary remains unresolved. Sources and the
+discovery summary expose `importedMixed` and `importedUnresolved`; unresolved imports make
+`complete` and `sessionCountComplete` false and cannot trigger encoded-directory recovery.
+These are bounded observations, not an exhaustive turn census.
 
 ### 4. Cumulative counter restarts are summed, per event
 
@@ -217,15 +245,14 @@ subagent and previously dropped usage is now priced.
   `buildSessionRows`), so the file's usage (176,326 tokens, its own `last_token_usage.total_tokens`
   sum across its `token_count` events) reaches no total either way. Counting that usage, or
   documenting the shape more precisely, is left to the usage-accuracy branch.
-- Whole-rollout exclusion may drop real usage (open, plausible, 2026-09-27). On the reference
-  machine 6 of 924 imported rollouts carry a later turn that is not an import: one `task_started`
-  whose `turn_id` starts with `rollout-`, no `user_message` event, `role: user` response items in
-  five of the six (2 to 76 per file) and non-zero `token_count` usage (the per-file sum of
-  `last_token_usage.total_tokens` is about 8k to 449k). Both usage and discovery set the whole file
-  aside at the marker, so this usage is not counted. With no `user_message`, the turn may be
-  automatic (a compaction or title pass). Measured from counts only. Decided 2026-09-27 (audit
-  decision 12): Branch 8 excludes per turn instead of per file, so imported turns are never counted
-  and later turns are, after it establishes whether they are the user's work or an automatic pass.
+- The historical 2026-09-27 observation (6 of 924 import-marked files) did not prove
+  that every token snapshot in those files belonged to a native turn. Unit 7 implements
+  decision 12 per turn. The 2026-09-29 metadata-only reproduction found 6 mixed files among
+  945 import-marked candidates, with 64 native-turn responses. Only one token snapshot fell
+  inside a native interval, and its input/cache/output components were all zero; the other
+  snapshots were copied-turn evidence. No billable components are inferred from total-only
+  counters. The native turn's initiator remains unknown unless separately declared; this
+  does not prove whether it was user work or an automatic pass.
 
 ## Verification
 
