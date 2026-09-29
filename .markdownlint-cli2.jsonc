@@ -1,6 +1,6 @@
 {
   // Lint only OUR authored markdown. Vendored ruflo/aqe docs (.claude, .agentic-qe,
-  // .agents) and archived docs are excluded — not ours to fix.
+  // .agents) are excluded. Archived documentation is linted too.
   "globs": [
     "README.md",
     "CLAUDE.md",
@@ -14,8 +14,7 @@
     "node_modules",
     ".claude",
     ".agentic-qe",
-    ".agents",
-    "docs/archive"
+    ".agents"
   ],
   "config": {
     "default": true,
@@ -24,6 +23,7 @@
     "MD041": false, // first line need not be a top-level heading
     "MD024": { "siblings_only": true }, // allow repeated headings in different sections
     "MD029": { "style": "ordered" },
-    "MD060": false // table pipe-alignment — cosmetic, fights hand-maintained wide tables
+    "MD060": false, // table pipe-alignment — cosmetic, fights hand-maintained wide tables
+    "MD010": { "code_blocks": false } // tabs inside archived shell heredocs are content
   }
 }
