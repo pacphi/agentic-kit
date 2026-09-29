@@ -1,7 +1,7 @@
 # ADR-0063 — One evidence store and the refresh vocabulary
 
 - **Status:** Accepted
-- **Updated:** 2026-09-29 — Branch 6c delivered the dashboard refresh operation and retired GET-started scans
+- **Updated:** 2026-09-29 — Branch 6c delivered the dashboard refresh operation and retired GET-started scans; 2026-09-29 V4 A3: self-version retry attempts and last freshness are scoped to checked channels
 - **Earlier update:** 2026-09-28 — Branch 6b delivered the CLI refresh vocabulary
 - **Date:** 2026-09-28
 - **Deciders:** agentic-kit maintainers
@@ -539,25 +539,7 @@ shared evidence envelope.
 
 ## Known limitations (recorded, not fixed, by this branch)
 
-1. **Resolved in Branch 6b: the failed-lookup rule is now the same in all four version-drift
-   functions.** This item originally recorded that `ruvector.mjs`/`ruvnet-brain.mjs`'s `drift()`
-   could silently drop a known update on a failed forced fetch, unlike `versions.mjs`'s
-   `driftReport()`/`selfDrift()`. Branch 6b fixed both (`fix(versions): a failed lookup keeps the
-   cached version and waits one TTL window before retrying`, and its follow-ups), so all four now
-   share one rule: on a total lookup failure, the cached `latest`/`best`/`installedRelease` value
-   is kept — never overwritten with `null` — and the TTL stamp (`last`) is restamped, so the next
-   unforced call waits one more TTL window before retrying (`force` bypasses this and retries
-   immediately). `observedAt` records the real time a value was last actually observed, not the
-   time of a failed retry: `ruvector.mjs`'s `drift()` keeps `observedAt: cached.observedAt ??
-   cached.last` on failure (`:70`); `ruvnet-brain.mjs`'s `drift()` does the same
-   (`:288`, `recordedRelease()`); `versions.mjs`'s `driftReport()`'s `lookUpLatest()` restamps
-   `observedAt` from the prior `last` only for packages that were never individually observed
-   (`:82`); its `selfDrift()`'s `selfRecord()` restamps on a *total* failure, including one with no
-   cached candidate at all — only a partial answer (something answered live but did not win), or a
-   total failure whose cached candidate is unusable (a `next` candidate on a stable install), saves
-   nothing (`:172-176`). None of the four applies this rule under `record: false` (`ak sync
-   --dry-run`, ADR-0063's own `record` parameter) or a cache-only read (`cacheOnly: true`, `ak
-   sync --skip <part>`): both skip the network and the write entirely, by design.
+1. **Resolved in Branch 6b, refined in V4 A3: failed version lookups retain recorded evidence without claiming a new observation.** A total failed lookup of managed packages, Brain, or ruvector keeps its cached candidate and restamps `last` for one retry per configured TTL; `observedAt` remains the time that candidate was actually seen. The kit follows that rule when its cached candidate is usable. A partial answer that leaves the kit's cached candidate winning, or a stable install whose cached `next` candidate is unusable, keeps `last`, `observedAt`, and `best` unchanged and separately records `versionCheck.self.attempt` with its time and exact channel tags. Successful and total-failure kit lookups record `lastTags`, the channel scope of `last`; changing from stable to prerelease therefore probes an untried `next` channel even within the prior TTL. Legacy records without `lastTags` are reused for the single `latest` channel or where a `next` winner proves it was checked; a legacy `latest` winner cannot suppress an untried `next`. Malformed or future attempt metadata cannot suppress retries. `force` bypasses freshness. `record: false` permits a lookup without saving its result or attempt, while `cacheOnly: true` performs neither a lookup nor a write.
 2. **`globalRoot()`'s `record`-persistence structural fragility** — see "The `npm-global-root`
    exception" above.
 3. **Task 9's dashboard timeout bounds async hangs only** — see "The dashboard poll's two cost
