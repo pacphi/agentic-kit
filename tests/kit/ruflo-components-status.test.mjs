@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rufloComponentRows, formatComponentResults, componentResultReport, RESTART_REMINDER } from '../../src/commands/status/sections/ruflo-components.mjs';
+import { describeState } from '../../src/lib/ruflo-components/states.mjs';
 import { rufloComponentsTrustGroup, trustManifestLines } from '../../src/lib/trust-manifest.mjs';
 
 const view = (id, label, stateId, stateLabel, meaning, action = '') => ({ id, label, state: { id: stateId, label: stateLabel, meaning, action } });
@@ -21,6 +22,45 @@ test('rows lead with a summary and always carry the meaning', () => {
   assert.match(rows[2].fix, /ak sync/);
   assert.equal(rows[3].level, 'ok');
   assert.equal(rows[3].fix, null);
+});
+
+test('applied-unverified gives one restart instruction across message and manual fix', () => {
+  const [summary, unverified] = rufloComponentRows({
+    rufloVersion: '3.44.0', summary: { active: 0, total: 1 }, components: [
+      { id: 'minilmPicker', label: 'MiniLM agent picker', state: describeState('applied-unverified') },
+    ],
+  });
+  assert.equal(summary.level, 'info');
+  assert.equal(unverified.state, 'applied-unverified');
+  assert.equal(unverified.level, 'warn');
+  assert.equal(unverified.repair, 'manual');
+  assert.match(unverified.message, /MiniLM agent picker — applied, not verified: Set, but not yet confirmed/);
+  assert.match(unverified.fix, /restart Claude Code, Codex and OpenCode, then run ak status --refresh/i);
+  assert.equal(`${unverified.message} ${unverified.fix}`.match(/restart Claude Code, Codex and OpenCode/gi)?.length, 1);
+});
+
+test('neighboring component rows retain action, repair, and convergence contracts', () => {
+  const states = ['not-applied', 'drifted', 'blocked', 'active'];
+  const rows = rufloComponentRows({
+    rufloVersion: '3.44.0', summary: { active: 1, total: 4 },
+    components: states.map((id) => ({ id, label: `${id} component`, state: describeState(id) })),
+  }).slice(1);
+  for (const id of ['not-applied', 'drifted']) {
+    const rendered = rows.find((r) => r.state === id);
+    assert.equal(rendered.level, 'warn');
+    assert.equal(rendered.repair, 'sync');
+    assert.match(rendered.message, /Run ak sync/);
+    assert.match(rendered.fix, /sync applies/);
+  }
+  const blocked = rows.find((r) => r.state === 'blocked');
+  assert.equal(blocked.level, 'fail');
+  assert.equal(blocked.repair, 'sync');
+  assert.match(blocked.message, /Follow the reason shown, then run ak sync/);
+  assert.match(blocked.fix, /sync applies/);
+  const active = rows.find((r) => r.state === 'active');
+  assert.equal(active.level, 'ok');
+  assert.equal(active.repair, null);
+  assert.equal(active.fix, null);
 });
 
 test('setup results table lists state and meaning per component', () => {
