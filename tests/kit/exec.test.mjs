@@ -181,6 +181,28 @@ test('run() enforces maxBuffer in UTF-8 bytes', async () => {
   assert.match(result.stderr, /maxBuffer/i);
 });
 
+function recordShimChildren(reported, observedShimPid, cleanupPids) {
+  // The reported parent is assertion evidence, never kill authority.
+  cleanupPids.push(reported[0], reported[1], observedShimPid);
+  assert.equal(reported[2], observedShimPid, 'Node is a child of the observed PowerShell shim');
+}
+
+test('a mismatched reported parent never becomes a fixture cleanup kill target', () => {
+  const cleanupPids = [];
+  const killTargets = [];
+  const unexpectedParent = 990003;
+  // Synthetic PIDs and an injected recording function: no real process signal.
+  const kill = (pid) => { killTargets.push(pid); };
+  try {
+    assert.throws(() => recordShimChildren([990001, 990002, unexpectedParent], 990004, cleanupPids),
+      /Node is a child of the observed PowerShell shim/);
+  } finally {
+    for (const pid of cleanupPids) kill(pid);
+  }
+  assert.equal(killTargets.includes(unexpectedParent), false, 'unowned reported parent must never be signalled');
+  assert.deepEqual(killTargets, [990001, 990002, 990004]);
+});
+
 test('Windows abort reaps the Node child behind a PowerShell shim and its grandchild', {
   skip: process.platform !== 'win32',
 }, async () => {
@@ -189,7 +211,7 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
   const shimEntry = path.join(dir, 'powershell-pid');
   const controller = new AbortController();
   const quotedNode = process.execPath.replaceAll("'", "''");
-  let pids = [];
+  const pids = [];
   let pending;
   let outcome;
   try {
@@ -214,8 +236,8 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
     assert.equal(await waitUntil(() => fs.existsSync(pidFile) || outcome), true, 'PowerShell launch settled or ready');
     assert.equal(fs.existsSync(shimEntry), true, `PowerShell entered owned shim: ${JSON.stringify(outcome)}`);
     assert.equal(fs.existsSync(pidFile), true, `PowerShell launched Node: ${JSON.stringify(outcome)}`);
-    pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
-    assert.equal(pids[2], Number(fs.readFileSync(shimEntry, 'utf8')), 'Node is a child of the observed PowerShell shim');
+    const reported = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+    recordShimChildren(reported, Number(fs.readFileSync(shimEntry, 'utf8')), pids);
     assert.equal(isAlive(pids[1]), true);
     controller.abort();
     const result = await pending;
