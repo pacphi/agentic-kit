@@ -178,6 +178,86 @@ test('root JSON becoming active holds new keys but permits receipted obsolete-ke
     { 'daemon.resourceThresholds.minFreeMemoryPercent': 0 });
 });
 
+test('cleanup of inactive receipted JSON under root JSON does not restart a live daemon', async (t) => {
+  const root = rufloRepo(t);
+  const cfg = { rufloDaemon: { receipts: {} } };
+  reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts: cfg.rufloDaemon.receipts });
+  fs.writeFileSync(path.join(root, 'claude-flow.config.json'), '{"daemon.maxConcurrent":7}');
+  const before = JSON.stringify(cfg.rufloDaemon.receipts);
+  const preview = reconcileRufloDaemon(root, {
+    rufloVersion: '3.46.1', platform: 'linux', receipts: cfg.rufloDaemon.receipts, dryRun: true,
+  });
+  assert.equal(preview.config, 'removed');
+  assert.equal(JSON.stringify(cfg.rufloDaemon.receipts), before);
+  const { calls, runner } = recorder();
+  const applied = await applyRufloDaemon(root, {
+    cfg, rufloVersion: '3.46.1', platform: 'linux', runner, alive: () => true,
+  });
+  assert.equal(applied.result.config, 'removed');
+  assert.equal(applied.restarted, false);
+  assert.deepEqual(calls, []);
+  assert.equal(fs.existsSync(configFile(root)), false);
+  assert.deepEqual(cfg.rufloDaemon.receipts, {});
+});
+
+test('an existing explicit config holds creation of daemon JSON in preview and apply', (t) => {
+  const root = tmpProject(t);
+  const external = tmpProject(t);
+  const custom = path.join(external, 'custom-config.json');
+  fs.writeFileSync(custom, '{"daemon.maxConcurrent":7}');
+  fs.mkdirSync(path.join(root, '.claude-flow'));
+  fs.writeFileSync(path.join(root, '.claude-flow', 'config.yaml'), 'daemon:\n  maxConcurrent: 9\n');
+  const receipts = {};
+  const env = { CLAUDE_FLOW_CONFIG: custom };
+  const before = fs.readFileSync(custom, 'utf8');
+  const preview = reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts, env, dryRun: true });
+  assert.equal(preview.config, 'user-managed');
+  assert.equal(preview.held?.reason, 'explicit-config');
+  assert.deepEqual(receipts, {});
+  const applied = reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts, env });
+  assert.deepEqual(applied, preview);
+  assert.equal(fs.existsSync(configFile(root)), false);
+  assert.equal(fs.readFileSync(custom, 'utf8'), before);
+});
+
+test('relative explicit config resolves from process cwd, and absent path does not hold JSON creation', (t) => {
+  const root = tmpProject(t);
+  const external = tmpProject(t);
+  const originalCwd = process.cwd();
+  fs.writeFileSync(path.join(external, 'custom-config.json'), '{"daemon.maxConcurrent":7}');
+  try {
+    process.chdir(external);
+    const held = reconcileRufloDaemon(root, {
+      rufloVersion: '3.45.0', platform: 'darwin', receipts: {},
+      env: { CLAUDE_FLOW_CONFIG: './custom-config.json' }, dryRun: true,
+    });
+    assert.equal(held.held?.reason, 'explicit-config');
+    const writable = reconcileRufloDaemon(root, {
+      rufloVersion: '3.45.0', platform: 'darwin', receipts: {},
+      env: { CLAUDE_FLOW_CONFIG: './missing-config.json' }, dryRun: true,
+    });
+    assert.equal(writable.config, 'written');
+  } finally { process.chdir(originalCwd); }
+});
+
+test('an existing daemon JSON takes precedence over CLAUDE_FLOW_CONFIG', async (t) => {
+  const root = rufloRepo(t);
+  const external = tmpProject(t);
+  const custom = path.join(external, 'custom-config.json');
+  fs.writeFileSync(custom, '{"daemon.maxConcurrent":7}');
+  fs.writeFileSync(configFile(root), '{}');
+  const { calls, runner } = recorder();
+  const result = await applyRufloDaemon(root, {
+    cfg: { rufloDaemon: { receipts: {} } }, rufloVersion: '3.46.1', platform: 'darwin',
+    env: { CLAUDE_FLOW_CONFIG: custom }, runner, alive: () => true,
+  });
+  assert.equal(result.result.config, 'written');
+  assert.equal(result.restarted, true);
+  assert.deepEqual(readConfig(root), { 'daemon.resourceThresholds.minFreeMemoryPercent': 0 });
+  assert.equal(fs.readFileSync(custom, 'utf8'), '{"daemon.maxConcurrent":7}');
+  assert.deepEqual(calls, [['ruflo', 'daemon', 'stop', root], ['ruflo', 'daemon', 'start', root]]);
+});
+
 test('an existing JSON keeps its ownership rules beside YAML, and release exposes YAML again', (t) => {
   const root = tmpProject(t);
   const receipts = {};
