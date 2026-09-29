@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as pathModule from '../../src/lib/paths.mjs';
+import { defaultStorageRoots } from '../../src/lib/footprint/storage.mjs';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
@@ -19,6 +20,44 @@ test('xdgBase keeps only absolute XDG values for both path flavors', () => {
     }
     assert.equal(pathModule.xdgBase('XDG_CONFIG_HOME', fallback, { env: { XDG_CONFIG_HOME: absolute }, p }), absolute);
   }
+});
+
+test('Windows deep runtime-log root follows LOCALAPPDATA with a distinct XDG state base', () => {
+  const home = 'C:\\Users\\Ada';
+  const env = {
+    LOCALAPPDATA: 'C:\\Users\\Ada\\AppData\\Local',
+    XDG_STATE_HOME: 'D:\\xdg-state',
+  };
+  const expected = 'C:\\Users\\Ada\\AppData\\Local\\agentic-kit\\runtime-debug.log';
+  const options = { env, home, platform: 'win32', p: path.win32 };
+  assert.equal(pathModule.stateBase(options), env.LOCALAPPDATA);
+  assert.equal(defaultStorageRoots(options).find((row) => row.id === 'ak-runtime-debug')?.path, expected);
+});
+
+test('runtime-log writer, known-file reader, and deep root agree with distinct native state bases', (t) => {
+  const home = tempDir('ak-xdg-state-agreement', t);
+  const local = path.join(home, 'native-local');
+  const xdg = path.join(home, 'xdg-state');
+  const pathsUrl = new URL('../../src/lib/paths.mjs', import.meta.url).href;
+  const footprintUrl = new URL('../../src/lib/footprint/index.mjs', import.meta.url).href;
+  const storageUrl = new URL('../../src/lib/footprint/storage.mjs', import.meta.url).href;
+  const script = `import path from 'node:path';
+import { stateBase } from ${JSON.stringify(pathsUrl)};
+import { knownFileSpecs } from ${JSON.stringify(footprintUrl)};
+import { defaultStorageRoots } from ${JSON.stringify(storageUrl)};
+console.log(JSON.stringify({ writer: path.join(stateBase(), 'agentic-kit', 'runtime-debug.log'),
+  known: knownFileSpecs().find((row) => row.id === 'ak-runtime-debug').path,
+  deep: defaultStorageRoots().find((row) => row.id === 'ak-runtime-debug').path }));`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: home,
+    env: spawnEnv(home, { LOCALAPPDATA: local, XDG_STATE_HOME: xdg }),
+    encoding: 'utf8',
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const paths = JSON.parse(child.stdout);
+  const base = process.platform === 'win32' ? local : xdg;
+  const expected = path.join(base, 'agentic-kit', 'runtime-debug.log');
+  assert.deepEqual(paths, { writer: expected, known: expected, deep: expected });
 });
 
 test('relative XDG values cannot redirect live paths or tool root discovery into cwd', { skip: process.platform === 'win32' }, (t) => {

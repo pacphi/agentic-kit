@@ -21,9 +21,9 @@ function configBase() {
   if (isWindows) return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
   return xdgBase('XDG_CONFIG_HOME', path.join(home, '.config'));
 }
-export function stateBase() {
-  if (isWindows) return process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-  return xdgBase('XDG_STATE_HOME', path.join(home, '.local', 'state'));
+export function stateBase({ env = process.env, home: h = home, platform = process.platform, p = path } = {}) {
+  if (platform === 'win32') return env.LOCALAPPDATA || p.join(h, 'AppData', 'Local');
+  return xdgBase('XDG_STATE_HOME', p.join(h, '.local', 'state'), { env, p });
 }
 export const configDir = () => path.join(configBase(), 'agentic-kit');
 export const telemetryDir = () => path.join(configDir(), 'telemetry');
