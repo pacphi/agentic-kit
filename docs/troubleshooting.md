@@ -157,9 +157,12 @@ ak status --refresh=live --only learning,harvest,aqe,memory-routes,security,deja
 
 If `ak status --refresh=live --only aqe` warns that RVF is held by another live process, another AQE
 process (usually the AQE MCP server in an open Claude Code session) owns the store.
-That is contention, not a storage failure, even though agentic-qe 3.14.3 also prints
-`FsyncFailed` in this case ([#240](https://github.com/pacphi/agentic-kit/issues/240)).
-A `FsyncFailed` without the live-owner lines still fails verification.
+Released agentic-qe 3.14.4 passed native macOS and Linux live-owner probes with `LockHeld`
+and no `FsyncFailed` ([#240](https://github.com/pacphi/agentic-kit/issues/240)).
+The old 3.14.3 sequence also printed `FsyncFailed`; ak now treats any `FsyncFailed` or
+`0x0303` as an RVF failure, even alongside live-owner lines. An ordinary live lock stays
+busy with SQLite fallback observed; owner health and RVF integrity remain unverified.
+Native Windows AQE live-lock conformance has not been run.
 
 ## Known upstream gaps (not fixable by sync)
 
