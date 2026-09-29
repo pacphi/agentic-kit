@@ -8,7 +8,7 @@ import { planPartitions, partitionDrifted } from '../../src/lib/maintenance/disc
 import { inspectHookTarget, atomicReplaceHookTarget } from '../../src/lib/hook-remediation/fs-port.mjs';
 import { JsonlTailer } from '../../src/lib/live/jsonl-tailer.mjs';
 import { createHostHealthSnapshot } from '../../src/lib/host-health-evidence.mjs';
-import { HOOK_HEAL_RECEIPT_SCHEMA, readHookReceipt, writeHookReceipt } from '../../src/lib/hook-remediation/store.mjs';
+import { HOOK_HEAL_RECEIPT_SCHEMA, readHookReceipt, sealHookReceipt } from '../../src/lib/hook-remediation/store.mjs';
 import { inspectHostAlignment } from '../../src/lib/host-alignment.mjs';
 import { TranscriptStreams } from '../../src/lib/live/transcript-streams.mjs';
 
@@ -52,13 +52,33 @@ test('hook target parent identity survives JSON and refuses adjacent replacement
     if (target === root) stat.ino = options?.bigint ? ino : Number(ino);
     return stat;
   } };
-  const snapshot = inspectHookTarget(file, root, { fsImpl });
+  // Exercise the parent guard on every OS before any mutation is allowed.
+  // This injected branch is not evidence of native Windows atomic replacement.
+  fsImpl.openSync = (target, flags) => {
+    assert.equal(flags, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    return fs.openSync(target, flags);
+  };
+  fsImpl.renameSync = () => assert.fail('parent drift must refuse before rename');
+  const options = { fsImpl, platform: 'linux' };
+  const snapshot = inspectHookTarget(file, root, options);
   assert.equal(snapshot.parent.ino, '9007199254740992');
   const savedParent = JSON.parse(JSON.stringify(snapshot.parent));
   ino = B;
-  assert.throws(() => atomicReplaceHookTarget({ ...snapshot, parent: savedParent }, Buffer.from('[]'), undefined, { fsImpl }),
+  assert.throws(() => atomicReplaceHookTarget({ ...snapshot, parent: savedParent }, Buffer.from('[]'), undefined, options),
     /target parent changed/);
   assert.equal(fs.readFileSync(file, 'utf8'), '{}');
+});
+
+test('Windows hook mutation refuses before accessing the filesystem', (t) => {
+  const root = tempDir('ak-hook-windows-refusal', t);
+  const file = path.join(root, 'hook.json');
+  fs.writeFileSync(file, '{}');
+  const snapshot = inspectHookTarget(file, root, { platform: 'win32' });
+  const fsImpl = { lstatSync: () => assert.fail('unsupported mutation must refuse before inspection') };
+  assert.throws(() => atomicReplaceHookTarget(snapshot, Buffer.from('[]'), undefined, { fsImpl, platform: 'win32' }),
+    /hook mutation is unsupported on Windows until replace-existing atomicity is proven/);
+  assert.equal(fs.readFileSync(file, 'utf8'), '{}');
+  assert.deepEqual(fs.readdirSync(root), ['hook.json']);
 });
 
 test('hook snapshot gets identity and fractional mtime from one descriptor stat', (t) => {
@@ -105,19 +125,26 @@ test('JSONL replacement with a colliding Number inode resets offset and emits ne
 
 test('host health evidence changes when adjacent 64-bit launcher inode changes', (t) => {
   const root = tempDir('ak-health-id', t);
-  const launcher = path.join(root, 'codex');
+  const launcher = path.join(root, process.platform === 'win32' ? 'codex.cmd' : 'codex');
   fs.writeFileSync(launcher, 'launcher');
+  const observedIds = [];
   const statSync = fs.statSync;
   let ino = A;
   t.mock.method(fs, 'statSync', (target, options) => {
     const stat = statSync(target, options);
-    if (target === launcher) stat.ino = options?.bigint ? ino : Number(ino);
+    if (target === launcher) {
+      assert.equal(options?.bigint, true);
+      stat.ino = ino;
+      observedIds.push(ino);
+    }
     return stat;
   });
-  const snapshot = createHostHealthSnapshot({ env: { PATH: root }, inputPaths: () => [] });
+  const snapshot = createHostHealthSnapshot({ env: { PATH: root, PATHEXT: '.CMD' }, inputPaths: () => [] });
   const before = snapshot({ cwd: root, cfg: {} }).key;
+  assert.deepEqual(observedIds, [A], 'the fixture must be the launcher fingerprinted by this platform');
   ino = B;
   assert.notEqual(snapshot({ cwd: root, cfg: {} }).key, before);
+  assert.deepEqual(observedIds, [A, B]);
 });
 
 test('hook receipt accepts exact parent IDs but refuses unsafe legacy Numbers', (t) => {
@@ -141,18 +168,24 @@ test('hook receipt accepts exact parent IDs but refuses unsafe legacy Numbers', 
       backup: { relative: path.join('backups', '0000.bin'), sha256: digest, size: 2 },
     }],
   };
-  writeHookReceipt(file, receipt);
-  assert.equal(readHookReceipt(root, id).receipt.actions[0].preimage.parent.ino, '9007199254740993');
+  // Seed sealed on-disk inputs for reader validation. Durable receipt writes
+  // have a separate contract and require native directory fsync support.
+  const seedReceipt = () => fs.writeFileSync(file, JSON.stringify(sealHookReceipt(receipt)));
+  for (const ino of [String(A), String(B)]) {
+    receipt.actions[0].preimage.parent.ino = ino;
+    seedReceipt();
+    assert.equal(readHookReceipt(root, id).receipt.actions[0].preimage.parent.ino, ino);
+  }
   receipt.actions[0].preimage.parent.ino = Number(B);
-  writeHookReceipt(file, receipt);
+  seedReceipt();
   assert.throws(() => readHookReceipt(root, id), /receipt action image is invalid/);
   for (const malformed of ['-1', '01', -1]) {
     receipt.actions[0].preimage.parent.ino = malformed;
-    writeHookReceipt(file, receipt);
+    seedReceipt();
     assert.throws(() => readHookReceipt(root, id), /receipt action image is invalid/);
   }
   receipt.actions[0].preimage.parent.ino = 42;
-  writeHookReceipt(file, receipt);
+  seedReceipt();
   assert.equal(readHookReceipt(root, id).receipt.actions[0].preimage.parent.ino, 42);
 });
 
