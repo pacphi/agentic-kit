@@ -143,13 +143,14 @@ export function removeMemoryProbe(root, namespace, key) {
 //   aqe         a .agentic-qe/ folder below the project root (AQE resolves a
 //               relative AQE_MEMORY_PATH against the folder it runs in)
 // Bounded: at most `maxDirs` folders listed and `maxDepth` levels deep; dot
-// folders (other checkouts under .claude/worktrees, .git) and node_modules are
-// never walked, only a root dot folder's own markers are checked. A folder that
+// tool homes (including other checkouts under .claude/worktrees), .git and
+// node_modules are never walked. Ordinary dot folders are walked. A folder that
 // holds `.git` (nested repository, submodule, worktree inside the checkout) is
 // another repository: neither it nor anything below it is searched; it is
 // listed in `nestedRepositories`.
 const RUFLO_STORE_FILES = Object.freeze(['memory.db', 'agentdb-memory.db']);
 const ROOT_STRAYS = Object.freeze([['agentdb.db', 'agentdb-cli'], ['agentdb.rvf', 'agentdb-rvf'], ['ruvector.db', 'ruvector']]);
+const SCAN_EXCLUDED_DIRS = new Set(['.git', '.swarm', '.agentic-qe', '.claude', '.codex', '.claude-flow', '.agents', '.harness', 'node_modules']);
 
 const isDirectory = (file) => { try { return fs.lstatSync(file).isDirectory(); } catch { return false; } };
 const isFile = (file) => { try { return fs.lstatSync(file).isFile(); } catch { return false; } };
@@ -170,7 +171,7 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
     visited += 1;
     try {
       return fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-    } catch { return []; }
+    } catch { complete = false; return []; }
   };
   const checkMarkers = (dir, { ruflo = true } = {}) => {
     if (isDirectory(path.join(dir, '.agentic-qe'))) add('aqe', path.join(dir, '.agentic-qe'), null);
@@ -202,14 +203,14 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
       if (!entry.isDirectory()) continue;
       const full = path.join(dir, entry.name);
       if (entry.name !== '.git' && otherRepository(full)) continue;
-      if (entry.name.startsWith('.')) {
-        // .swarm's own subtree is walked separately; only its AQE marker here.
-        if (depth === 0 && entry.name !== '.git') checkMarkers(full, { ruflo: entry.name !== '.swarm' });
-        continue;
-      }
-      if (entry.name === 'node_modules') continue;
-      checkMarkers(full);
+      if (entry.name !== '.git') checkMarkers(full, { ruflo: entry.name !== '.swarm' });
+      if (SCAN_EXCLUDED_DIRS.has(entry.name)) continue;
       if (depth + 1 < maxDepth) walk(full, depth + 1);
+      else {
+        // A marker at the depth boundary is visible, but descendants are not.
+        const children = list(full);
+        if (children?.some((child) => child.isDirectory() && !SCAN_EXCLUDED_DIRS.has(child.name))) complete = false;
+      }
     }
   };
 

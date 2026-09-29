@@ -274,7 +274,7 @@ test('the stray search is bounded and says when it stopped early', (t) => {
   assert.equal(capped.complete, false);
   assert.equal(capped.visited, 3);
   const deep = findStrayMemoryStores(root);
-  assert.equal(deep.complete, true);
+  assert.equal(deep.complete, false, 'a depth cutoff leaves descendants unchecked');
   assert.deepEqual(deep.strays, [], 'folders deeper than the depth bound are not searched');
   assert.deepEqual(findStrayMemoryStores(path.join(root, 'missing')), { strays: [], complete: true, visited: 0, nestedRepositories: [] });
 });
@@ -299,4 +299,37 @@ test('the stray search stops at a nested repository or an in-checkout worktree: 
   const { strays, nestedRepositories } = findStrayMemoryStores(root);
   assert.deepEqual(strays.map((stray) => `${stray.kind} ${stray.path}`), ['aqe docs/.agentic-qe']);
   assert.deepEqual(nestedRepositories, ['.tools', 'packages/api', 'wt/feature']);
+});
+
+test('the stray search finds AQE below ordinary dot folders without entering tool homes or linked folders', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-dot-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-outside-'));
+  t.after(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, '.superpowers', 'sdd', 'program', 'reports', '.agentic-qe'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.notes', 'drafts', '.agentic-qe'), { recursive: true });
+  for (const dir of ['.git', '.claude', '.codex', '.agentic-qe', '.swarm', 'node_modules']) {
+    fs.mkdirSync(path.join(root, dir, 'nested', '.agentic-qe'), { recursive: true });
+  }
+  fs.mkdirSync(path.join(outside, '.agentic-qe'));
+  fs.symlinkSync(outside, path.join(root, '.notes', 'linked'));
+  fs.symlinkSync(root, path.join(root, '.notes', 'loop'));
+  fs.mkdirSync(path.join(root, '.other-repo', '.agentic-qe'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.other-repo', '.git'), 'gitdir: elsewhere\n');
+
+  const result = findStrayMemoryStores(root);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.strays.map((stray) => stray.path), [
+    '.notes/drafts/.agentic-qe',
+    '.superpowers/sdd/program/reports/.agentic-qe',
+  ]);
+  assert.deepEqual(result.nestedRepositories, ['.other-repo']);
+});
+
+test('unreadable or depth-limited dot subtrees do not claim complete stray coverage', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-limit-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, '.notes', 'a', 'b', 'c', 'd', '.agentic-qe'), { recursive: true });
+  const result = findStrayMemoryStores(root);
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.strays, []);
 });
