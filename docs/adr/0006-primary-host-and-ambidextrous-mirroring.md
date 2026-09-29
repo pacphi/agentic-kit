@@ -7,7 +7,7 @@
   as `claude-sonnet-5`; Anthropic's first-party benchmarks show it strictly ahead on every axis
   checked). `claude-sonnet-5` is retained at `tier: 'prior'` for user pins, so a pinned route now
   mirrors to `gpt-5.6-sol`, not `gpt-6-sol` — the same behavior the Opus 5 → Opus 5.5 move
-  established. See `docs/plans/2026-09-28-sonnet-5-5-routing-refresh.md`.
+  established. See `docs/archive/2026-09-28-plan-sonnet-5-5-routing-refresh.md`.
 - **Earlier update (2026-09-23):** Tier parity: both hosts now have a `reasoning` tier (`claude-opus-5-5` ↔
   `gpt-6-astra`), so a Codex-driven seed gets reasoning-tier models and an escalation that steps up a
   tier, as a Claude-driven seed does. A catalog entry may `pairs` with an extra tier.
