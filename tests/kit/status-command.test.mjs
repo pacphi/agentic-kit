@@ -658,6 +658,7 @@ test('Codex MCP topology fails recursive self-registration and reports missing A
     'args = ["x", "ruflo-mcp"]',
   ].join('\n'));
   try {
+    const codexConfigBefore = fs.readFileSync(path.join(PROJECT, '.codex', 'config.toml'), 'utf8');
     const rows = rowsFor(await collect(), 'codex-mcp');
     assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.level, 'fail');
     assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.level, 'warn');
@@ -666,7 +667,12 @@ test('Codex MCP topology fails recursive self-registration and reports missing A
     // can prove (codexMcpRepairPlan); Agentic-QE owns its own Codex registration.
     assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.repair, 'sync');
     assert.equal(rows.find((r) => /duplicate Ruflo/.test(r.message))?.repair, 'sync');
-    assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.repair, 'manual');
+    const aqe = rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message));
+    assert.equal(aqe?.repair, 'manual');
+    assert.match(aqe.fix, /aqe init --auto --with-codex --codex-guidance compact/);
+    assert.doesNotMatch(aqe.fix, /platform setup|codex mcp-server/);
+    assert.equal(fs.readFileSync(path.join(PROJECT, '.codex', 'config.toml'), 'utf8'), codexConfigBefore,
+      'status only reports the AQE-owned initialization flow');
   } finally {
     rmrf(path.join(PROJECT, '.codex'));
   }
@@ -716,7 +722,7 @@ test('a user-owned deprecated codex mcp-server entry is a manual removal', async
 });
 
 test('Codex MCP topology does not ask an aqe:false machine to register agentic-qe in Codex', async () => {
-  // #237 N1: with AQE opted out, `aqe platform setup codex` is advice for a
+  // #237 N1: with AQE opted out, Codex initialization advice is for a
   // tool the user declined; the topology rows must honor kit.json like the
   // aqe section does.
   seedHome(offlineKitConfig({

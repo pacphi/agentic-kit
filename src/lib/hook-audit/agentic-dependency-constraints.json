@@ -2702,8 +2702,8 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row's manual fix names aqe platform setup codex (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
-      "adjustment": "none: ak does not run platform setup; once fixed, the codex-mcp status row's manual fix (aqe platform setup codex --overwrite --with-ruflo) works as written.",
+      "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row formerly named the broken platform setup command (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
+      "adjustment": "The codex-mcp status row now points to AQE's supported aqe init --auto --with-codex --codex-guidance compact flow and notes the separate 3.14.4 Codex asset gap (agentic-qe#755). ak does not run platform setup or write AQE's Codex registration.",
       "status": "fixed-unreleased",
       "constraintIds": [],
       "history": [
