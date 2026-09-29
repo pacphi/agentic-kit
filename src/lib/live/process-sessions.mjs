@@ -96,18 +96,39 @@ export function hostFromCommand(command, executable = null) {
 }
 
 const DESKTOP_HOSTED_CLAUDE_CLI = /\/claude-code\/[^/]+\/claude\.app\/Contents\/MacOS\/claude$/i;
+// Match the native executable inside the application bundle. A folder name in
+// argv, cwd, or an unrelated executable never establishes an application.
+const DESKTOP_APPLICATIONS = [
+  { executable: /\/Claude\.app\/Contents\/MacOS\/Claude$/, name: 'Claude Desktop' },
+  { executable: /\/ChatGPT\.app\/Contents\/MacOS\/ChatGPT$/, name: 'ChatGPT desktop app' },
+];
+const desktopApplication = (executable) => DESKTOP_APPLICATIONS
+  .find((app) => app.executable.test(String(executable ?? '').replaceAll('\\', '/')))?.name ?? null;
+// The installed ChatGPT bundle carries a native CodexCLI.app executable.
+// Resources/codex-cli/bin/codex is a shell wrapper, not a process image.
+const DESKTOP_HOSTED_CODEX_CLI = /\/ChatGPT\.app\/Contents\/Resources\/codex-cli\/CodexCLI\.app\/Contents\/MacOS\/codex$/;
+const APP_BUNDLE_PATH = /\/[^/]+\.app\/Contents\//i;
+const KNOWN_APP_BUNDLE_PATH = /\/(?:Claude|ChatGPT)\.app\/Contents\//;
+const supportedExecutable = (executable) => {
+  const nativePath = String(executable ?? '').replaceAll('\\', '/');
+  return !APP_BUNDLE_PATH.test(nativePath) || KNOWN_APP_BUNDLE_PATH.test(nativePath)
+    || DESKTOP_HOSTED_CLAUDE_CLI.test(nativePath);
+};
 
 /** Reduce process argv to a non-sensitive controller role, then discard argv. */
 function controllerKind(row) {
   const argv = argvOf(row.command, row.executable);
-  if (argv.includes('app-server')) return 'host-service';
+  const program = executableName(row.executable ?? argv[0]);
+  const argumentOffset = ['node', 'nodejs'].includes(program) ? 2 : 1;
+  if (argv[argumentOffset] === 'app-server') return 'host-service';
   const executable = String(row.executable ?? argv[0] ?? '').replaceAll('\\', '/');
   // The Claude desktop app runs its own Claude Code CLI from a versioned
   // bundle (`…/Claude/claude-code/<version>/claude.app/Contents/MacOS/claude`).
   // It is a user's project session, not the desktop app, even though its path
   // has the `.app/Contents/` shape.
-  if (DESKTOP_HOSTED_CLAUDE_CLI.test(executable)) return 'project-session';
-  if (/\/[^/]+\.app\/Contents\//i.test(executable)) return 'desktop-app';
+  if (DESKTOP_HOSTED_CLAUDE_CLI.test(executable)
+    || DESKTOP_HOSTED_CODEX_CLI.test(executable)) return 'project-session';
+  if (APP_BUNDLE_PATH.test(executable)) return 'desktop-app';
   return 'project-session';
 }
 
@@ -157,7 +178,8 @@ function parseArgsByPid(output) {
 
 const isHostCandidate = (row) => {
   const name = executableName(row.executable);
-  return HOST_NAMES.has(name) || name === 'node' || name === 'nodejs';
+  return supportedExecutable(row.executable) && (!!desktopApplication(row.executable)
+    || HOST_NAMES.has(name) || name === 'node' || name === 'nodejs');
 };
 
 /**
@@ -244,8 +266,10 @@ function rootControllers(rows) {
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   const candidates = new Map();
   for (const row of rows) {
-    const host = hostFromCommand(row.command, row.executable);
-    if (host) candidates.set(row.pid, { ...row, host });
+    const application = desktopApplication(row.executable);
+    const host = application || !supportedExecutable(row.executable)
+      ? null : hostFromCommand(row.command, row.executable);
+    if (application || host) candidates.set(row.pid, { ...row, host, application });
     else if (row.command) runtimeDebug('classify', { pid: row.pid, exe: row.executable, host: 'none' });
   }
   const roots = [...candidates.values()].filter((candidate) => {
@@ -487,7 +511,7 @@ export async function listActiveHostSessions({
 } = {}) {
   const rows = processRows
     ?? await collectRows({ platform, execFileImpl, uid, scriptPath, env });
-  const controllers = rootControllers(rows);
+  const controllers = rootControllers(rows).filter((row) => controllerKind(row) === 'project-session');
   const pids = controllers.map((row) => row.pid);
   let cwds = cwdByPid;
   if (!cwds) {
@@ -628,6 +652,7 @@ export async function surveyHostProcesses({
     const attributable = typeof cwd === 'string' && isAbsoluteFor(cwd);
     return {
       host: row.host,
+      application: row.application ?? null,
       controllerKind: controllerKind(row),
       pid: row.pid,
       ppid: row.ppid,
