@@ -66,7 +66,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0054](0054-fleet-evidence-export.md) | Vendor-neutral fleet evidence export | Implemented |
 | [0055](0055-aqe-embedding-lifecycle.md) | AQE embedding lifecycle and qualified readiness | Implemented |
 | [0058](0058-managed-ruflo-components.md) | Managed ruflo components | Accepted (implementation in progress — see Implementation status) |
-| [0060](0060-session-surface-initiator-and-product-names.md) | Session surface, initiator and official product names | Proposed; §3 implemented for project discovery (2026-09-27), the rest staged follow-on |
+| [0060](0060-session-surface-initiator-and-product-names.md) | Session surface, initiator and official product names | Accepted |
 | [0061](0061-brain-reclaim-stuck-remediation.md) | RuvNet Brain "unresolved rollback state" remediation | Accepted |
 | [0062](0062-aqe-project-store-integrity.md) | AQE project store integrity | Accepted |
 | [0063](0063-evidence-store-and-refresh-vocabulary.md) | One evidence store and the refresh vocabulary | Accepted; CLI and dashboard refresh operation delivered |
@@ -399,11 +399,13 @@ component out.
 
 ## ADR-0060 — Session surface, initiator and official product names
 
-[ADR-0060](0060-session-surface-initiator-and-product-names.md) (Proposed; §3 implemented for
-project discovery) derives a session's surface and initiator from the hosts' declared log fields,
-keeps every raw value, uses official product names (Claude Desktop, ChatGPT desktop app, Codex CLI,
-and others), and excludes imported session copies from every origin view. Project discovery already
-sets imported copies aside and counts them; the other decisions remain proposed.
+[ADR-0060](0060-session-surface-initiator-and-product-names.md) (Accepted; updated 2026-09-29)
+separates Git scope, host, session surface, initiator and provider using declared source evidence
+and shared official labels. Local detail retains approved bounded origin tokens; observed provider
+metadata is not network attestation. Per-turn import ownership, count bases and completeness remain
+visible, desktop applications are distinct from hosts, and legacy filters preserve their labeled
+membership. Dedicated Cowork storage remains uncovered (#257). Usage schema changes 25 → 26;
+footprint stays 8.
 
 ## ADR-0062 — AQE project store integrity
 
