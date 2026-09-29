@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,6 +8,7 @@ import { runInventoryQuery } from '../../src/lib/maintenance/management/query.mj
 import { publicInventoryPage } from '../../src/lib/dashboard/maintenance-api.mjs';
 import { validateMaintenanceV2Query } from '../../src/lib/dashboard/maintenance-security.mjs';
 import { discoverProjectSources } from '../../src/lib/footprint/project-sources.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const options = { installationKey: 'maintenance-grouping-fixture-key', environment: { platform: 'darwin' }, now: () => 1700000000000 };
 const repository = { kind: 'git', repositoryId: 'repository:0123456789abcdef0123', root: '/work/repo',
@@ -65,8 +67,9 @@ test('should_report_session_counts_once_per_project_despite_multiple_installed_r
   assert.equal(page.navigation.nodes[0].count, 2);
   assert.equal(page.navigation.nodes[0].sessionOrigins[0].sessions, 7);
 });
-test('project census count basis survives discovery, management, and API without changing legacy meanings', () => {
-  const project = '/census-project';
+test('project census count basis survives discovery, management, and API without changing legacy meanings', (t) => {
+  // Catalog project roots are native absolute paths, just like discovery output.
+  const project = path.join(tempDir('ak-census-grouping', t), 'census-project');
   const discovered = discoverProjectSources({
     scanTranscripts: (_root, host) => ({ complete: true, sightings: host === 'claude'
       ? [{ cwd: project, weight: 2, sessionOrigin: { origin: 'claude-desktop', evidence: 'declared' } }]
@@ -74,6 +77,7 @@ test('project census count basis survives discovery, management, and API without
     scanOpencode: () => ({ complete: true, sightings: [] }),
   });
   const source = discovered.projects[0];
+  assert.equal(source.path, project);
   assert.deepEqual(source.sessionOrigins.map(({ countBasis, sessions }) => [countBasis, sessions]),
     [['declared-session-ids', 2], ['transcript-files', 3]]);
   const page = publicInventoryPage(runInventoryQuery(build({ projects: [], discoveryProjects: [source] }, [project]),
