@@ -897,6 +897,21 @@ test('public activity allows a bounded pause time while omitting invalid timesta
   assert.equal(JSON.stringify(payload).includes(PRIVATE_PATH), false);
 });
 
+test('public activity rejects impossible pause dates and retains valid leap-day offset stamps', () => {
+  const base = { sourceId: SOURCE, state: 'paused', completedAt: null };
+  const valid = '2024-02-29T23:59:59.125+05:30';
+  const payload = publicActivity({ scans: [{ ...base, recordedAt: valid }], scanHistory: [
+    { ...base, recordedAt: '2026-09-31T12:00:00Z', completedAt: '2026-09-30T12:00:00Z' },
+    { ...base, recordedAt: '2025-02-29T12:00:00Z' },
+    { ...base, recordedAt: valid },
+  ] });
+  assert.equal(payload.scans[0].recordedAt, valid);
+  assert.equal(payload.scanHistory[0].recordedAt, undefined);
+  assert.equal(payload.scanHistory[0].completedAt, '2026-09-30T12:00:00Z');
+  assert.equal(payload.scanHistory[1].recordedAt, undefined);
+  assert.equal(payload.scanHistory[2].recordedAt, valid);
+});
+
 test('v2 reports native persistence refusal without suggesting an action started', async () => {
   const refusal = Object.assign(new Error('private adapter unavailable'), { code: 'MAINTENANCE_PERSISTENCE_UNAVAILABLE' });
   const { post } = harness({ management: stubManagement({ planAction: async () => { throw refusal; } }).facade });

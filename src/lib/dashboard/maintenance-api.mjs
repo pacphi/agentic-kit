@@ -9,6 +9,7 @@ import {
   SHELLS, SORT_ORDERS, SOURCE_COVERAGE_STATES, SOURCE_TYPES, isOpaqueId, isProhibitedLabel,
 } from '../maintenance/management/model.mjs';
 import { maintenanceReceiptPresentation } from '../maintenance/receipt-presentation.mjs';
+import { validScanTime } from '../maintenance/management/activity.mjs';
 import {
   MAINTENANCE_LOCAL_PATH, createMaintenanceCapabilityStore, matchMaintenanceV2Route, readMaintenanceJson,
   validateMaintenanceBody, validateMaintenanceV2Body, validateMaintenanceV2Query,
@@ -430,9 +431,7 @@ const SCALARS = Object.freeze({
   label: (node, value) => { const safe = evidenceText(value, node.max); return safe && !isProhibitedLabel(safe) ? safe : undefined; },
   token: (node, value) => (typeof value === 'string' && value.length <= node.max && TOKEN.test(value) ? value : undefined),
   iso: (_node, value) => (typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value)) ? value : undefined),
-  scanStamp: (_node, value) => (typeof value === 'string' && value.length <= 40
-    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    && Number.isFinite(Date.parse(value)) ? value : undefined),
+  scanStamp: (_node, value) => validScanTime(value) ?? undefined,
   owner: (node, value) => text(value, node.max) ?? undefined,
   bool: (_node, value) => (typeof value === 'boolean' ? value : undefined),
   int: (_node, value) => (Number.isInteger(value) ? value : undefined),

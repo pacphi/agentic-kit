@@ -24,3 +24,12 @@
 
 - V4 B8 producer remains on its separate branch. This change is the consumer contract only, pending integration and independent review.
 - Full unit and UI suites were not repeated after the final timestamp-validation refinement; focused unit tests, lint, and typecheck passed after it. The guarded browser run covered the Activity renderer before that refinement.
+
+## Scoped review fix: impossible calendar dates
+
+- Review found that the prior ISO shape plus `Date.parse` accepted `2026-09-31T12:00:00Z`, letting a paused row outrank a real September 30 completion and render on October 1.
+- The Activity projection now checks the calendar day against its month and leap year, plus clock component bounds, before accepting a scan timestamp. The v2 Activity API uses the same validator for `recordedAt`.
+- New cases reject September 31 and a non-leap February 29 at both projection boundaries, retain a valid completion timestamp when the recorded time is rejected, and retain a valid leap day with an offset and fractional seconds.
+- Guarded focused tests: `env -u FORCE_COLOR node scripts/run-tests.mjs exec -- --test tests/kit/maintenance-management-activity.test.mjs tests/kit/maintenance-dashboard-v2-api.test.mjs` passed 61 tests after the validator change. The final fallback assertions were added afterward and rerun before this fix commit.
+- `./node_modules/.bin/tsc -p tsconfig.json --noEmit` passed. Focused ESLint had 0 errors and the existing file-length warning in `maintenance-api.mjs`.
+- Browser and full suites were not repeated for this scoped validation fix; the prior guarded browser run remains the renderer evidence, with full gates assigned to integration.
