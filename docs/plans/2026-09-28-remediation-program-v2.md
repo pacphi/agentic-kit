@@ -2,6 +2,12 @@
 
 > **For agentic workers:** this is a program plan. Execute it with superpowers:subagent-driven-development. Each branch gets its own code-level plan (superpowers:writing-plans), saved in `docs/plans/` and written against `main` as it stands when the branch starts.
 
+## Status
+
+Active, not yet started. The §1 decision batch is awaiting the maintainer's answers. D-2's first
+release (`4.0.0-alpha.60`, carrying #263's breaking changes) is being cut ahead of branch V1, per
+D-2 option A.
+
 **Goal:** Finish everything left over from [remediation program v1](2026-09-26-remediation-program.md) in seven branches. The maintainer's attention goes into one decision sitting up front and a short list of named interrupts. v1 took about 28 attended hours; v2 aims for under 4 (§4 adds it up).
 
 **Written against:** `main@e957737b`. v1 status: #258, #259, #260, #261 and #263 merged on 2026-09-28. npm still ships `4.0.0-alpha.59`, so #259–#263 are unreleased, and #263 changes the CLI in breaking ways. The only worktrees are the main checkout and this one, and no stash exists.

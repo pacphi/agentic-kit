@@ -1,5 +1,12 @@
 # Issues #237, #238, #239 — verification and maintainer decisions — September 26, 2026
 
+## Status
+
+Active. This is the standing decision log for the remediation program: v1's branches appended
+their "Implementation status" entries here, and [remediation program v2](2026-09-28-remediation-program-v2.md)
+continues to cite and append to it (its own §1 decisions are numbered separately, D-1 onward). It
+archives alongside the program plans once v2 completes.
+
 Source baseline: `847486c` on `main` (agentic-kit 4.0.0-alpha.55 plus #236). The reporter tested
 the installed 4.0.0-alpha.55 package. Nothing in this record is implemented: it records verified
 findings, the decisions the maintainer made on them, and the remediation plan those decisions

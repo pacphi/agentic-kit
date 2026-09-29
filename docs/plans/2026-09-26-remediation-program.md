@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This is a program plan: each branch below gets its own code-level plan (superpowers:writing-plans) when it starts, written against the code as it then stands.
 
+## Status
+
+Superseded (2026-09-28) by [remediation program v2](2026-09-28-remediation-program-v2.md), which
+finishes everything this plan left open (Branch 0's final steps and the decision-gate backlog).
+Most branches here did merge (#241, #244–#250, #252, #253, #258–#261, #263). Kept in `docs/plans/`
+rather than archived because v2 and the decision log below still cite it by name; it archives
+alongside v2's own plan once v2's docs-taxonomy branch runs (v2 §3, `V2`).
+
 **Goal:** Finish the issues 237–239 remediation and close every other item found while doing it, in branches that each carry one related body of work.
 
 **Architecture:** Nine branches in five waves. Every branch starts from `main` after its predecessors merge, is built test-first in its own worktree as unit commits, passes the full gate set and a fresh adversarial review, and reaches `main` through a pull request the maintainer merges. Decisions still open are asked at the start of the branch that needs them, in the audit record's decision format.
