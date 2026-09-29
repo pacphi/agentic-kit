@@ -61,6 +61,33 @@ test('an absent ledger branch reads as an empty ledger without a fetch', async (
   assert.deepEqual(calls.map((call) => call.args), [['ls-remote', '--exit-code', '--heads', 'origin', 'upstream-watch-ledger']]);
 });
 
+test('runWithInput reports a spawn failure without rejecting', async () => {
+  const result = await runWithInput('ak-missing-command-for-test', []);
+  assert.equal(result.status, null);
+  assert.equal(result.error?.code, 'ENOENT');
+});
+
+test('read reports failures from rev-parse, show and log', async () => {
+  for (const failedCommand of ['rev-parse', 'show', 'log']) {
+    const sha = 'a'.repeat(40);
+    const responses = [
+      { stdout: `${sha}\trefs/heads/upstream-watch-ledger\n` }, {},
+      { stdout: `${sha}\n` }, { stdout: '' }, { stdout: '' },
+    ];
+    const index = { 'rev-parse': 2, show: 3, log: 4 }[failedCommand];
+    responses[index] = { status: 128, stderr: `${failedCommand} failed` };
+    const { exec, calls } = fakeExec(responses);
+    await assert.rejects(createLedgerStore({ exec }).read('upstream-watch-ledger', { now: NOW }), new RegExp(`git ${failedCommand} failed: ${failedCommand} failed`));
+    assert.equal(calls.at(-1).args[0], failedCommand);
+  }
+});
+
+test('read rejects an invalid branch before any git call', async () => {
+  const { exec, calls } = fakeExec([]);
+  await assert.rejects(createLedgerStore({ exec }).read('../ledger'), /not a branch name/);
+  assert.equal(calls.length, 0);
+});
+
 test('a failed ls-remote or fetch throws', async () => {
   const lookup = fakeExec([{ status: 128, stderr: 'fatal: unable to access: HTTP 403\n' }]);
   await assert.rejects(createLedgerStore({ exec: lookup.exec }).read('upstream-watch-ledger', { now: NOW }), /git ls-remote origin upstream-watch-ledger failed: fatal: unable to access/);

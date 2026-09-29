@@ -287,7 +287,7 @@
         "refs": ["closed-upstream review 2026-09-26"],
         "files": ["docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md", "src/lib/execution/codex.mjs"]
       },
-      "adjustment": "None: closed 2026-04-03 as model behaviour without a fix; parseHandoffText is the validation wrapper the maintainer recommended. Re-probe --output-schema with MCP on Codex upgrades (last probed on 0.149.1).",
+      "adjustment": "None: closed 2026-04-03 as model behaviour without a fix; parseHandoffText is the validation wrapper the maintainer recommended.",
       "status": "retired",
       "constraintIds": [],
       "history": [

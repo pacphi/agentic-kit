@@ -58,7 +58,7 @@ jobs:
           set -e
           {
             echo "## Upstream watch preview (exit $code)"
-            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), blind \(.blind), notice \(.notice.post), would fire \(.wouldFire | length)"' watch.json
+            jq -r 'if .blind then "blind \(.blind): \(.error // "unknown error"), could not check \(.fetchErrors | length)" else "since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), blind \(.blind), notice \(.notice.post), would fire \(.wouldFire | length)" end' watch.json
             jq -r '(.wouldFire // [])[] | "- would fire \(.id) \(.version) \(.branch)"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -102,7 +102,7 @@ jobs:
           set -e
           {
             echo "## Upstream watch (exit $code)"
-            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), commit \(.commit // "none"), would fire \(.wouldFire | length)"' watch.json
+            jq -r 'if .blind then "blind \(.blind): \(.error // "unknown error"), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length)" else "since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), commit \(.commit // "none"), would fire \(.wouldFire | length)" end' watch.json
             jq -r '(.wouldFire // [])[] | "- would fire \(.id) \(.version) \(.branch)"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
             jq -r '.notice.body' watch.json
@@ -120,7 +120,8 @@ jobs:
         if: env.RECORD == 'true'
         run: |
           [ "$(jq -r '.notice.post' watch.json)" = true ] || { echo 'Nothing needs the maintainer.'; exit 0; }
-          commit=$(jq -r '.commit' watch.json)
+          commit=$(jq -r '.commit // empty' watch.json)
+          [ -n "$commit" ] || { echo 'Notice requested without a ledger commit.' >&2; exit 1; }
           jq -r '.notice.body' watch.json > notice.md
           test -s notice.md
           gh api "repos/$GITHUB_REPOSITORY/commits/$commit/comments" -F body=@notice.md --jq .html_url
