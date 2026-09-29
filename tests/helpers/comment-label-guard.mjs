@@ -7,7 +7,8 @@ const modifiers = new Set(['only', 'skip', 'todo', 'concurrent', 'sequential', '
 const memberName = expression => expression.computed ? expression.property.value : expression.property.name;
 
 // Static contract: known declaration names/modifiers, each(table)(title), and
-// first callback parameters of recognized declarations. An unbound `t.test`
+// first callback parameters of direct declarations (never each table data).
+// An unbound `t.test`
 // is accepted as the conventional context form; bound receivers must resolve
 // to a declaration callback parameter. Runtime aliases are not evaluated.
 function isTestContext(receiver, sourceCode) {
@@ -21,7 +22,7 @@ function isTestContext(receiver, sourceCode) {
         const call = fn.parent;
         return definition.type === 'Parameter' && fn.params[0] === definition.name
           && call?.type === 'CallExpression' && call.arguments.includes(fn)
-          && isTestCall(call.callee, sourceCode);
+          && isTestCall(call.callee, sourceCode, false);
       });
     }
     scope = scope.upper;
@@ -29,14 +30,14 @@ function isTestContext(receiver, sourceCode) {
   return receiver.name === 't';
 }
 
-function isTestCall(expression, sourceCode) {
+function isTestCall(expression, sourceCode, allowEach = true) {
   if (expression.type === 'Identifier') return testNames.has(expression.name);
   if (expression.type === 'MemberExpression') {
     const name = memberName(expression);
     if (name === 'test') return isTestContext(expression.object, sourceCode);
-    return modifiers.has(name) && isTestCall(expression.object, sourceCode);
+    return modifiers.has(name) && isTestCall(expression.object, sourceCode, allowEach);
   }
-  return expression.type === 'CallExpression'
+  return allowEach && expression.type === 'CallExpression'
     && expression.callee.type === 'MemberExpression'
     && memberName(expression.callee) === 'each'
     && isTestCall(expression.callee.object, sourceCode);

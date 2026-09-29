@@ -33,6 +33,16 @@ test('ignores ordinary member calls and parameterized test data', () => {
   ]) assert.deepEqual(inspectCommentLabels(source), [], source);
 });
 
+test('parameterized callback arguments are table data, not Node contexts', () => {
+  for (const api of ['test.each', 'test.only.each', "test['each']"]) {
+    assert.deepEqual(inspectCommentLabels(`${api}([/Task/])('matches text', (pattern) => pattern.test('Task 1'));`), [], api);
+    const findings = inspectCommentLabels(`${api}([/Task/])('Task 2: matches text', (t) => t.test('Task 1'));`);
+    assert.equal(findings.length, 1, api);
+    assert.equal(findings[0].text, 'Task 2: matches text');
+  }
+  assert.equal(inspectCommentLabels('test.each([1])("row", () => { test("outer", (context) => context.test("Task 1", () => {})); });').length, 1);
+});
+
 test('recognizes lexically declared nested Node test contexts', () => {
   assert.equal(inspectCommentLabels('test("outer", async (context) => { await context.test("Task 1", async (child) => { await child.test("Task 2", () => {}); }); });').length, 2);
   assert.deepEqual(inspectCommentLabels('other("outer", (context) => { context.test("Task 1"); });'), []);
