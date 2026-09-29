@@ -4,30 +4,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { tempDir } from './helpers/temp-dir.mjs';
+import { interruptionScope, childGone } from './helpers/interruption-scope.mjs';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RUNNER = path.join(ROOT, 'scripts', 'run-tests.mjs');
 const ownerFile = '.ak-suite-owner.json';
 
-async function until(check, description, timeout = 5000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const result = check();
-    if (result) return result;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw Error(`timed out waiting for ${description}`);
-}
-
 function roots(parent) {
   return fs.readdirSync(parent).filter((name) => /^ak-suite-[A-Za-z0-9]{6}$/.test(name)).sort();
-}
-
-function childGone(pid) {
-  try { process.kill(pid, 0); return false; }
-  catch (error) { return error.code === 'ESRCH'; }
 }
 
 function runnerFor(repo, script, handshake, stop, done, env, log) {
@@ -43,7 +28,8 @@ test('interrupted and live sibling roots stay listed, including after the orphan
   skip: process.platform === 'win32' && 'POSIX runner termination probe; Windows retains siblings by list-only policy',
   timeout: 20000,
 }, async (t) => {
-  const home = tempDir('ak-interrupt', t);
+  const scope = interruptionScope(t);
+  const { home, wait: until } = scope;
   const repo = path.join(home, 'repo');
   fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
   const env = spawnEnv(home, { APPDATA: path.join(home, 'AppData', 'Roaming'), CI: 'true' });
@@ -53,7 +39,8 @@ test('interrupted and live sibling roots stay listed, including after the orphan
   const script = path.join(home, 'hold.mjs');
   fs.writeFileSync(script, `import fs from 'node:fs';
     const [handshake, stop, done] = process.argv.slice(2);
-    fs.writeFileSync(handshake, JSON.stringify({ pid: process.pid, cwd: process.cwd(), tmpdir: process.env.TMPDIR }));
+    fs.writeFileSync(handshake + '.tmp', JSON.stringify({ pid: process.pid, cwd: process.cwd(), tmpdir: process.env.TMPDIR }));
+    fs.renameSync(handshake + '.tmp', handshake);
     const timer = setInterval(() => {
       if (!fs.existsSync(stop)) return;
       const request = fs.readFileSync(stop, 'utf8');
@@ -69,7 +56,8 @@ test('interrupted and live sibling roots stay listed, including after the orphan
   let runner4;
   let interruptedRoot;
   try {
-    runner1 = runnerFor(repo, script, ...first, env, path.join(home, 'run1.log'));
+    runner1 = scope.launch(() => runnerFor(repo, script, ...first, env, path.join(home, 'run1.log')),
+      { handshake: first[0], stop: first[1] });
     const firstData = await until(() => fs.existsSync(first[0]) && JSON.parse(fs.readFileSync(first[0], 'utf8')), 'first child handshake');
     const root1 = await until(() => roots(parent).map((name) => path.join(parent, name)).find((root) => {
       try { return JSON.parse(fs.readFileSync(path.join(root, ownerFile), 'utf8')).pid === runner1.pid; }
@@ -84,13 +72,17 @@ test('interrupted and live sibling roots stay listed, including after the orphan
     assert.ok(fs.existsSync(root1));
     assert.equal(fs.existsSync(first[2]), false, 'orphan has not stopped');
 
-    const runFocus = () => spawnSync(process.execPath, [RUNNER, 'focus', clean], { env, encoding: 'utf8' });
+    const runFocus = () => {
+      scope.active();
+      return spawnSync(process.execPath, [RUNNER, 'focus', clean], { env, encoding: 'utf8' });
+    };
     const second = runFocus();
     assert.equal(second.status, 0, second.stdout + second.stderr);
     assert.match(second.stderr, /kept run root.*cannot prove complete descendant exit \(list-only\)/);
     assert.deepEqual(roots(parent), [path.basename(root1)]);
 
-    runner4 = runnerFor(repo, script, ...live, env, path.join(home, 'run4.log'));
+    runner4 = scope.launch(() => runnerFor(repo, script, ...live, env, path.join(home, 'run4.log')),
+      { handshake: live[0], stop: live[1] });
     const liveData = await until(() => fs.existsSync(live[0]) && JSON.parse(fs.readFileSync(live[0], 'utf8')), 'live child handshake');
     const root4 = await until(() => roots(parent).map((name) => path.join(parent, name)).find((root) => {
       try { return JSON.parse(fs.readFileSync(path.join(root, ownerFile), 'utf8')).pid === runner4.pid; }
@@ -110,22 +102,9 @@ test('interrupted and live sibling roots stay listed, including after the orphan
     assert.ok(fs.existsSync(root1), 'known stopped child does not authorize sibling removal');
     assert.ok(fs.existsSync(root4), 'concurrently live sibling remains');
   } finally {
-    // Stop only children created by this fixture, through their private channels.
-    fs.writeFileSync(first[1], 'exit');
-    fs.writeFileSync(live[1], 'exit');
-    if (runner1 && runner1.exitCode === null && runner1.signalCode === null) runner1.kill('SIGTERM');
-    if (runner4 && runner4.exitCode === null && runner4.signalCode === null) {
-      await until(() => runner4.exitCode !== null || runner4.signalCode !== null, 'live runner completion', 14000);
-    }
-    if (fs.existsSync(first[0])) {
-      const { pid } = JSON.parse(fs.readFileSync(first[0], 'utf8'));
-      await until(() => childGone(pid), 'first child exit', 14000);
-    }
-    if (fs.existsSync(live[0])) {
-      const { pid } = JSON.parse(fs.readFileSync(live[0], 'utf8'));
-      await until(() => childGone(pid), 'live child exit', 14000);
-    }
+    await scope.cleanup();
   }
+  if (t.signal.aborted) return;
   // Only this test's disposable fixture root is removed after its child stops.
   assert.deepEqual(roots(parent), [path.basename(interruptedRoot)]);
   fs.rmSync(interruptedRoot, { recursive: true });
