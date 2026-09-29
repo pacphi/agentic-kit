@@ -16,15 +16,15 @@
 // process.platform, so the wrong-platform root simply reads absent and a machine
 // carrying both (a tool that moved its cache) reports both.
 import path from 'node:path';
-import { home, isWindows } from '../paths.mjs';
+import { home, isWindows, xdgBase } from '../paths.mjs';
 import { decodeClaudeProjectDir } from './project-sources.mjs';
 import {
   rootMeasurements, measured, unknown, statNode, sumMeasurements, hasValue,
 } from './walk.mjs';
 import { candidate } from './storage-reclaim.mjs';
 
-const xdgCache = (env) => env.XDG_CACHE_HOME || path.join(home, '.cache');
-const xdgData = (env) => env.XDG_DATA_HOME || path.join(home, '.local', 'share');
+const xdgCache = (env) => xdgBase('XDG_CACHE_HOME', path.join(home, '.cache'), { env });
+const xdgData = (env) => xdgBase('XDG_DATA_HOME', path.join(home, '.local', 'share'), { env });
 const macCache = () => path.join(home, 'Library', 'Caches');
 const winLocalAppData = (env) => env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
 
