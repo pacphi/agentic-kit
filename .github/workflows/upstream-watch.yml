@@ -58,8 +58,10 @@ jobs:
           set -e
           {
             echo "## Upstream watch preview (exit $code)"
-            jq -r 'if .blind then "blind \(.blind): \(.error // "unknown error"), could not check \(.fetchErrors | length)" else "since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), blind \(.blind), notice \(.notice.post), would fire \(.wouldFire | length)" end' watch.json
+            jq -r 'if .blind then "blind \(.blind): \(.error // "unknown error"), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), deferred \(.deferred | length)" else "since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), notice \(.notice.post), would fire \(.wouldFire | length), deferred \(.deferred | length)" end' watch.json
             jq -r '(.wouldFire // [])[] | "- would fire \(.id) \(.version) \(.branch)"' watch.json
+            jq -r '(.deferred // [])[] | "- deferred \(.id) \(.version) \(.branch)"' watch.json
+            jq -r '(.fired // [])[] | "- observed session before ledger failure: \(.id) \(.fields.session)"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
@@ -102,9 +104,10 @@ jobs:
           set -e
           {
             echo "## Upstream watch (exit $code)"
-            jq -r 'if .blind then "blind \(.blind): \(.error // "unknown error"), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length)" else "since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), commit \(.commit // "none"), would fire \(.wouldFire | length), deferred \(.deferred | length)" end' watch.json
+            jq -r 'if .blind then "blind \(.blind): \(.error // "unknown error"), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), deferred \(.deferred | length)" else "since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), commit \(.commit // "none"), would fire \(.wouldFire | length), deferred \(.deferred | length)" end' watch.json
             jq -r '(.wouldFire // [])[] | "- would fire \(.id) \(.version) \(.branch)"' watch.json
             jq -r '(.deferred // [])[] | "- deferred \(.id) \(.version) \(.branch)"' watch.json
+            jq -r '(.fired // [])[] | "- observed session before ledger failure: \(.id) \(.fields.session)"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
             jq -r '.notice.body' watch.json
           } >> "$GITHUB_STEP_SUMMARY"
