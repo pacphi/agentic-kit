@@ -136,6 +136,44 @@ const DRY = (over = {}) => ({ 'dry-run': true, 'no-upgrade': false, yes: false, 
 const failedDates = async () => ({ code: 1, stdout: '', stderr: 'offline' });
 const NOT_CHECKED = /versions not checked online \(offline or timed out\); this plan uses the versions ak recorded/;
 
+test('versions-only dry run previews conditional daemon convergence in a Ruflo project without writes', async () => {
+  seed();
+  const marker = path.join(PROJECT, '.claude-flow', 'config.yaml');
+  fs.mkdirSync(path.dirname(marker), { recursive: true });
+  fs.writeFileSync(marker, 'daemon:\n  maxConcurrent: 7\n');
+  const beforeHome = snapshot(HOME);
+  const beforeProject = snapshot(PROJECT);
+  try {
+    const { result, out } = await syncLines({
+      flags: DRY(), fetchLatest: async () => null, releaseDatesRunner: failedDates,
+      collectFn: async () => [{ subsystem: 'versions', level: 'warn', message: 'ruflo update available', fix: 'sync upgrades', repair: 'sync' }],
+    });
+    assert.equal(result, 0, out);
+    assert.match(out, /\[daemons\].*installed Ruflo version/);
+    assert.doesNotMatch(out, /daemon\.idleSecs.*0/, 'the target version is not yet known');
+    assertUnchanged(beforeHome, HOME);
+    assertUnchanged(beforeProject, PROJECT);
+  } finally { fs.rmSync(marker); }
+});
+
+test('versions-triggered daemon preview honors skip daemons and skip versions', async () => {
+  seed();
+  const marker = path.join(PROJECT, '.claude-flow', 'config.yaml');
+  fs.mkdirSync(path.dirname(marker), { recursive: true });
+  fs.writeFileSync(marker, 'daemon:\n  maxConcurrent: 7\n');
+  const collectFn = async () => [{ subsystem: 'versions', level: 'warn', message: 'update available', fix: 'sync upgrades', repair: 'sync' }];
+  try {
+    const daemonSkipped = await syncLines({
+      flags: DRY({ skip: ['daemons'] }), fetchLatest: async () => null, releaseDatesRunner: failedDates, collectFn,
+    });
+    assert.match(daemonSkipped.out, /skipped by request: \[daemons\]/);
+    const versionSkipped = await syncLines({
+      flags: DRY({ skip: ['versions'] }), fetchLatest: async () => null, releaseDatesRunner: failedDates, collectFn,
+    });
+    assert.doesNotMatch(versionSkipped.out, /\[daemons\]/);
+  } finally { fs.rmSync(marker); }
+});
+
 test('a dry run looks the versions up online and plans the upgrade a fresh cache does not know about, recording nothing', () => {
   const root = seed({ age: HOUR });
   const env = spawnEnv(HOME);

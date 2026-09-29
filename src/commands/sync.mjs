@@ -22,7 +22,7 @@ import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, det
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
-import { applyRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
+import { applyRufloDaemon, rufloDaemonProjectRoot } from '../lib/ruflo-daemon-config.mjs';
 import { cleanupProbeRows } from '../lib/memory-probe-cleanup.mjs';
 import { rufloMemoryLocation } from '../lib/ruflo-memory.mjs';
 import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
@@ -484,11 +484,11 @@ export const SYNC_STEPS = [
       // that are actually still alive, not the ones just killed.
       if (reaped.some((r) => r.killed)) await list({ cwd: ctx.cwd, refresh: true, record: true, source: 'sync' });
       // Read the version now: the versions step may have just upgraded Ruflo.
-      const applied = await applyRufloDaemon(ctx.cwd, {
-        cfg: ctx.cfg, rufloVersion: installedRoutingVersion() ?? installedVersion('ruflo'),
+      const applied = await (ctx.daemonApply ?? applyRufloDaemon)(ctx.cwd, {
+        cfg: ctx.cfg, rufloVersion: (ctx.daemonVersion ?? (() => installedRoutingVersion() ?? installedVersion('ruflo')))(),
       });
       if (!applied) return;
-      saveKitConfig(ctx.cfg);
+      (ctx.saveConfig ?? saveKitConfig)(ctx.cfg);
       const { config, autostart } = applied.result;
       if (applied.result.changed) ok(`ruflo daemon settings: config ${config}, start-on-use ${autostart}`);
       const { held } = applied.result;
@@ -1125,6 +1125,18 @@ async function converge({
     // an action sync cannot complete this run. Other ruflo-components fixes
     // (not-applied/drifted/blocked) don't need an upgrade and stay in the plan.
     .filter((r) => !(flags['no-upgrade'] && r.subsystem === 'ruflo-components' && r.state === 'needs-ruflo'));
+
+  // The daemon step also runs for a versions item, even when the collector
+  // reports no current daemon drift. Its settings are decided after upgrades
+  // from the installed Ruflo version, so the preview can promise only this
+  // recheck, not exact keys or a restart.
+  if (!skip.has('versions') && candidates.some((r) => r.subsystem === 'versions')
+    && !candidates.some((r) => r.subsystem === 'daemons')
+    && rufloDaemonProjectRoot(cwd)) {
+    candidates.push(row('daemons', 'info',
+      'package changes may change the daemon settings needed by the installed Ruflo version',
+      'recheck daemon settings against the installed Ruflo version; write receipted keys or restart a running daemon only if needed'));
+  }
 
   const cfg = loadKitConfig();
   if (cfg.aqe !== false && cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged') {
