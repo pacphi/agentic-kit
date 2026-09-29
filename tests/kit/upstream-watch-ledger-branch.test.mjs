@@ -82,6 +82,12 @@ test('read reports failures from rev-parse, show and log', async () => {
   }
 });
 
+test('read rejects an invalid branch before any git call', async () => {
+  const { exec, calls } = fakeExec([]);
+  await assert.rejects(createLedgerStore({ exec }).read('../ledger'), /not a branch name/);
+  assert.equal(calls.length, 0);
+});
+
 test('a failed ls-remote or fetch throws', async () => {
   const lookup = fakeExec([{ status: 128, stderr: 'fatal: unable to access: HTTP 403\n' }]);
   await assert.rejects(createLedgerStore({ exec: lookup.exec }).read('upstream-watch-ledger', { now: NOW }), /git ls-remote origin upstream-watch-ledger failed: fatal: unable to access/);
