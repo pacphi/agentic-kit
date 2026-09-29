@@ -1,5 +1,6 @@
 import { rowCostEvidence, sessionCostEvidence, acquisitionSummary } from './usage-cost.mjs';
 import { isLocalInferenceProvider } from './usage-local-provider.mjs';
+import { classifySessionSurface } from './session-surface.mjs';
 // usage-aggregate.mjs — pure arithmetic over ALREADY-PARSED session records:
 // interval math, secret masking, and the two shapes usage-index.mjs hands its
 // consumers (the batch Aggregate from `aggregate()`, and the single-session
@@ -847,7 +848,7 @@ function buildSessionRow(rec, usage, verdict) {
     start: new Date(rec.start ?? rec.end).toISOString(),
     minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
     prompts: rec.prompts, responses: rec.responses, exceptions: rec.exceptions,
-    sidechain: rec.sidechain, threadSource: rec.threadSource,
+    sidechain: rec.sidechain, threadSource: rec.threadSource, parentSessionId: rec.parentSessionId ?? null,
     models: rec.models.slice(),
     input, output, cacheRead, cacheWrite,
     tokens: input + output + cacheRead + cacheWrite,
@@ -934,7 +935,7 @@ function foldSessionIntoTree(tree, s) {
 /** Subagent work is either Claude's sidechain flag or Codex's ledger-backed
  *  thread source; both mean "not a session a human was driving". */
 function sourceKey(s) {
-  return isSubagentSession(s) ? 'subagent' : 'main';
+  return isSubagentSession(s) || ['guardian_review', 'agent_created_thread'].includes(s.threadSource) ? 'subagent' : 'main';
 }
 
 /** Second pass over the (now sorted) session rows: totals, the by-host/
@@ -1300,18 +1301,58 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
  *     stays visible/auditable.
  * Exported for test.
  */
+function ledgerParent(rec, ledger, byId) {
+  const parentId = rec.parentSessionId ?? (ledger.parents instanceof Map ? ledger.parents.get(rec.id) : null);
+  if (typeof parentId !== 'string' || parentId === rec.id) return null;
+  const parent = byId.get(parentId);
+  // A chain or cycle supplies no reliable top-level surface. Walk only IDs
+  // already present in this bounded record set; never infer a missing link.
+  if (!parent || ['subagent', 'guardian_review', 'agent_created_thread'].includes(
+    parent.threadSource ?? ledger.threads.get(parentId)?.threadSource)) return null;
+  const seen = new Set([rec.id]);
+  let cursor = parentId;
+  while (cursor) {
+    if (seen.has(cursor)) return null;
+    seen.add(cursor);
+    const node = byId.get(cursor);
+    if (!node) return null;
+    cursor = node.parentSessionId ?? (ledger.parents instanceof Map ? ledger.parents.get(cursor) : null);
+  }
+  return { parentId, parent };
+}
+
+function ledgerOrigin(rec, source, parent) {
+  let origin = rec.sessionOrigin;
+  if (origin && source !== rec.threadSource) {
+    const raw = origin.rawEvidence ?? {};
+    origin = { ...origin, ...classifySessionSurface({ host: 'codex', originator: raw.originator,
+      source: raw.source, threadSource: source }) };
+  }
+  if (origin && parent?.sessionOrigin && ['subagent', 'guardian_review', 'agent_created_thread'].includes(source)) {
+    origin = { ...origin, surface: parent.sessionOrigin.surface, label: parent.sessionOrigin.label,
+      attributes: [...(origin.attributes ?? []), source === 'guardian_review' ? 'Auto-review' : 'Subagents'] };
+  }
+  return origin;
+}
+
 export function applyCodexLedger(records, ledger) {
-  if (!ledger || !(ledger.threads instanceof Map)) return records;
+  // The rollout's own source can carry a verified parent even when Codex's
+  // optional SQLite ledger is unavailable.
+  if (!ledger || !(ledger.threads instanceof Map)) ledger = { threads: new Map(), parents: new Map() };
+  const byId = new Map(records.filter((rec) => rec?.provider === 'codex').map((rec) => [rec.id, rec]));
   return records.map((rec) => {
     if (!rec || rec.provider !== 'codex') return rec;
     const t = ledger.threads.get(rec.id);
     const fromEdges = ledger.parents instanceof Map && ledger.parents.has(rec.id) ? 'subagent' : null;
     const source = rec.threadSource ?? t?.threadSource ?? fromEdges;
+    const parentLink = ledgerParent(rec, ledger, byId);
     // A rollout that classified ITSELF (any source, subagent included) already
     // carries the right usage: a subagent's is its own, replay subtracted.
-    if (source === rec.threadSource) return rec;
-    const out = { ...rec, threadSource: source };
-    if (source === 'subagent') { out.usage = []; out.reasoningOutput = 0; }
+    if (source === rec.threadSource && !parentLink && !rec.parentSessionId) return rec;
+    const out = { ...rec, threadSource: source,
+      parentSessionId: parentLink?.parentId ?? null };
+    if (source !== rec.threadSource && source === 'subagent') { out.usage = []; out.reasoningOutput = 0; }
+    out.sessionOrigin = ledgerOrigin(rec, source, parentLink?.parent);
     return out;
   });
 }

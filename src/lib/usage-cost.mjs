@@ -10,7 +10,7 @@ import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 export function rowCostEvidence(row, rec, deps) {
   const observed = typeof row.costObserved === 'number' && Number.isFinite(row.costObserved) && row.costObserved >= 0;
   const missing = row.costMissingUsage ?? (observed ? null : row);
-  const unpriced = !!missing && isLocalInferenceProvider(row.provider);
+  const unpriced = !!missing && (isLocalInferenceProvider(row.provider) || row.model === 'codex-auto-review');
   const estimatedUsd = missing && !unpriced ? (deps.costOf({
     model: row.model, provider: row.provider ?? rec.provider, day: row.day,
     input: missing.input, output: missing.output,

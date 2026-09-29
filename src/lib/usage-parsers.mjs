@@ -202,7 +202,7 @@ export function blankSession(id, provider) {
     id, provider, host: provider, inferenceProvider: null, providerProvenance: 'unknown',
     title: '', project: 'unknown', start: null, end: null,
     projectEvidence: null, sessionOrigin: { origin: 'unknown', evidence: 'desktop-origin-not-declared' },
-    prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, models: [], tools: {},
+    prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, parentSessionId: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
     // Codex-only detail (v6): reasoning tokens inside output, and the last
     // rate-limit snapshot the rollout carried. Claude sessions keep the zero
@@ -839,13 +839,19 @@ function recordCodexUnknownType(stats, type) {
  *  `handleCodexTurnContext`'s own `rec.project === 'unknown'` check — a
  *  DIFFERENT gate that coincides with this one in the common case but is
  *  not "the same rule" as this latch. */
-function handleCodexMeta(rec, metaState, decoded) {
+function handleCodexMeta(rec, metaState, decoded, payload) {
   if (metaState.seen) return;
   metaState.seen = true;
   if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
   if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
   if (typeof decoded.cwd === 'string') rec.projectEvidence = observeUsageProject(decoded.cwd);
   if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
+  // Observed Codex shape: source.subagent.thread_spawn.parent_thread_id.
+  // Accept only a UUID-shaped identifier; arbitrary source objects are never
+  // copied into the usage record or used to infer a parent.
+  const parentId = payload?.source?.subagent?.thread_spawn?.parent_thread_id;
+  if (typeof parentId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(parentId)
+      && parentId !== rec.id) rec.parentSessionId = parentId;
   if (decoded.provider) {
     rec.inferenceProvider = decoded.provider;
     rec.providerProvenance = 'observed';
@@ -1136,7 +1142,7 @@ function rawPayload(e) {
 /** One line of a Codex rollout, dispatched on its decoded type. */
 function processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns) {
   const decoded = decodeCodexRecord(e);
-  if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded); return; }
+  if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded, rawPayload(e)); return; }
   if (decoded.type === 'turnContext') {
     handleCodexTurnContext(rec, decoded, rawPayload(e));
     noteCodexWalkModel(usageState.walk, decoded.model);

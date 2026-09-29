@@ -92,6 +92,7 @@ function codexClassification(originator, source, threadSource) {
   if (surface === 'codex-mcp' || ['subagent', 'guardian_review', 'agent_created_thread'].includes(threadSource)) initiator = 'agent';
   else if (['codex-cli-exec', 'codex-sdk'].includes(surface) || threadSource === 'automation') initiator = 'automation';
   else if (['user', 'chatgpt_handoff'].includes(threadSource)) initiator = 'person';
+  else if (threadSource !== null) initiator = 'unknown';
   return [surface, initiator, []];
 }
 
