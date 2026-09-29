@@ -25,6 +25,30 @@ function fixture() {
   return { root, codexHome, project, cache };
 }
 
+function cliFixture(t) {
+  const fx = fixture();
+  // An after hook preserves the command assertion if bounded cleanup also fails.
+  t.after(() => fs.rmSync(fx.root, { recursive: true, force: true, maxRetries: 3 }));
+  const preload = path.join(fx.root, 'probes.cjs');
+  const launches = path.join(fx.root, 'unexpected-launches.jsonl');
+  fs.writeFileSync(launches, '');
+  fs.writeFileSync(preload, `const cp = require('node:child_process');
+    const fs = require('node:fs');
+    for (const method of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
+      cp[method] = (command, args) => {
+        if (method === 'spawnSync' && command === 'codex' && JSON.stringify(args) === '["--version"]')
+          return { status: 0, stdout: 'codex 0.151.0', stderr: '' };
+        if (method === 'execFileSync' && command === 'npm' && JSON.stringify(args) === '["root","-g"]')
+          return ${JSON.stringify(path.join(fx.root, 'global-packages'))};
+        fs.appendFileSync(${JSON.stringify(launches)}, JSON.stringify({ method, command, args }) + '\\n');
+        throw new Error('unexpected child launch during hook audit');
+      };
+    }
+    require('node:module').syncBuiltinESMExports();
+  `);
+  return { ...fx, preload, launches };
+}
+
 test('audit keeps SessionEnd compatibility separate from trust and never proposes an automatic cache edit', () => {
   const fx = fixture();
   try {
@@ -411,36 +435,30 @@ test('audit reports malformed hook documents and remains read-only', () => {
   }
 });
 
-test('ak audit hooks exposes the read-only audit as a porcelain command', () => {
-  const fx = fixture();
-  try {
-    const result = spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'agentic-kit.mjs'), 'audit', 'hooks', '--json'], {
-      cwd: fx.project,
-      env: spawnEnv(path.join(fx.root, 'home'), { CODEX_HOME: fx.codexHome }),
-      encoding: 'utf8',
-    });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    const report = JSON.parse(result.stdout);
-    assert.equal(report.mode, 'read-only');
-    assert.equal(report.summary.automaticActions, 0);
-  } finally {
-    fs.rmSync(fx.root, { recursive: true, force: true });
-  }
+test('ak audit hooks exposes the read-only audit as a porcelain command', (t) => {
+  const fx = cliFixture(t);
+  const result = spawnSync(process.execPath, ['--require', fx.preload, path.join(repoRoot, 'bin', 'agentic-kit.mjs'), 'audit', 'hooks', '--json'], {
+    cwd: fx.project,
+    env: spawnEnv(path.join(fx.root, 'home'), { CODEX_HOME: fx.codexHome }),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.mode, 'read-only');
+  assert.equal(report.summary.automaticActions, 0);
+  assert.equal(fs.readFileSync(fx.launches, 'utf8'), '');
 });
 
-test('ak audit hooks human output is not followed by the generic network drift nudge', () => {
-  const fx = fixture();
-  try {
-    const result = spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'agentic-kit.mjs'), 'audit', 'hooks'], {
-      cwd: fx.project,
-      env: spawnEnv(path.join(fx.root, 'home'), { CODEX_HOME: fx.codexHome }),
-      encoding: 'utf8',
-      timeout: 3_000,
-    });
-    assert.equal(result.error, undefined, result.error?.message);
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /trust: unchanged/);
-  } finally {
-    fs.rmSync(fx.root, { recursive: true, force: true });
-  }
+test('ak audit hooks human output is not followed by the generic network drift nudge', (t) => {
+  const fx = cliFixture(t);
+  const result = spawnSync(process.execPath, ['--require', fx.preload, path.join(repoRoot, 'bin', 'agentic-kit.mjs'), 'audit', 'hooks'], {
+    cwd: fx.project,
+    env: spawnEnv(path.join(fx.root, 'home'), { CODEX_HOME: fx.codexHome }),
+    encoding: 'utf8',
+    timeout: 3_000,
+  });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /trust: unchanged/);
+  assert.equal(fs.readFileSync(fx.launches, 'utf8'), '', 'audit must not launch the network drift nudge');
 });
