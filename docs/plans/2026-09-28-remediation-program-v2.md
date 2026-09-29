@@ -6,7 +6,7 @@
 
 **Written against:** `main@e957737b`. v1 status: #258, #259, #260, #261 and #263 merged on 2026-09-28. npm still ships `4.0.0-alpha.59`, so #259–#263 are unreleased, and #263 changes the CLI in breaking ways. The only worktrees are the main checkout and this one, and no stash exists.
 
-**Sources:** the scope reconciliation, keyed by its row ids in [Appendix A](#appendix-a-the-reconciliations-189-rows); the SDD ledger, cited as `L:NNN`; [the 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md), whose section "Deferred to Branch 6c" holds the dashboard task text; [the Branch 9 plan](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md), which holds Tasks 5–14, the deferred items and N-1 to N-5; the N-5 list; the final reviews of 6b and Branch 9; and [the docs taxonomy plan](2026-09-28-docs-taxonomy-and-archive.md). The reconciliation, the ledger, the N-5 list and the reviews are git-ignored files in the main checkout under `.superpowers/sdd/2026-09-26-remediation-program/` (`reports/program-scope-reconciliation.md`, `progress.md`, `reports/n5-253-deferred-minors.md`, `reports/b6b-final-review.md`, `reports/b6b-final-rereview.md`, `reports/b9-final-review.md`).
+**Sources:** the scope reconciliation, keyed by its row ids in [Appendix A](#appendix-a-the-reconciliations-189-rows); the SDD ledger, cited as `L:NNN`; [the 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md), whose section "Deferred to Branch 6c" holds the dashboard task text; [the Branch 9 plan](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md), which holds Tasks 5–14, the deferred items and N-1 to N-5; the N-5 list; the final reviews of 6b and Branch 9; and [the docs taxonomy plan](../archive/2026-09-28-plan-docs-taxonomy-and-archive.md). The reconciliation, the ledger, the N-5 list and the reviews are git-ignored files in the main checkout under `.superpowers/sdd/2026-09-26-remediation-program/` (`reports/program-scope-reconciliation.md`, `progress.md`, `reports/n5-253-deferred-minors.md`, `reports/b6b-final-review.md`, `reports/b6b-final-rereview.md`, `reports/b9-final-review.md`).
 
 **How v2 saves attended time:**
 
@@ -217,7 +217,7 @@ Seven branches. V2 has two PRs, so there are eight PRs in total. Effort is given
 
 ### V2 `docs/taxonomy-reorg` and `docs/archive-link-repair`: the docs taxonomy
 
-**Scope:** [the taxonomy plan](2026-09-28-docs-taxonomy-and-archive.md) as written, with its Proposed status lifted by D-3.
+**Scope:** [the taxonomy plan](../archive/2026-09-28-plan-docs-taxonomy-and-archive.md) as written, with its Proposed status lifted by D-3.
 
 - PR A covers Tasks 1–9. Tasks 1–2 are tools only, so they can overlap V1. Task 3 regenerates the move map, and it starts only after the plan's "When to run" check prints nothing.
 - PR B covers Tasks 10–12, cut from `main` after PR A merges and run alongside Wave 2.

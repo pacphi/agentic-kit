@@ -158,6 +158,7 @@ reconfirmed by this metadata audit. The per-file inventory and limitations are r
 | [2026-09-28-superpowers-plan-branch-9-follow-ups.md](2026-09-28-superpowers-plan-branch-9-follow-ups.md) | `docs/superpowers/plans/2026-09-28-branch-9-follow-ups.md` | Finished Superpowers plan | Implemented work record preserved after its implementing PR merged. |
 | [2026-09-28-superpowers-plan-upstream-watch-ledger-branch.md](2026-09-28-superpowers-plan-upstream-watch-ledger-branch.md) | `docs/superpowers/plans/2026-09-28-upstream-watch-ledger-branch.md` | Finished Superpowers plan | Implemented work record preserved after its implementing PR merged. |
 | [2026-09-28-superpowers-spec-upstream-watch-ledger-branch-design.md](2026-09-28-superpowers-spec-upstream-watch-ledger-branch-design.md) | `docs/superpowers/specs/2026-09-28-upstream-watch-ledger-branch-design.md` | Finished Superpowers specification | Implemented work record preserved after its implementing PR merged. |
+| [2026-09-28-plan-docs-taxonomy-and-archive.md](2026-09-28-plan-docs-taxonomy-and-archive.md) | `docs/plans/2026-09-28-docs-taxonomy-and-archive.md` | Finished documentation taxonomy and archive plan | Implemented in [PR #264](https://github.com/pacphi/agentic-kit/pull/264) and [PR #266](https://github.com/pacphi/agentic-kit/pull/266). Current layout rules live in the [docs index](../README.md) and [layout guard](../../scripts/docs-layout.mjs); this plan records the build steps. |
 
 ## Naming convention
 
