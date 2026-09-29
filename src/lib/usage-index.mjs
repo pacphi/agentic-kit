@@ -44,6 +44,7 @@ import { readClaudeWindowLog, statClaudeWindowLedger } from './claude-window-led
 import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
 import { selectOpencodeSource } from './usage-opencode-source.mjs';
+import { reusableOpencodeObservations } from './usage-opencode-cache.mjs';
 import { opencodeStorageHealth } from './usage-opencode-health.mjs';
 import {
   listSessionsResult as listOpencodeSessionsResult,
@@ -542,7 +543,8 @@ function parseCodexFile(entry, sink, limits) {
 function parseFile(entry, sink = {}, limits = {}) {
   if (entry.provider === 'opencode') {
     try {
-      const parsed = parseOpencodeSession({ dbFile: entry.dbFile, id: entry.id });
+      const parsed = parseOpencodeSession({ dbFile: entry.dbFile, id: entry.id,
+        maxSessionBytes: limits.maxSessionBytes, maxSessionRows: limits.maxSessionRows });
       // Title hygiene matches the JSONL parsers: the cached index lands on
       // disk, so the same secrets mask applies here.
       if (parsed?.session) parsed.session.title = maskSecrets(parsed.session.title);
@@ -713,9 +715,10 @@ function notify(onProgress, payload) {
  *           statusline's `claude-context-windows/` ledger (tests). Unset reads
  *           the real config dir only for default-root scans; overridden `roots`
  *           read no ledger. `null` disables ledger pairing.
- * @property {{streamAboveBytes?: number, chunkBytes?: number, maxLineBytes?: number}} [readLimits]
+ * @property {{streamAboveBytes?: number, chunkBytes?: number, maxLineBytes?: number, maxSessionBytes?: number, maxSessionRows?: number}} [readLimits]
  *           override where a Codex rollout switches from a whole-string read to
- *           the bounded streaming reader, and that reader's chunk/line limits (tests)
+ *           the bounded streaming reader, its chunk/line limits, and OpenCode session
+ *           acquisition byte/row limits (tests)
  * @property {number} [now]         override "now" (tests)
  * @property {number} [maxAgeMs]    readIndex only: memo TTL
  * @property {object|null} [codexState] override the Codex SQLite thread ledger
@@ -854,7 +857,7 @@ function parseValidatedCandidate(c, failure, readLimits) {
   // A source with malformed accounting cannot enter the cache or global
   // reconciliation, even when the parser could salvage other fields.
   return { session: c.provider === 'claude' && session && !validClaudeMessageClaims(session) ? null : session,
-    parseStats: parsed?.parseStats ?? null };
+    parseStats: parsed?.parseStats ?? null, observationFingerprint: parsed?.observationFingerprint ?? null };
 }
 
 function withClaudeIdentityEligibility(session, candidate, cutoff) {
@@ -882,15 +885,13 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, claudeR
     && ledgerStillValid(hit, c.windowStat)
     && compatibleCostStateCache(c, hit)
     && compatibleOpencodeCache(c, hit)
+    && reusableOpencodeObservations(c, hit, readLimits)
     && (c.provider !== 'codex' || hit.parseStats));
   const key = { localTimeContext: timeContext, mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null),
     ...(c.provider === 'opencode' ? { parseSemantics: OPENCODE_PARSE_SEMANTICS, sourceIdentity: c.sourceIdentity } : {}) };
-  let session = cacheHit ? hit.session : null;
-  let parseStats = cacheHit ? hit.parseStats : null;
   const failure = {};
-  if (!session) {
-    ({ session, parseStats } = parseValidatedCandidate(c, failure, readLimits));
-  }
+  const { session, parseStats, observationFingerprint } = cacheHit && hit.session
+    ? hit : parseValidatedCandidate(c, failure, readLimits);
   const counted = c.provider !== 'codex'
     || recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure });
   if (counted && commonDiagnostics[c.provider]) {
@@ -903,7 +904,11 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, claudeR
       });
     }
   }
-  return { key, session, parseStats };
+  return { key: observationCacheKey(c, key, observationFingerprint), session, parseStats };
+}
+
+function observationCacheKey(candidate, key, observationFingerprint) {
+  return candidate.provider === 'opencode' ? { ...key, observationFingerprint } : key;
 }
 
 /** Carry forward cached entries outside the window whose source still exists,

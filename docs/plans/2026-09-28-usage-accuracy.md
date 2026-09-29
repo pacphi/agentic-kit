@@ -167,3 +167,17 @@ no in-flight markers and no populated session counters. Its database digest was
 unchanged. This is not positive affected-user evidence; synthetic fixtures cover
 the supported and failure cases. Unit 18 awaits independent review; Unit 19 has
 not started. Detailed commands and evidence are in the ignored task18 report.
+
+
+Unit 18 review fixes bind warm reuse to a SHA-256 digest of the selected session's
+observation metadata, relevant message fields, compaction/step-finish parts, and
+V2 scope presence. Both the probe and parser stay within the same per-session
+acquisition ceilings and their own read snapshots; the persisted digest comes
+from the parse snapshot. Unchanged inputs reuse the cache; same-count rewrites
+and removals invalidate it even when upstream timestamps do not change. No
+whole-database payload hash or prompt-body hash is used.
+
+Response-free request evidence now remains in the current/previous compaction
+bounds. Refused acquisitions contribute only their unknown bound, preserving the
+existing rule that they do not become ordinary zero-cost session rows. Neither
+path manufactures responses, tokens or billing. Review fixes await rereview.

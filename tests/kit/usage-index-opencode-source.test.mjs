@@ -196,7 +196,8 @@ test('OpenCode storage warnings refresh on all cache hits and survive an empty w
     cache.entries['opencode://ses_coverage'].session.title = 'cache witness';
     fs.writeFileSync(sb.cachePath, JSON.stringify(cache)); _resetForTest();
     const db = new DatabaseSync(sb.dbFile);
-    db.exec('CREATE TABLE session_message (payload text); INSERT INTO session_message VALUES (NULL)'); db.close();
+    // Source-level V2 activity elsewhere must not invalidate this unchanged V1 session.
+    db.exec("CREATE TABLE session_message (session_id text, payload text); INSERT INTO session_message VALUES ('unrelated', NULL)"); db.close();
     fs.mkdirSync(path.join(path.dirname(sb.dbFile), 'storage'));
     fs.writeFileSync(path.join(path.dirname(sb.dbFile), 'storage', 'legacy.json'), 'not read');
     const warm = await buildIndex(opts(sb));

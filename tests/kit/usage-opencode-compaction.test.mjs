@@ -5,6 +5,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './helpers/temp-dir.mjs';
 import { parseSession } from '../../src/lib/usage-opencode.mjs';
+import { aggregate } from '../../src/lib/usage-aggregate.mjs';
 import { buildIndex, _resetForTest } from '../../src/lib/usage-index.mjs';
 
 const NOW = Date.parse('2026-09-29T12:00:00Z');
@@ -135,4 +136,101 @@ test('duplicate summary evidence is counted once per actual request parent', t =
   assert.deepEqual(session.compactionEvidence, { lowerBound: 1, upperBound: 1 });
   assert.equal(session.responses, 2, 'distinct assistant rows keep their recorded usage');
   assert.equal(session.usage[0].costObserved, 0.5);
+});
+
+
+function mutateDb(opts, action) {
+  const db = new DatabaseSync(opts.dbFile);
+  try { action(db); } finally { db.close(); }
+  _resetForTest();
+}
+
+for (const [name, mutation, reason] of [
+  ['upstream part removal and counter subtraction', db => db.exec(`DELETE FROM part WHERE id = 'p1';
+    UPDATE session SET cost = 0, tokens_input = 0, tokens_output = 0, tokens_reasoning = 0,
+      tokens_cache_read = 0, tokens_cache_write = 0`), 'unpopulated-session-counters'],
+  ['same-count step rewrite', db => db.prepare('UPDATE part SET data = ? WHERE id = ?')
+    .run(JSON.stringify({ type: 'step-finish', tokens: { ...TOKENS, input: 101 }, cost: 0.25 }), 'p1'), 'unproved-step-scope'],
+  ['part addition', db => db.exec("INSERT INTO part SELECT 'extra', message_id, session_id, data FROM part WHERE id = 'p1'"), 'unproved-step-scope'],
+  ['metadata-only rewrite', db => db.exec("UPDATE session SET time_compacting = 123"), 'incomplete-messages'],
+  ['new V2 scope', db => db.exec("CREATE TABLE session_message (session_id TEXT); INSERT INTO session_message VALUES ('s')"), 'unsupported-v2-scope'],
+]) test(`warm observation cache invalidates after ${name} without timestamp changes`, async t => {
+  const opts = fixture(t);
+  assert.equal((await buildIndex(opts)).sessions[0].opencodeReconciliation.state, 'matched');
+  mutateDb(opts, mutation);
+  const warm = await buildIndex(opts);
+  assert.equal(warm.sessions[0].opencodeReconciliation.reason, reason);
+  assert.deepEqual(warm.sessions[0].opencodeReconciliation, parseSession(opts).session.opencodeReconciliation);
+  assert.equal(warm.totals.responses, 1);
+  assert.equal(warm.totals.cost, 0.25);
+});
+
+test('same-size compaction part rewrite invalidates a current marker while unchanged evidence reuses it', async t => {
+  const opts = fixture(t);
+  await buildIndex(opts);
+  const cache = JSON.parse(fs.readFileSync(opts.cachePath, 'utf8'));
+  cache.entries['opencode://s'].session.title = 'cache reuse sentinel';
+  fs.writeFileSync(opts.cachePath, JSON.stringify(cache)); _resetForTest();
+  assert.equal((await buildIndex(opts)).sessions[0].title, 'cache reuse sentinel', 'unchanged source reuses the parse');
+  mutateDb(opts, db => db.prepare('UPDATE part SET data = ? WHERE id = ?')
+    .run(JSON.stringify({ type: 'xxxxxxxxxx' }), 'p0'));
+  const warm = await buildIndex(opts);
+  assert.equal(warm.sessions[0].title, 'fixture');
+  assert.equal(warm.totals.compactions, 0);
+  assert.deepEqual(warm.totals.compactionEvidence, { lowerBound: 0, upperBound: 1 });
+});
+
+for (const [name, maxSessionBytes, upperBound] of [
+  ['request-only', undefined, 1], ['acquisition-incomplete', 64, null],
+]) test(`${name} observation uncertainty survives current and previous aggregate windows`, t => {
+  const opts = fixture(t, { messages: [['u', { role: 'user' }]], parts: [['u', { type: 'compaction' }]] });
+  const { session } = parseSession({ ...opts, maxSessionBytes });
+  for (const offset of [0, 15]) {
+    const now = NOW + offset * 86400000;
+    const result = aggregate([session], { days: 14, now, cutoff: now - 14 * 86400000, previous: true, deps: opts.deps });
+    const totals = offset ? result.previous.totals : result.totals;
+    assert.deepEqual(totals.compactionEvidence, { lowerBound: 0, upperBound });
+    assert.equal(totals.sessions, maxSessionBytes ? 0 : 1, 'refused acquisition is not a normal session');
+    assert.equal(totals.responses, 0);
+    assert.equal(totals.tokens, 0);
+    assert.equal(totals.cost, 0);
+    if (offset) assert.equal(result.totals.sessions, 0);
+  }
+});
+
+test('a tighter acquisition budget cannot reuse a cached full observation', async t => {
+  const opts = fixture(t);
+  await buildIndex(opts); _resetForTest();
+  const restricted = await buildIndex({ ...opts, readLimits: { maxSessionBytes: 64 } });
+  assert.equal(restricted.totals.responses, 0);
+  assert.deepEqual(restricted.totals.compactionEvidence, { lowerBound: 0, upperBound: null });
+  assert.equal(restricted.totals.cost, 0);
+});
+
+
+test('unknown V2 schema preserves V1 usage and refuses a matched reconciliation', async t => {
+  const opts = fixture(t);
+  await buildIndex(opts);
+  mutateDb(opts, db => db.exec('CREATE TABLE session_message (payload TEXT)'));
+  const warm = await buildIndex(opts);
+  assert.equal(warm.totals.responses, 1);
+  assert.equal(warm.totals.cost, 0.25);
+  assert.equal(warm.sessions[0].opencodeReconciliation.reason, 'unsupported-v2-scope');
+});
+
+test('an observation entry without its input digest reparses rather than laundering stale evidence', async t => {
+  const opts = fixture(t);
+  await buildIndex(opts);
+  const cache = JSON.parse(fs.readFileSync(opts.cachePath, 'utf8'));
+  delete cache.entries['opencode://s'].observationFingerprint;
+  cache.entries['opencode://s'].session.title = 'unbound cache';
+  fs.writeFileSync(opts.cachePath, JSON.stringify(cache)); _resetForTest();
+  assert.equal((await buildIndex(opts)).sessions[0].title, 'fixture');
+});
+
+test('read-limit controls cannot override the explicitly selected database', async t => {
+  const opts = fixture(t);
+  const unrelated = fixture(t, { metadata: { title: 'other source' } });
+  const result = await buildIndex({ ...opts, readLimits: { dbFile: unrelated.dbFile, id: unrelated.id } });
+  assert.equal(result.sessions[0].title, 'fixture');
 });

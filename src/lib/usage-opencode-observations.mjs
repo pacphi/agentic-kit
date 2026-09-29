@@ -64,7 +64,7 @@ function incompleteMessages(srow, messages, assistants) {
 
 function reconciliation(srow, messages, parts, hasV2) {
   if (srow.version !== '1.18.33') return unknown('unsupported-version');
-  if (hasV2) return unknown('unsupported-v2-scope');
+  if (hasV2 !== false) return unknown('unsupported-v2-scope');
   const session = [srow.cost, srow.tokens_input, srow.tokens_output, srow.tokens_reasoning,
     srow.tokens_cache_read, srow.tokens_cache_write];
   if (!finite(session[0]) || !session.slice(1).every(integer)) return unknown('invalid-session-counters');
@@ -91,11 +91,17 @@ function reconciliation(srow, messages, parts, hasV2) {
     basis: 'opencode-v1.18.33-single-step' };
 }
 
+export function hasOpencodeV2Rows(db, id) {
+  const v2Table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_message'").get();
+  if (!v2Table) return false;
+  try { return !!db.prepare('SELECT 1 FROM session_message WHERE session_id = ? LIMIT 1').get(id); }
+  catch { return null; } // unreadable scope is unknown, not an absent V2 stream
+}
+
 /** Metadata only: no raw message/parent identities, text, or charge values persist. */
 export function opencodeObservations(db, srow, rows, parts) {
   const messages = rows.map(row => ({ id: row.id, data: parse(row.data) }));
-  const v2Table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_message'").get();
-  const hasV2 = !!v2Table && !!db.prepare('SELECT 1 FROM session_message WHERE session_id = ? LIMIT 1').get(srow.id);
+  const hasV2 = hasOpencodeV2Rows(db, srow.id);
   return { ...compactions(srow, messages, parts),
     opencodeReconciliation: reconciliation(srow, messages, parts, hasV2) };
 }
@@ -109,4 +115,28 @@ export function opencodeObservationProjection(rec) {
     compactionEvidence: { lowerBound: lower, upperBound: valid && rec.acquisitionCoverage?.complete !== false ? upper : null },
     opencodeReconciliation: rec.opencodeReconciliation ?? unknown('missing-observation'),
     opencodeCompaction: rec.opencodeCompaction ?? null };
+}
+
+
+/** Evidence can exist without a completed/billable response. Empty, fully
+ * observed OpenCode sessions still have no compaction evidence to retain. */
+export function hasOpencodeObservations(rec) {
+  if (rec.host !== 'opencode' || rec.acquisitionCoverage?.complete === false) return false;
+  const bounds = opencodeObservationProjection(rec).compactionEvidence;
+  return bounds.lowerBound > 0
+    || bounds.upperBound === null || bounds.upperBound > 0;
+}
+
+
+/** Refused acquisitions retain uncertainty without becoming ordinary zero-cost
+ * session rows. Fold their bounds alone into the selected current/previous window. */
+export function foldIncompleteOpencodeObservations(records, totals, cutoff, endMs = Infinity) {
+  for (const rec of records) {
+    if (rec?.host !== 'opencode' || rec.responses || rec.acquisitionCoverage?.complete !== false
+      || !Number.isFinite(rec.end) || rec.end < cutoff || rec.end >= endMs) continue;
+    const bounds = opencodeObservationProjection(rec).compactionEvidence;
+    totals.compactions += bounds.lowerBound;
+    totals.compactionEvidence.lowerBound += bounds.lowerBound;
+    totals.compactionEvidence.upperBound = null;
+  }
 }

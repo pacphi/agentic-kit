@@ -1,4 +1,4 @@
-import { opencodeObservationProjection } from './usage-opencode-observations.mjs';
+import { foldIncompleteOpencodeObservations, hasOpencodeObservations, opencodeObservationProjection } from './usage-opencode-observations.mjs';
 import { rowCostEvidence, sessionCostEvidence, acquisitionSummary, reconcileClaudeCostState } from './usage-cost.mjs';
 import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 import { classifySessionSurface } from './session-surface.mjs';
@@ -968,7 +968,7 @@ function buildSessionRows(records, { cutoff, endMs = null, deps, byDay, byModel,
   for (const rec of records) {
     // Codex can spend measured tokens in an aborted/tool-only turn. A positive
     // component row is enough evidence to include it even without a message.
-    if (!rec || (!rec.responses && !(rec.host === 'codex' && rec.usage?.some((row) =>
+    if (!rec || (!rec.responses && !hasOpencodeObservations(rec) && !(rec.host === 'codex' && rec.usage?.some((row) =>
       row.input > 0 || row.output > 0 || row.cacheRead > 0 || row.cacheWrite > 0)))) continue;
     if (rec.end === null || rec.end < cutoff) continue;    // outside the window
     if (endMs != null && rec.end >= endMs) continue;       // ... or after the window asked for
@@ -1275,6 +1275,7 @@ function previousWindow(records, { days, now, deps, rates }) {
     cutoff: windowStart - days * DAY_MS, endMs: windowStart, deps, byDay, byModel, rates,
   });
   const folded = foldSessionTotals(sessions, byDay, byModel);
+  foldIncompleteOpencodeObservations(records, folded.totals, windowStart - days * DAY_MS, windowStart);
   finishTotals(folded.totals, sessions, folded);
   return { totals: folded.totals, rhythm: buildRhythm(sessions) };
 }
@@ -1331,6 +1332,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
   sessions.sort((a, b) => b.cost - a.cost || Date.parse(b.start) - Date.parse(a.start));
 
   const folded = foldSessionTotals(sessions, byDay, byModel);
+  foldIncompleteOpencodeObservations(records, folded.totals, cutoff);
   const { totals, byHost, byProvider, byMode, bySource, byTool,
     byProject, byCategory, punchcard, promptsByHost, promptStatsByDay, tree } = folded;
 

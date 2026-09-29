@@ -24,6 +24,7 @@
 // record their OWN messages, not a replay of the parent's — the codex
 // double-count rule does not apply (different storage semantics).
 import { availableOpencodeMetadata, opencodeObservations } from './usage-opencode-observations.mjs';
+import { opencodeObservationFingerprint } from './usage-opencode-cache.mjs';
 import { withDb } from './sqlite.mjs';
 import { sessionAcquisitionCoverage } from './usage-opencode-bounds.mjs';
 // Shared record shape/accumulator with parseClaude/parseCodex — see their
@@ -471,7 +472,7 @@ export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, m
     delete rec.stamps;
     delete rec.pendingPromptMs;
     delete rec.spans;
-    return { session: rec, turns };
+    return { session: rec, turns, observationFingerprint: opencodeObservationFingerprint(db, id) };
   });
   return result.ok ? result.value : null;
 }
