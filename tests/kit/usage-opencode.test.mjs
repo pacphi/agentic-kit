@@ -117,17 +117,18 @@ test('parseSession maps a session to the index record: identity, usage rows with
   assert.equal(rec.exceptions, 0);
   assert.equal(rec.sidechain, false);
   assert.equal(rec.threadSource, null);
-  // provider is the LAST observed assistant providerID — never the host
-  assert.equal(rec.inferenceProvider, 'openrouter');
-  assert.equal(rec.providerProvenance, 'observed');
+  assert.equal(rec.inferenceProvider, null, 'a session spanning providers has no single inference provider');
+  assert.equal(rec.providerProvenance, 'unknown');
   // usage rows per (day, model) with summed observed cost
   const day1 = rec.usage.find((r) => r.model === 'kimi-k3');
+  assert.equal(day1.provider, 'opencode');
   assert.deepEqual(
     { input: day1.input, output: day1.output, cacheRead: day1.cacheRead, cacheWrite: day1.cacheWrite, responses: day1.responses, costObserved: day1.costObserved },
     // output = 2 x (20 text + 5 reasoning): OpenCode stores output NET of reasoning
     { input: 200, output: 50, cacheRead: 80, cacheWrite: 6, responses: 2, costObserved: 0.03 },
   );
   const day2 = rec.usage.find((r) => r.model === 'moonshotai/kimi-k3');
+  assert.equal(day2.provider, 'openrouter');
   assert.equal(day2.costObserved, 0.03);
   assert.equal(day2.day !== day1.day, true, 'rows keyed by day');
   assert.deepEqual(rec.models, ['kimi-k3', 'moonshotai/kimi-k3']);
@@ -562,7 +563,7 @@ test('the same modelID under two providers stays two usage rows, each carrying i
     assert.equal(local.costObserved, null, 'the local turn recorded no cost and is not charged with the cloud turn\'s');
     assert.equal(cloud.input, 75);
     assert.ok(Math.abs(cloud.costObserved - 0.3) < 1e-9);
-    assert.equal(session.inferenceProvider, 'openrouter', 'the session-level provider stays the last observed one');
+    assert.equal(session.inferenceProvider, null, 'two observed providers cannot be a single session provider');
   } finally { rm(d); }
 });
 

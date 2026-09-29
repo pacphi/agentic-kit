@@ -775,6 +775,7 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
   m.responses += row.responses; m.input += row.input; m.output += row.output;
   m.cacheRead += row.cacheRead; m.cacheWrite += row.cacheWrite;
   m.tokens += rowTokens; m.cost = round(m.cost + rowCost);
+  return rowCost;
 }
 
 /** Fold every usage row of one record; returns `{input, output, cacheRead,
@@ -784,13 +785,22 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
  *  usable: it can open at 23:58 and only bill after midnight). */
 function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
   const acc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSaved: 0 };
+  const providerUsage = rec.host === 'opencode' ? Object.create(null) : null;
   const activeDays = new Set();
   for (const row of rec.usage) {
     acc.cacheSaved += cacheSavedFor(row, rec, deps, rates);
-    foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
+    const rowCost = foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
+    if (providerUsage) {
+      const p = bucket(providerUsage, row.provider ?? 'unknown');
+      p.responses += row.responses;
+      p.input += row.input; p.output += row.output;
+      p.cacheRead += row.cacheRead; p.cacheWrite += row.cacheWrite;
+      p.tokens += row.input + row.output + row.cacheRead + row.cacheWrite;
+      p.cost += rowCost;
+    }
   }
   for (const day of activeDays) byDay[day].sessionsActive++;
-  return { ...acc, costEvidence: sessionCostEvidence(rec, deps), firstDay: firstBilledDay(rec) };
+  return { ...acc, providerUsage, costEvidence: sessionCostEvidence(rec, deps), firstDay: firstBilledDay(rec) };
 }
 
 /**
@@ -834,13 +844,25 @@ function v11Projection(rec) {
 
 /** One aggregate session row from a parsed record, its folded usage sums,
  *  and its classifier verdict. */
+function sessionProviderIdentity(rec) {
+  // Cached v26 OpenCode records can still carry the old last-wins session
+  // field. Derive it from the row identities so no additional schema bump is
+  // needed for this unreleased format.
+  if (rec.host !== 'opencode') return {
+    provider: rec.inferenceProvider ?? null,
+    providerProvenance: rec.providerProvenance ?? 'unknown',
+  };
+  const providers = new Set((rec.usage ?? []).map((row) => row.provider ?? null));
+  const provider = providers.size === 1 ? [...providers][0] : null;
+  return { provider, providerProvenance: provider ? 'observed' : 'unknown' };
+}
+
 function buildSessionRow(rec, usage, verdict) {
   const { input, output, cacheRead, cacheWrite, cost, cacheSaved, firstDay } = usage;
   return {
     id: rec.id, host: rec.host ?? rec.provider,
-    provider: rec.inferenceProvider ?? null,
+    ...sessionProviderIdentity(rec),
     transcriptProvider: rec.provider,
-    providerProvenance: rec.providerProvenance ?? 'unknown',
     title: rec.title, project: rec.project,
     projectEvidence: rec.projectEvidence ? { ...rec.projectEvidence } : null,
     sessionOrigin: rec.sessionOrigin ? { ...rec.sessionOrigin } : null,
@@ -886,6 +908,7 @@ function buildSessionRow(rec, usage, verdict) {
     _active: Array.isArray(rec.active) && rec.active.length ? rec.active : [[rec.start ?? rec.end, rec.end]],
     _punchcard: rec.punchcard,
     _day: firstDay,
+    _providerUsage: usage.providerUsage,
   };
 }
 
@@ -993,7 +1016,16 @@ function foldSessionTotals(sessions, byDay, byModel) {
     // stop; claude does not), so they are kept per host — a reader dividing
     // by "responses that could have recorded one" needs them apart.
     hostBucket.aborts = (hostBucket.aborts ?? 0) + (Number(s.aborts) || 0);
-    addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
+    if (s._providerUsage && Object.keys(s._providerUsage).length) {
+      // OpenCode's provider is observed on each assistant row. A session may
+      // count under several providers, but each response/token/dollar lands
+      // exactly once under the row's own provider (or unknown).
+      for (const [provider, usage] of Object.entries(s._providerUsage)) {
+        addTo(bucket(byProvider, provider), { ...s, ...usage });
+      }
+    } else {
+      addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
+    }
     // 'not-recorded' is a first-class key, not a display fallback: a transcript
     // that carried no mode evidence must not be folded into a real posture.
     addTo(bucket(byMode, s.mode ?? 'not-recorded'), s);
@@ -1252,7 +1284,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
 
   const projectTree = buildProjectTree(tree);
   for (const s of sessions) {
-    delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced;
+    delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced; delete s._providerUsage;
     delete s._typedTokens; delete s._questions; delete s._personas;
   }
   const codexRateLimits = buildCodexRateLimits(sessions);

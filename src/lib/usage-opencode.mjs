@@ -251,10 +251,6 @@ function recordAssistantUsage(rec, data, at) {
   const model = typeof data.modelID === 'string' && data.modelID ? data.modelID : 'unknown';
   if (!rec.models.includes(model)) rec.models.push(model);
   const provider = typeof data.providerID === 'string' && data.providerID ? data.providerID : null;
-  if (provider) {
-    rec.inferenceProvider = provider;
-    rec.providerProvenance = 'observed';
-  }
   const t = data.tokens ?? {};
   const cache = t.cache ?? {};
   const day = localDay(at || Date.now());
@@ -465,6 +461,12 @@ export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, m
     Object.assign(rec, { acquisitionCoverage });
     const turns = [];
     for (const row of msgRows) processMessageRow(rec, turns, row, { withTurns, partsByMessage });
+    // A session can switch providers, including to a row with no providerID.
+    // Its usage rows retain the observed identity; the session names a provider
+    // only when every assistant row agrees on one.
+    const providers = new Set(rec.usage.map((row) => row.provider ?? null));
+    rec.inferenceProvider = providers.size === 1 ? [...providers][0] : null;
+    rec.providerProvenance = rec.inferenceProvider ? 'observed' : 'unknown';
     if (!withTurns) collectScanToolCounts(db, id, rec);
 
     if (!rec.title) rec.title = '(untitled)';

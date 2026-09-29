@@ -7,15 +7,16 @@
 
 ## Status
 
-Active. Units 1, 20, 21, 2 and 6 are implemented on this branch. Unit 2 is limited to
-the agreed classifier interface, parser fields and one usage-cache schema bump.
+Active. Units 1–8, 20 and 21 are accepted. Unit 9 implements OpenCode
+provider totals on this branch and awaits independent review before Unit 10.
+Unit 2 is limited to the agreed classifier interface, parser fields and one
+usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin
 fields as raw evidence for local detail. The classifier now retains those tokens
 without inferring a product or provider; malformed, oversized and non-string
 values remain excluded. This narrow policy follow-up does not accept all of
-ADR-0060 or add a UI. Unit 2 and this follow-up must stop for independent review
-before Unit 3; later units still require separate dispatch, RED/GREEN evidence
-and capture commits.
+ADR-0060 or add a UI. Later units still require separate dispatch, RED/GREEN
+evidence and capture commits.
 
 Unit 6 records Amazon Bedrock or Google Vertex AI only when a Claude assistant
 message carries a provider-specific model ID. Conflicting or ordinary IDs leave
@@ -77,7 +78,7 @@ do not cover the reproduced failure.
 | 6 | `src/lib/usage-parsers.mjs`, `usage-local-provider.mjs` | `tests/kit/usage-provenance.test.mjs`, `usage-local-pricing.test.mjs` |
 | 7 | `src/lib/codex-import-marker.mjs`, `usage-parsers.mjs`, `footprint/project-sources.mjs` | `tests/kit/project-sources-imports.test.mjs`, `usage-codex-attribution.test.mjs` |
 | 8 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-codex-attribution.test.mjs`, `usage-codex-large-rollout.test.mjs` |
-| 9 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-telemetry.test.mjs`, `usage-index.test.mjs` |
+| 9 | `src/lib/usage-opencode.mjs`, `usage-aggregate.mjs`; parser row identity already exists | `tests/kit/usage-opencode.test.mjs`, `usage-index-opencode.test.mjs`, `usage-index.test.mjs` |
 | 10 | `src/lib/usage-parsers.mjs`, `usage-insights.mjs` | `tests/kit/usage-codex-attribution.test.mjs`, `usage-context.test.mjs` |
 | 11 | `src/lib/usage-parsers.mjs`, `usage-cost.mjs` | `tests/kit/usage-telemetry.test.mjs`, `usage-claude-window-pairing.test.mjs` |
 | 12 | `src/lib/usage-parsers.mjs`, `usage-index.mjs` | `tests/kit/usage-claude-dedup.test.mjs`, `usage-index.test.mjs` |

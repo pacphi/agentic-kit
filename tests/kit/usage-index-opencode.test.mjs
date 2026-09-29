@@ -118,6 +118,93 @@ test('scan aggregates opencode sessions: host bucket, provider bucket, tokens, a
   rm(sb.dir);
 });
 
+test('one OpenCode session partitions provider usage on cold and warm scans without changing global totals', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_switch', directory: '/x', title: 'switch', timeCreated: at }],
+    messages: [
+      assistantMsg('a1', 'ses_switch', at + 1000, { model: 'shared', provider: 'alpha', cost: 0.25,
+        tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 3, write: 1 } } }),
+      assistantMsg('a2', 'ses_switch', at + 2000, { model: 'shared', provider: 'beta',
+        tokens: { input: 20, output: 4, reasoning: 0, cache: { read: 5, write: 2 } } }),
+      assistantMsg('a3', 'ses_switch', at + 3000, { model: 'shared', provider: 'alpha', cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }),
+    ],
+  });
+  try {
+    const cold = await buildIndex(opts(sb));
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    for (const entry of Object.values(cache.entries)) {
+      if (entry.session.host === 'opencode') {
+        entry.session.inferenceProvider = 'alpha'; // pre-repair v26 last-wins cache
+        entry.session.providerProvenance = 'observed';
+      }
+    }
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const warm = await buildIndex(opts(sb));
+    const reused = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.equal(Object.values(reused.entries).find((entry) => entry.session.host === 'opencode')
+      .session.inferenceProvider, 'alpha', 'warm scan reused the old record');
+    for (const agg of [cold, warm]) {
+      assert.equal(agg.sessions.length, 1);
+      assert.equal(agg.sessions[0].provider, null, 'mixed providers have no unique session provider');
+      assert.equal(agg.sessions[0].providerProvenance, 'unknown');
+      assert.equal(agg.totals.sessions, 1);
+      assert.equal(agg.totals.responses, 3);
+      assert.equal(agg.totals.tokens, 47);
+      assert.equal(agg.totals.cost, 0.281);
+      assert.deepEqual(agg.sessions[0].costEvidence, {
+        observedUsd: 0.25, estimatedUsd: 0.031,
+        observedMessages: 2, estimatedMessages: 1, unpricedMessages: 0,
+      });
+      assert.equal(agg.byHost.opencode.sessions, 1);
+      assert.equal(agg.byHost.opencode.responses, 3);
+      assert.deepEqual(Object.keys(agg.byProvider).sort(), ['alpha', 'beta']);
+      assert.deepEqual(
+        ['sessions', 'responses', 'input', 'output', 'cacheRead', 'cacheWrite', 'tokens', 'cost']
+          .map((key) => agg.byProvider.alpha[key]),
+        [1, 2, 10, 2, 3, 1, 16, 0.25],
+      );
+      assert.deepEqual(
+        ['sessions', 'responses', 'input', 'output', 'cacheRead', 'cacheWrite', 'tokens', 'cost']
+          .map((key) => agg.byProvider.beta[key]),
+        [1, 1, 20, 4, 5, 2, 31, 0.031],
+      );
+      assert.equal(agg.byModel.shared.responses, 3);
+      assert.equal(agg.byModel.shared.tokens, 47);
+    }
+  } finally { rm(sb.dir); }
+});
+
+test('an unreported zero-token completion belongs to its observed provider and an absent provider stays unknown', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_unknown', directory: '/x', title: 'unknown', timeCreated: at }],
+    messages: [
+      assistantMsg('a1', 'ses_unknown', at + 1000, { provider: 'alpha', cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }),
+      assistantMsg('a2', 'ses_unknown', at + 2000, { provider: null, cost: 0.1,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }),
+    ],
+  });
+  try {
+    const agg = await buildIndex(opts(sb));
+    assert.equal(agg.sessions[0].provider, null);
+    assert.equal(agg.totals.responses, 2);
+    assert.equal(agg.totals.tokens, 0);
+    assert.equal(agg.totals.cost, 0.1);
+    assert.equal(agg.byHost.opencode.responses, 2);
+    assert.deepEqual(Object.keys(agg.byProvider).sort(), ['alpha', 'unknown']);
+    assert.equal(agg.byProvider.alpha.sessions, 1);
+    assert.equal(agg.byProvider.alpha.responses, 1);
+    assert.equal(agg.byProvider.alpha.tokens, 0);
+    assert.equal(agg.byProvider.unknown.sessions, 1);
+    assert.equal(agg.byProvider.unknown.responses, 1);
+    assert.equal(agg.byProvider.unknown.cost, 0.1);
+  } finally { rm(sb.dir); }
+});
+
 test('sessions with NO observed cost fall back to the pricing table (never a fabricated $0)', async () => {
   const at = NOW - DAY;
   const sb = sandbox({
