@@ -325,11 +325,38 @@ test('the stray search finds AQE below ordinary dot folders without entering too
   assert.deepEqual(result.nestedRepositories, ['.other-repo']);
 });
 
-test('unreadable or depth-limited dot subtrees do not claim complete stray coverage', (t) => {
+test('depth-limited dot subtrees do not claim complete stray coverage', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-limit-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, '.notes', 'a', 'b', 'c', 'd', '.agentic-qe'), { recursive: true });
   const result = findStrayMemoryStores(root);
+  assert.equal(result.complete, false);
+  assert.deepEqual(result.strays, []);
+});
+
+test('dependency root markers are excluded before stray inspection', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-dependency-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'node_modules', '.agentic-qe'), { recursive: true });
+  touch(root, 'node_modules/.swarm/memory.db');
+  touch(root, 'node_modules/.swarm/agentdb-memory.db');
+  const result = findStrayMemoryStores(root);
+  assert.equal(result.complete, true);
+  assert.deepEqual(result.strays, []);
+});
+
+test('a listed dot subtree with denied marker metadata reports incomplete coverage', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-metadata-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, '.notes', '.agentic-qe'), { recursive: true });
+  const denied = path.join(root, '.notes', '.agentic-qe');
+  const original = fs.lstatSync;
+  fs.lstatSync = (file, ...args) => {
+    if (file === denied) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    return original(file, ...args);
+  };
+  let result;
+  try { result = findStrayMemoryStores(root); } finally { fs.lstatSync = original; }
   assert.equal(result.complete, false);
   assert.deepEqual(result.strays, []);
 });
