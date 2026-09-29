@@ -193,7 +193,6 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
   let outcome;
   try {
     fs.writeFileSync(path.join(dir, 'codex.cmd'), '@echo off\r\n');
-    fs.writeFileSync(path.join(dir, 'codex.ps1'), `& '${quotedNode}' $args[0]\nexit $LASTEXITCODE\n`);
     const code = `const {spawn}=require('node:child_process');
       const gc=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
       require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
@@ -202,7 +201,9 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
     // native arguments, so multiline node -e source is not that interface.
     const script = path.join(dir, 'fixture.cjs');
     fs.writeFileSync(script, code);
-    pending = run('codex', [script], {
+    fs.writeFileSync(path.join(dir, 'codex.ps1'),
+      `& '${quotedNode}' '${script.replaceAll("'", "''")}' $args\nexit $LASTEXITCODE\n`);
+    pending = run('codex', [], {
       env: { PATH: dir, PATHEXT: '.CMD' }, signal: controller.signal, timeout: 10_000,
     });
     pending.then((result) => { outcome = result; });
