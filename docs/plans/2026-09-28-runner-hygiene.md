@@ -6,7 +6,7 @@ Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe8
 
 LQ1 source inspection refutes the claimed missing selector propagation: the runner copies its input environment and removes only `FORCE_COLOR`. A guarded-child sentinel regression is green on the original implementation and fails when that copy is removed. LQ4 now uses an explicit Chrome launch environment with a private home and temp root; the local macOS system Chrome passed the full guarded UI suite (495 dashboard checks, 15 Node UI tests). Guarded unit, TypeScript and targeted ESLint gates passed. Native Windows and Linux Chrome behavior remains unmeasured.
 
-The Windows smoke lifetime follow-up has a deterministic handshake regression: the previous guarded parent exited while its forked child waited in the project directory. The smoke now waits for that exact child's `close` or `error`, checks its status, and releases it before sandbox removal. The guarded focused suite, typecheck and targeted ESLint pass on macOS. This establishes the lifecycle gap locally; native Windows CI remains the required platform proof for the reported `EPERM`.
+The Windows smoke lifetime follow-up uses a held fork and parent close acknowledgment. The smoke waits for the fork's `close` or `error`, checks its exit status, and establishes both exits before sandbox removal; uncertain exits retain the sandbox. A bounded pre-release observation detects early parent exit, and a local removed-wait mutation fails the focused test. The guarded suite also covers fork failure, stalled-fork cleanup, and launch failure. This establishes the lifecycle gap locally; native Windows CI remains the required platform proof for the reported `EPERM`.
 
 ## Contract and dependencies
 

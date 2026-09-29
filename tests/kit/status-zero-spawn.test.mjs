@@ -35,8 +35,29 @@ function readLedger(file) {
   return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
 }
 
+async function waitUntil(check, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!check() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  return check();
+}
+
+async function waitFor(promise, timeoutMs = 5_000) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('owned process did not close')), timeoutMs);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+function processGone(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return error.code === 'ESRCH'; }
+}
+
 /** Runs `fn` inside a disposable sandboxed HOME/project, with `extraEnv`
- *  merged into the child's environment. Cleans up unconditionally. */
+ *  merged into the child's environment. Retains both roots when a child may still use them. */
 async function inSandbox(prefix, extraEnv, fn) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-home-`));
   fs.mkdirSync(path.join(home, '.config'), { recursive: true });
@@ -50,8 +71,10 @@ async function inSandbox(prefix, extraEnv, fn) {
   });
   let result;
   let failure;
-  try { result = await fn({ home, project, env }); }
+  let retained = false;
+  try { result = await fn({ home, project, env, retain: () => { retained = true; } }); }
   catch (error) { failure = error; }
+  if (retained) throw failure ?? new Error(`retained uncertain sandbox: ${home}, ${project}`);
   for (const root of [home, project]) {
     try { fs.rmSync(root, { recursive: true, force: true }); }
     catch (error) { failure = failure ? new AggregateError([failure, error], 'sandbox assertion and cleanup failed') : error; }
@@ -72,13 +95,17 @@ test('spawn-guard is a no-op when AK_SPAWN_LEDGER_FILE is unset', async () => {
   });
 });
 
-test('spawn-guard records every wrapped form and waits for its owned fork', async () => {
-  await inSandbox('ak-spawn-guard-smoke', {}, async ({ project, env: baseEnv }) => {
+async function runGuardedSmoke({ childExitCode = 0, childStallsOnRelease = false,
+  closeTimeoutMs = 5_000, launchFailure = false } = {}) {
+  await inSandbox('ak-spawn-guard-smoke', {}, async ({ project, env: baseEnv, retain }) => {
     const ledgerFile = path.join(project, 'spawn-ledger.ndjson');
     const readyFile = path.join(project, 'fork-ready');
     const releaseFile = path.join(project, 'fork-release');
     const doneFile = path.join(project, 'fork-done');
     const pidFile = path.join(project, 'fork-pid');
+    const attemptFile = path.join(project, 'fork-attempt');
+    const waitingFile = path.join(project, 'parent-waiting-for-fork');
+    const parentAckFile = path.join(project, 'fork-closed-by-parent');
     const env = { ...baseEnv, AK_SPAWN_LEDGER_FILE: ledgerFile };
     const forkTarget = path.join(project, 'fork-target.cjs');
     fs.writeFileSync(forkTarget, [
@@ -88,8 +115,9 @@ test('spawn-guard records every wrapped form and waits for its owned fork', asyn
       'const timer = setInterval(() => {',
       '  if (!fs.existsSync(release)) return;',
       `  fs.writeFileSync(${JSON.stringify(doneFile)}, 'done');`,
+      ...(childStallsOnRelease ? ['  return;'] : []),
       '  clearInterval(timer);',
-      '  process.exit(0);',
+      `  process.exit(${childExitCode});`,
       '}, 10);',
     ].join('\n'));
     const script = [
@@ -98,20 +126,26 @@ test('spawn-guard records every wrapped form and waits for its owned fork', asyn
       "spawnSync(process.execPath, ['-e', '0']);",
       "ef(process.execPath, ['-e', '0']);",
       'try { es(\'true\'); } catch {}', // shell builtin: exercised even with PATH broken
+      `require('node:fs').writeFileSync(${JSON.stringify(attemptFile)}, 'attempt');`,
       `const child = fork(${JSON.stringify(forkTarget)}, [], { stdio: 'ignore' });`,
       `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+      `require('node:fs').writeFileSync(${JSON.stringify(waitingFile)}, 'waiting');`,
       'await new Promise((resolve, reject) => {',
       '  child.once("error", reject);',
       '  child.once("close", (code, signal) => code === 0 && !signal',
       '    ? resolve() : reject(new Error(`fork failed: code=${code}, signal=${signal}`)));',
       '});',
+      'if (child.exitCode !== 0 || child.signalCode) throw new Error("fork has not exited cleanly");',
+      `require('node:fs').writeFileSync(${JSON.stringify(parentAckFile)}, 'fork closed');`,
       '}',
       'main().catch((error) => { console.error(error); process.exitCode = 1; });',
     ].join(' ');
-    const guarded = spawn(process.execPath, [
+    const guarded = spawn(launchFailure ? path.join(project, 'missing-node') : process.execPath, [
       `--import=${SPAWN_GUARD_URL}`, '-e', script,
     ], { cwd: project, env, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
+    let launchError;
+    guarded.once('error', (error) => { launchError = error; });
     guarded.stderr.on('data', (chunk) => { stderr += chunk; });
     let closed = false;
     const parentClose = new Promise((resolve) => guarded.once('close', (code, signal) => {
@@ -120,40 +154,55 @@ test('spawn-guard records every wrapped form and waits for its owned fork', asyn
     }));
     let failure;
     try {
-      const deadline = Date.now() + 5_000;
-      while (!fs.existsSync(readyFile) && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+      await waitUntil(() => (fs.existsSync(waitingFile) && fs.existsSync(readyFile)) || closed || launchError);
+      if (launchError) throw launchError;
+      assert.ok(fs.existsSync(waitingFile), `guarded parent did not reach fork wait: ${stderr}`);
       assert.ok(fs.existsSync(readyFile), `fork did not become ready: ${stderr}`);
-      assert.strictEqual(closed, false, 'guarded parent exited while its owned fork was still running');
+      // A premature parent may write its acknowledgment or close on a later
+      // event-loop turn. Give those events time to surface before release.
+      await waitUntil(() => fs.existsSync(parentAckFile) || closed, 300);
+      assert.ok(!fs.existsSync(parentAckFile), 'parent acknowledged fork close before child release');
+      assert.ok(!closed, 'guarded parent exited while its owned fork was still running');
     } catch (error) { failure = error; }
-    try {
-      fs.writeFileSync(releaseFile, 'release');
-      const deadline = Date.now() + 5_000;
-      while (!fs.existsSync(doneFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-      if (!fs.existsSync(doneFile) && fs.existsSync(pidFile)) {
-        const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-        if (Number.isInteger(pid) && pid > 0) { try { process.kill(pid); } catch { /* already exited */ } }
+    const cleanupErrors = [];
+    let parentExited = closed;
+    let pid = NaN;
+    try { fs.writeFileSync(releaseFile, 'release'); } catch (error) { cleanupErrors.push(error); }
+    try { pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : NaN; }
+    catch (error) { cleanupErrors.push(error); }
+    try { await waitFor(parentClose, closeTimeoutMs); parentExited = true; }
+    catch {
+      // Keep the guarded parent alive to receive its own fork's close event.
+      if (Number.isInteger(pid) && pid > 0) {
+        try { process.kill(pid); } catch (error) { if (error.code !== 'ESRCH') cleanupErrors.push(error); }
       }
-      if (!fs.existsSync(doneFile) && !closed) guarded.kill();
-      let timeout;
-      try {
-        await Promise.race([parentClose, new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error('guarded parent did not close')), 5_000);
-        })]);
-      } finally { clearTimeout(timeout); }
-    } catch (error) {
-      if (fs.existsSync(pidFile)) {
-        const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-        if (Number.isInteger(pid) && pid > 0) { try { process.kill(pid); } catch { /* already exited */ } }
+      try { await waitFor(parentClose, closeTimeoutMs); parentExited = true; }
+      catch {
+        if (!closed) guarded.kill();
+        try { await waitFor(parentClose, closeTimeoutMs); parentExited = true; }
+        catch (error) { cleanupErrors.push(error); }
       }
-      if (!closed) guarded.kill();
-      failure = failure ? new AggregateError([failure, error], 'fork assertion and cleanup failed') : error;
     }
+    parentExited ||= closed;
+    // The acknowledgment is written only after the guarded parent receives
+    // its fork's close event. Otherwise require independent OS exit evidence.
+    let forkExited = fs.existsSync(parentAckFile) || (!fs.existsSync(attemptFile) && parentExited)
+      || await waitUntil(() => processGone(pid));
+    if (!forkExited && Number.isInteger(pid) && pid > 0) {
+      try { process.kill(pid); } catch (error) { if (error.code !== 'ESRCH') cleanupErrors.push(error); }
+      forkExited = await waitUntil(() => processGone(pid));
+    }
+    if (!forkExited) cleanupErrors.push(new Error(`cannot establish owned fork exit: pid=${pid}`));
+    if (!parentExited) cleanupErrors.push(new Error('cannot establish guarded parent exit'));
+    if (!parentExited || !forkExited) retain();
+    if (cleanupErrors.length) failure = failure
+      ? new AggregateError([failure, ...cleanupErrors], 'fork assertion and cleanup failed')
+      : new AggregateError(cleanupErrors, 'fork cleanup failed');
     if (failure) throw failure;
     assert.ok(fs.existsSync(doneFile), 'owned fork completed before sandbox cleanup');
     const { code, signal } = await parentClose;
     assert.strictEqual(code, 0, `guarded parent failed (${signal}): ${stderr}`);
+    assert.ok(fs.existsSync(parentAckFile), 'guarded parent did not acknowledge the fork close event');
     const lines = readLedger(ledgerFile);
     // Each wrapped form by name, not an exact total: execSync goes through a
     // platform shell, and only its own record is what this test is about.
@@ -164,6 +213,22 @@ test('spawn-guard records every wrapped form and waits for its owned fork', asyn
     assert.ok(lines.some((l) => l.cmd === forkTarget), `fork() records the module path as cmd; got ${got}`);
     assert.ok(lines.every((l) => typeof l.at === 'string' && !Number.isNaN(Date.parse(l.at))), 'every line has an ISO timestamp');
   });
+}
+
+test('spawn-guard records every wrapped form and waits for its owned fork', async () => {
+  await runGuardedSmoke();
+});
+
+test('nonzero owned fork exit fails after the guarded parent reaps it', async () => {
+  await assert.rejects(runGuardedSmoke({ childExitCode: 7 }), /guarded parent failed/);
+});
+
+test('stalled owned fork is signaled before its parent is reaped', async () => {
+  await assert.rejects(runGuardedSmoke({ childStallsOnRelease: true, closeTimeoutMs: 200 }), /guarded parent failed/);
+});
+
+test('guarded launch failure is reported and its sandbox is cleaned', async () => {
+  await assert.rejects(runGuardedSmoke({ launchFailure: true }), { code: 'ENOENT' });
 });
 
 // A ledger line from the fixture's own npm registry lookups
