@@ -158,3 +158,31 @@ test('an inventory rebuild that the server reports unavailable fails its stage',
   });
   assert.equal((await actual.inventory({ strength: 'local' })).ok, false);
 });
+
+test('machine refresh honors each current project-tree choice through a shared persistent collector', async t => {
+  const { dashboardRefreshStages } = await import('../../src/lib/dashboard/refresh-api.mjs');
+  const { createSystemCollector } = await import('../../src/lib/footprint/index.mjs');
+  const measured = [];
+  const collector = createSystemCollector({ cwd: project,
+    snapshotFile: path.join(home, 'refresh-snapshot.json'),
+    runWorkerImpl: async ({ includeProjectTrees, startedAt }) => {
+      measured.push(includeProjectTrees);
+      return { ok: true, asOf: startedAt, sections: {}, completeness: { complete: true },
+        persisted: { ok: true }, error: null,
+        terminal: { running: false, phase: 'done', finishedAt: startedAt, durationMs: 0, error: null } };
+    },
+  });
+  const actual = dashboardRefreshStages({ cwd: project, getSystem: async () => collector,
+    getMaintenance: async () => ({}), refreshInventoryAfterProviderScan: async () => ({}),
+    statusCollect: async () => ({}), getHostReadiness: async () => ({}), loadConfig: () => ({}),
+  });
+  const server = await serverWith(stages({ machine: actual.machine }));
+  t.after(() => server.close());
+  // Separate HTTP callers (including another tab) share this server's collector.
+  // An omitted choice must also override a prior checked selection.
+  for (const projectTrees of [false, true, false, true, undefined]) {
+    assert.equal((await request(server, 'POST', '/api/refresh', { strength: 'machine', projectTrees })).status, 202);
+    assert.equal((await finished(server)).ok, true);
+  }
+  assert.deepEqual(measured, [false, true, false, true, false]);
+});

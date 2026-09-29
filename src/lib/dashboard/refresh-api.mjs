@@ -43,7 +43,7 @@ export function dashboardRefreshStages({ cwd, getSystem, getMaintenance, refresh
   getHostReadiness, statusCollect, loadConfig }) {
   return {
     async machine({ projectTrees }) {
-      const result = await (await getSystem()).refreshDeep(projectTrees ? { includeProjectTrees: true } : undefined);
+      const result = await (await getSystem()).refreshDeep({ includeProjectTrees: projectTrees === true });
       const ok = result?.ok === true && result.persisted?.ok !== false;
       return { ok, detail: ok ? null : result?.error ?? 'the measurement did not finish' };
     },
