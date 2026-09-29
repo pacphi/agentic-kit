@@ -151,5 +151,5 @@ test('should_qualify_encoded_directory_recovery_as_a_sighting_instead_of_a_verif
   }), scanOpencode: () => ({ complete: true, sightings: [] }) });
   assert.deepEqual({ sessions: result.projects[0].sessions, origin: result.projects[0].sessionOrigins[0].origin,
     countBasis: result.projects[0].sessionOrigins[0].countBasis },
-  { sessions: 1, origin: 'unknown', countBasis: 'recovered-project-sighting' });
+  { sessions: 0, origin: 'unknown', countBasis: 'recovered-project-sighting' });
 });

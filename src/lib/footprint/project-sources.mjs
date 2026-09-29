@@ -279,7 +279,7 @@ export function scanTranscriptCwds(root, host, {
     subagentExcluded: 0,
     nonConversationExcluded: 0,
     unknownSessionFiles: 0,
-    sessionCountComplete: true,
+    sessionCountComplete: status === 'absent' || (status === 'ok' && result.complete !== false),
     sightings: [],
     truncated: Boolean(result.truncated),
     truncatedBy: result.truncatedBy ?? null,
@@ -325,15 +325,13 @@ export function scanTranscriptCwds(root, host, {
     if (host === 'claude') {
       const records = [...parsedHeadRecords(lines)];
       const hasConversation = records.some((record) => record.type === 'user' || record.type === 'assistant');
-      const hasBridge = records.some((record) => record.type === 'bridge-session');
-      // A bridge marker is definitive only when the bounded head contains no
-      // conversation. Other head-only observations remain unknown if the file
-      // extends past the read budget.
+      // A sideband-only head excludes a file only when the read reached EOF.
+      // A later conversation may exist beyond either bounded limit.
       let fullyRead = false;
       try { fullyRead = fsImpl.statSync(file).size <= headBytes && lines.length < maxLines; }
       catch { /* the head alone does not establish an end-of-file */ }
-      if (!hasConversation && (hasBridge || (fullyRead && records.length > 0
-        && records.every((record) => CLAUDE_NON_CONVERSATION_TYPES.has(record.type))))) {
+      if (!hasConversation && (fullyRead && records.length > 0
+        && records.every((record) => CLAUDE_NON_CONVERSATION_TYPES.has(record.type)))) {
         nonConversationExcluded += 1;
         continue;
       }
@@ -372,7 +370,7 @@ export function scanTranscriptCwds(root, host, {
     const decoded = decodeDir(group.key);
     if (decoded) {
       recoveredFromDirName += 1;
-      sightings.push({ cwd: decoded, mtimeMs: group.newestMtimeMs, origin: 'encoded-dir' });
+      sightings.push({ cwd: decoded, mtimeMs: group.newestMtimeMs, origin: 'encoded-dir', weight: 0 });
     } else {
       unresolved += 1;
     }
@@ -533,7 +531,8 @@ export function discoverProjectSources({
       }
       row.hosts.add(host);
       row.origins.add(sighting.origin ?? 'cwd');
-      const weight = Number.isFinite(sighting.weight) ? sighting.weight : 1;
+      const weight = sighting.origin === 'encoded-dir' ? 0
+        : Number.isFinite(sighting.weight) ? sighting.weight : 1;
       row.sessions += weight;
       const declared = sighting.sessionOrigin;
       const origin = ['claude-desktop', 'codex-desktop'].includes(declared?.origin)

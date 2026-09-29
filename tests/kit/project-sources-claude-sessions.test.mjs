@@ -64,3 +64,44 @@ test('excluded-only folder cannot become a project through encoded directory rec
   assert.equal(scan.unresolved, 0);
   assert.deepEqual(scan.sightings, []);
 });
+
+test('encoded directory recovery is project evidence with zero verified sessions', () => {
+  const root = tempDir('ak-claude-recovery');
+  const claudeRoot = path.join(root, 'claude');
+  write(claudeRoot, 'legacy', 'unknown.jsonl', [{ type: 'user' }]);
+  const scan = scanTranscriptCwds(claudeRoot, 'claude', { decodeDir: () => root });
+  assert.equal(scan.sessions, 0);
+  assert.equal(scan.unknownSessionFiles, 1);
+  assert.deepEqual(scan.sightings.map(({ origin, weight }) => [origin, weight]), [['encoded-dir', 0]]);
+  const discovered = discoverProjectSources({ claudeRoot, codexRoot: path.join(root, 'none'),
+    scanTranscripts: (source, host, options) => scanTranscriptCwds(source, host, {
+      ...options, decodeDir: host === 'claude' ? () => root : null,
+    }), scanOpencode: () => ({ sightings: [], complete: true }) });
+  assert.equal(discovered.everSeen, 1);
+  assert.equal(discovered.projects[0].sessions, 0);
+  assert.equal(discovered.projects[0].sessionOrigins[0].sessions, 0);
+});
+
+test('bridge marker in a bounded head cannot exclude a later conversation', () => {
+  const root = tempDir('ak-claude-bridge-head');
+  const claudeRoot = path.join(root, 'claude');
+  write(claudeRoot, 'a', 'bridge.jsonl', [
+    { type: 'bridge-session', sessionId: 'one', cwd: root },
+    { type: 'user', sessionId: 'one', cwd: root },
+  ]);
+  const scan = scanTranscriptCwds(claudeRoot, 'claude', { maxLines: 1 });
+  assert.equal(scan.nonConversationExcluded, 0);
+  assert.equal(scan.unknownSessionFiles, 1);
+  assert.equal(scan.sessionCountComplete, false);
+  assert.equal(scan.sightings[0].weight, 0);
+});
+
+test('unreadable root cannot claim a complete zero-session count', () => {
+  const scan = scanTranscriptCwds('/unreadable', 'claude', {
+    walk: () => ({ status: 'unknown', reason: 'EACCES', complete: false }),
+  });
+  assert.equal(scan.status, 'degraded');
+  assert.equal(scan.sessions, 0);
+  assert.equal(scan.sessionCountComplete, false);
+  assert.equal(scan.complete, false);
+});
