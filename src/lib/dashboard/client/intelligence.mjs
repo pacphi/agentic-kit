@@ -110,9 +110,10 @@ import { fmtNum, kpi } from './usage.mjs';
       +kpi("most active project",totals.mostActiveProject||"—","by most recent learning adaptation","accent");
     var table=document.getElementById("mw-table");
     if(!table)return;
-    if(!perProject.length){table.innerHTML='<div class="empty">no projects discovered on this machine.</div>';return;}
+    if(!perProject.length){machineWideSurfaceFilter='all';table.innerHTML='<div class="empty">no projects discovered on this machine.</div>';return;}
     var designations=['all'].concat(Array.from(new Set(perProject.map(machineWideDesignation))).sort());
     var surfaceChoices=Array.from(new Set(perProject.flatMap(surfaceNames))).sort();
+    if(machineWideSurfaceFilter!=='all'&&!surfaceChoices.includes(machineWideSurfaceFilter))machineWideSurfaceFilter='all';
     var visible=(machineWideDesignationFilter==='all'?perProject:perProject.filter(function(row){return machineWideDesignation(row)===machineWideDesignationFilter;})).filter(function(row){return machineWideSurfaceFilter==='all'||surfaceNames(row).includes(machineWideSurfaceFilter);}).sort(function(a,b){return String(a.label||'').localeCompare(String(b.label||''),undefined,{sensitivity:'base',numeric:true})||String(a.key||a.path||'').localeCompare(String(b.key||b.path||''));});
     table.innerHTML='<div class="mw-filter-pills" role="group" aria-label="Filter learning locations by designation">'
       +designations.map(function(designation){var label=designation==='all'?'All':designation;return '<button type="button" class="mw-filter-pill" data-designation="'+esc(designation)+'" aria-pressed="'+(designation===machineWideDesignationFilter)+'">'+esc(label)+'</button>';}).join('')

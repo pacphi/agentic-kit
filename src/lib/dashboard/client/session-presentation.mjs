@@ -31,4 +31,6 @@ export function projectSurfacesHtml(project){
     +(entries.length?entries.map(function(row){return '<div>Host: '+esc(Object.hasOwn(SESSION_HOST_LABELS,row.host)?SESSION_HOST_LABELS[row.host]:'Unknown')+' · '+surfaceDetailHtml(row)+' · provider: '+esc(sessionPresentation(row).provider)+' ('+esc(sessionPresentation(row).providerBasis)+')'
       +' · '+esc(row.sessions)+' sessions ('+esc(row.countBasis||'legacy count basis unknown')+')</div>';}).join(''):'<div>Host, initiator and provider: Unknown</div>')+'</details>';
 }
-export function surfaceFacetLabel(value){return Object.hasOwn(SESSION_SURFACE_LABELS,value)?SESSION_SURFACE_LABELS[value]:'Unknown';}
+export function surfaceFacetLabel(value){
+  if(value==='codex-desktop')return sessionPresentation({origin:value}).note;
+  return Object.hasOwn(SESSION_SURFACE_LABELS,value)?SESSION_SURFACE_LABELS[value]:'Unknown';}

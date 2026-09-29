@@ -11,12 +11,13 @@ const counts = { everSeen: 1, onDisk: 1, gitRepos: 1, learning: 1, importedExclu
 test('served dashboard renders independent session evidence and preserves observed surface filters', async t => {
   const browser = await launchChrome(); t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  let currentProject = project;
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.route('http://surfaces.test/**', async route => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: renderPage({ name: 'Surfaces', version: 'test' }) });
-    const body = url.pathname === '/api/status' ? { overall: 'ok', rows: [], intel: { projects: [project],
-      census: { counts }, machineWide: { totals: { projectCount: 1 }, perProject: [project] } } }
+    const body = url.pathname === '/api/status' ? { overall: 'ok', rows: [], intel: { projects: [currentProject],
+      census: { counts }, machineWide: { totals: { projectCount: 1 }, perProject: [currentProject] } } }
       : url.pathname === '/api/usage' ? { totals: { sessions: 1 }, sessions: [], projectTree: [{ project: 'Example', sessions: 1, rows: [{ id: 'fixture-session', host: 'claude', sessionOrigin: { surface: 'claude-desktop', initiator: 'person', thirdPartyProvider: 'amazon-bedrock', thirdPartyProviderBasis: 'assistant-model-id', rawEvidence: { entrypoint: 'claude-desktop-3p' } } }] }] }
       : url.pathname === '/api/system/summary' ? { projects: { ...counts, projects: [project], discoveryProjects: [project] } } : {};
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
@@ -45,6 +46,12 @@ test('served dashboard renders independent session evidence and preserves observ
   assert.equal(await page.locator('#sys-projects img').count(), 0);
   await page.click('#tab-overview'); await page.click('[data-overview-view="intel"]');
   assert.equal(await filter.inputValue(), 'Cloud session');
+  currentProject = { ...project, sessionSurfaces: undefined, sessionOrigins: [{ origin: 'claude-desktop', sessions: 3 }] };
+  await page.click('#poll-now');
+  await page.waitForFunction(() => globalThis.document.querySelector('#mw-surface-filter').value === 'all');
+  assert.deepEqual(await filter.locator('option').allTextContents(), ['All', 'Claude Desktop']);
+  assert.equal(await page.locator('#mw-table .mw-data-row').count(), 1);
+  assert.match(await page.locator('#mw-table').innerText(), /Claude Desktop/);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.click('#tab-usage'); await page.click('#usage-tab-sessions');
   await page.locator('#u-tree .phead').click();

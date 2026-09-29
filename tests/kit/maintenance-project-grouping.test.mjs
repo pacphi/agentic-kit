@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildManagementInventory } from '../../src/lib/maintenance/management/projection.mjs';
@@ -54,7 +56,7 @@ test('should_filter_origin_memberships_as_overlapping_facets_without_duplicate_p
     [{ origin: 'claude-desktop', sessions: 2 }, { origin: 'codex-desktop', sessions: 3 }]);
   const either = runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['claude-desktop', 'codex-desktop'] } });
   assert.equal(either.total, 1);
-  assert.equal(runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['unknown'] } }).total, 2);
+  assert.equal(runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['unknown'] } }).total, 1);
 });
 test('should_report_session_counts_once_per_project_despite_multiple_installed_resources', () => {
   const inventory = build({ projects: [], discoveryProjects: [{ path: '/project', repository,
@@ -105,3 +107,27 @@ test('surface evidence survives public focus and row DTOs and facets exclude zer
   assert.deepEqual(page.navigation.nodes[0].sessionSurfaces[1].rawEvidence.originator, ['codex_work_desktop']);
   assert.equal(runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['cloud-session'] } }).total, 0);
 });
+
+for (const stateSource of ['saved preference', 'bookmarked hash']) {
+  test(`legacy desktop filter from ${stateSource} retains its exact membership`, () => {
+    const context = vm.createContext({ URLSearchParams, localStorage: { getItem: () => null } });
+    const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/maintenance-workspace.mjs', import.meta.url), 'utf8')
+      .replace(/^import\s[\s\S]*?from ['"][^'"]+['"];\s*$/gm, '').replace(/\bexport (?=(?:function|var)\b)/g, '');
+    vm.runInContext(source, context);
+    if (stateSource === 'saved preference') context.mntApplyPreferredState({ lastView: { scope: 'project', facets: { sessionOrigin: ['codex-desktop'] } } });
+    else context.mntApplyState(context.mntParseHashParts(['system', 'maintenance', 'inventory?scope=project&facet.sessionOrigin=codex-desktop']));
+    const restored = JSON.parse(JSON.stringify(context.MNT));
+    assert.deepEqual(restored.facets.sessionOrigin, ['codex-desktop']);
+    const rows = [{ path: '/desktop', sessionOrigins: [{ origin: 'codex-desktop', sessions: 3 }] },
+      { path: '/unknown', sessionOrigins: [{ origin: 'unknown', sessions: 1 }] }];
+    const inventory = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    const result = publicInventoryPage(runInventoryQuery(inventory, { scope: restored.scope, facets: restored.facets, presentation: 'focus' }));
+    assert.equal(result.total, 1);
+    assert.equal(result.navigation.nodes[0].sessionOrigins[0].origin, 'codex-desktop');
+    assert.equal(result.navigation.nodes[0].sessionSurfaces, null);
+    rows[0].sessionSurfaces = [{ host: 'codex', surface: 'chatgpt-desktop-work', sessions: 3 }];
+    const refreshed = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    assert.equal(runInventoryQuery(refreshed, { scope: restored.scope, facets: restored.facets }).total, 1,
+      'refreshing to the richer contract must not invalidate the saved legacy filter');
+  });
+}

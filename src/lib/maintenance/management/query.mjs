@@ -267,16 +267,23 @@ function channelValues(placement, index) {
   return placement.versions?.channel ? [placement.versions.channel] : [];
 }
 
+// Existing saved filters address legacy origin membership. Keep the coarse
+// desktop key independently labelled even when a refresh adds precise surfaces.
+function sessionOriginFacetValues(placement) {
+  if (!placement.projectId) return [];
+  const legacy = (placement.sessionOrigins ?? []).filter((entry) => entry.sessions > 0).map((entry) => entry.origin);
+  if (!Array.isArray(placement.sessionSurfaces)) return [...new Set(placement.sessionOrigins?.length ? legacy : ['unknown'])];
+  return [...new Set([...placement.sessionSurfaces.filter((entry) => entry.sessions > 0).map((entry) => entry.surface),
+    ...legacy.filter((origin) => origin === 'codex-desktop')])];
+}
+
 const FACET_EXTRACTORS = Object.freeze({
   family: (placement, index) => [familyFor(placement, index)],
   scope: (placement) => [placement.administrativeScope],
   environment: (placement) => [placement.environmentId],
   project: (placement) => (placement.projectId ? [placement.projectId] : []),
   projectType: (placement) => placement.projectId ? [PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown'] : [],
-  sessionOrigin: (placement) => placement.projectId
-    ? [...new Set(Array.isArray(placement.sessionSurfaces)
-      ? placement.sessionSurfaces.filter((entry) => entry.sessions > 0).map((entry) => entry.surface)
-      : placement.sessionOrigins?.length ? placement.sessionOrigins.filter((entry) => entry.sessions > 0).map((entry) => entry.origin === 'claude-desktop' ? entry.origin : 'unknown') : ['unknown'])] : [],
+  sessionOrigin: sessionOriginFacetValues,
   kind: (placement) => [placement.kind],
   consumer: (placement) => (placement.consumerHosts ?? []).filter((host) => ['claude', 'codex', 'opencode'].includes(host)),
   adapter: (placement) => [...new Set([...(placement.consumerHosts ?? []), ...(placement.kind === 'host-adapter' ? [placement.hostNamespace] : [])].filter((host) => typeof host === 'string' && host && !['claude', 'codex', 'opencode', 'agentic-kit'].includes(host)))],

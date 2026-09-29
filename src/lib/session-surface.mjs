@@ -160,7 +160,8 @@ export const SESSION_PROVIDER_LABELS = Object.freeze({ 'amazon-bedrock': 'Amazon
 
 /** Presentation accepts old snapshots without inventing a precise app mode. */
 export function sessionPresentation(origin = {}) {
-  const surface = Object.hasOwn(SESSION_SURFACE_LABELS, origin.surface) ? origin.surface : 'unknown';
+  const surface = Object.hasOwn(SESSION_SURFACE_LABELS, origin.surface) ? origin.surface
+    : origin.surface == null && origin.origin === 'claude-desktop' ? 'claude-desktop' : 'unknown';
   const provider = origin.thirdPartyProviderBasis === 'assistant-model-id'
     && ['amazon-bedrock', 'google-vertex-ai'].includes(origin.thirdPartyProvider)
     ? SESSION_PROVIDER_LABELS[origin.thirdPartyProvider] : 'Unknown';

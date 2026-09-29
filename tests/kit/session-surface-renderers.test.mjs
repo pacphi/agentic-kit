@@ -38,7 +38,7 @@ test('Intelligence keeps Git scope and session surfaces independent and displays
 test('Maintenance origin facet shares the same surface vocabulary and honest legacy fallback', () => {
   const context = renderer('maintenance-filters');
   assert.equal(context.mntFacetValueLabel('sessionOrigin', 'chatgpt-desktop-work'), 'ChatGPT desktop app · ChatGPT Work (local)');
-  assert.equal(context.mntFacetValueLabel('sessionOrigin', 'codex-desktop'), 'Unknown');
+  assert.equal(context.mntFacetValueLabel('sessionOrigin', 'codex-desktop'), 'ChatGPT desktop app observed; mode not recorded in this legacy snapshot');
 });
 test('Intelligence and System disclose pure, mixed and unresolved import counts, including an empty project census', () => {
   const counts = { importedExcluded: 4, importedMixed: 2, importedUnresolved: 3 };
@@ -76,4 +76,27 @@ test('Usage retains explicit observed provider IDs while refusing unproven or un
   assert.match(observed, /recorded provider ID; not network attestation/);
   const unknown = context.sdetail({ id: 'x', provider: 'openrouter', providerProvenance: 'unknown' });
   assert.doesNotMatch(unknown, /OpenRouter/);
+});
+test('Intelligence refresh resets an unavailable surface selection before rendering rows', () => {
+  const elements = { 'mw-table': {}, 'mw-hero': {}, 'mw-surface-filter': {} };
+  const context = renderer('intelligence', elements);
+  const cloud = { label: 'Cloud project', sessionSurfaces: [{ surface: 'cloud-session', sessions: 1 }] };
+  const local = { label: 'Local project', sessionSurfaces: [{ surface: 'claude-code-cli', sessions: 1 }] };
+  context.renderMachineWide({ totals: {}, perProject: [cloud, local] });
+  elements['mw-surface-filter'].value = 'Cloud session';
+  elements['mw-surface-filter'].onchange();
+  assert.equal(context.machineWideSurfaceFilter, 'Cloud session');
+  context.renderMachineWide({ totals: {}, perProject: [local] });
+  assert.equal(context.machineWideSurfaceFilter, 'all');
+  assert.match(elements['mw-table'].innerHTML, /Local project/);
+  assert.doesNotMatch(elements['mw-table'].innerHTML, /Cloud session/);
+});
+test('shared legacy Claude Desktop fallback remains known in Intelligence and Maintenance', () => {
+  const origin = { origin: 'claude-desktop', sessions: 3 };
+  assert.deepEqual(vocabulary.sessionPresentation(origin), { surface: 'claude-desktop', label: 'Claude Desktop',
+    initiator: 'Unknown', provider: 'Unknown', providerBasis: 'not established', note: 'Claude Desktop observed in this legacy snapshot' });
+  const context = renderer('maintenance-filters');
+  assert.deepEqual(Array.from(context.surfaceNames({ sessionOrigins: [origin] })), ['Claude Desktop']);
+  assert.equal(context.mntFacetValueLabel('sessionOrigin', 'claude-desktop'), 'Claude Desktop');
+  assert.equal(vocabulary.sessionPresentation({ origin: 'codex-desktop' }).surface, 'unknown');
 });
