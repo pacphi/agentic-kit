@@ -49,11 +49,13 @@ export function createDiagnosticScope({ spawnFn = spawn, platform = process.plat
       if (endInput) child.stdin.end();
       while (!closed && !result.error && !result.overflow && Date.now() - started < timeoutMs) {
         result.matched = until(result.stdout);
-        if (result.matched) break;
+        // EOF comparisons must observe natural closure. Stopping on the
+        // first response can race a server already exiting after stdin end.
+        if (result.matched && !endInput) break;
         await delay(10);
       }
       result.matched ||= until(result.stdout);
-      result.timedOut = !closed && !result.matched && !result.error && !result.overflow;
+      result.timedOut = !closed && !(result.matched && !endInput) && !result.error && !result.overflow;
     } catch (error) {
       result.error = error.message;
     } finally {

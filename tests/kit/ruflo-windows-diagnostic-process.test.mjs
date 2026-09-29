@@ -130,3 +130,62 @@ test('real version, legacy, initialize and taskkill children cannot see a parent
     if (previous === undefined) delete process.env[key]; else process.env[key] = previous;
   }
 });
+
+test('EOF response waits for natural pipe closure without racing taskkill', async () => {
+  let child;
+  const commands = [];
+  const { scope, released } = scopeFor((command) => {
+    commands.push(command);
+    child = fakeChild({ closes: false });
+    queueMicrotask(() => child.stdout.write('initialized'));
+    setTimeout(() => { child.exitCode = 0; }, 5);
+    setTimeout(() => child.emit('close', 0, null), 60);
+    return child;
+  });
+  const result = await scope.launch({ command: 'eof', args: [] }, {
+    env: {}, timeoutMs: 200, endInput: true, until: (text) => text === 'initialized',
+  });
+  assert.equal(result.matched, true);
+  assert.equal(result.code, 0);
+  assert.equal(result.cleanupComplete, true, 'requires observed close, not just exit code');
+  assert.equal(result.timedOut, false);
+  assert.equal(child.killed, false);
+  assert.deepEqual(commands, ['eof']);
+  assert.equal(scope.release(), true);
+  assert.equal(released(), true);
+});
+
+test('EOF match plus exit code zero without pipe closure retains uncertainty', async () => {
+  const commands = [];
+  let child;
+  const { scope, released } = scopeFor((command) => {
+    commands.push(command);
+    child = fakeChild({ closes: false });
+    queueMicrotask(() => { child.stdout.write('initialized'); child.exitCode = 0; });
+    return child;
+  });
+  const result = await scope.launch({ command: 'eof', args: [] }, {
+    env: {}, timeoutMs: 30, endInput: true, until: (text) => text === 'initialized',
+  });
+  assert.equal(result.matched, true);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.cleanupComplete, false);
+  assert.deepEqual(commands, ['eof'], 'never target a reaped PID');
+  assert.equal(child.unreferenced, true);
+  assert.equal(child.stdout.destroyed, true);
+  assert.equal(scope.release(), false);
+  assert.equal(released(), false);
+});
+
+test('a real EOF responder exits naturally after its reply before cleanup is accepted', async () => {
+  const scope = createDiagnosticScope({ acquireHold: () => ({}), releaseHold: () => {} });
+  const code = "process.stdin.resume();process.stdin.on('end',()=>{process.stdout.write('initialized');setTimeout(()=>process.exit(0),80)});";
+  const result = await scope.launch({ command: process.execPath, args: ['-e', code] }, {
+    env: {}, timeoutMs: 2000, endInput: true, until: (text) => text === 'initialized',
+  });
+  assert.equal(result.matched, true);
+  assert.equal(result.code, 0);
+  assert.equal(result.signal, null, 'no forced termination after the reply');
+  assert.equal(result.cleanupComplete, true);
+  assert.equal(scope.release(), true);
+});
