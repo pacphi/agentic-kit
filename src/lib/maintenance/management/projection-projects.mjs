@@ -73,9 +73,9 @@ export function enrichProjectPresentation(builder, registry, rows, { installatio
     if (['git', 'worktree', 'folder'].includes(row.repository?.kind)) entry.projectKind = row.repository.kind;
     if (Array.isArray(row.sessionOrigins)) entry.sessionOrigins = row.sessionOrigins
       .filter((origin) => ['claude-desktop', 'codex-desktop', 'unknown'].includes(origin.origin)
-        && Number.isInteger(origin.sessions) && origin.sessions > 0)
+        && Number.isInteger(origin.sessions) && origin.sessions >= 0)
       .map(({ origin, sessions, countBasis }) => ({ origin, sessions,
-        ...(['transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations'].includes(countBasis) ? { countBasis } : {}),
+        ...(['declared-session-ids', 'transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations'].includes(countBasis) ? { countBasis } : {}),
       }));
   }
 }

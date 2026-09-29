@@ -4,6 +4,7 @@ import { buildManagementInventory } from '../../src/lib/maintenance/management/p
 import { runInventoryQuery } from '../../src/lib/maintenance/management/query.mjs';
 import { publicInventoryPage } from '../../src/lib/dashboard/maintenance-api.mjs';
 import { validateMaintenanceV2Query } from '../../src/lib/dashboard/maintenance-security.mjs';
+import { discoverProjectSources } from '../../src/lib/footprint/project-sources.mjs';
 
 const options = { installationKey: 'maintenance-grouping-fixture-key', environment: { platform: 'darwin' }, now: () => 1700000000000 };
 const repository = { kind: 'git', repositoryId: 'repository:0123456789abcdef0123', root: '/work/repo',
@@ -61,4 +62,35 @@ test('should_report_session_counts_once_per_project_despite_multiple_installed_r
   const page = publicInventoryPage(runInventoryQuery(inventory, { scope: 'project', presentation: 'focus' }));
   assert.equal(page.navigation.nodes[0].count, 2);
   assert.equal(page.navigation.nodes[0].sessionOrigins[0].sessions, 7);
+});
+test('project census count basis survives discovery, management, and API without changing legacy meanings', () => {
+  const project = '/census-project';
+  const discovered = discoverProjectSources({
+    scanTranscripts: (_root, host) => ({ complete: true, sightings: host === 'claude'
+      ? [{ cwd: project, weight: 2, sessionOrigin: { origin: 'claude-desktop', evidence: 'declared' } }]
+      : [{ cwd: project, weight: 3, sessionOrigin: { origin: 'codex-desktop', evidence: 'declared' } }] }),
+    scanOpencode: () => ({ complete: true, sightings: [] }),
+  });
+  const source = discovered.projects[0];
+  assert.deepEqual(source.sessionOrigins.map(({ countBasis, sessions }) => [countBasis, sessions]),
+    [['declared-session-ids', 2], ['transcript-files', 3]]);
+  const page = publicInventoryPage(runInventoryQuery(build({ projects: [], discoveryProjects: [source] }, [project]),
+    { scope: 'project', presentation: 'focus' }));
+  assert.deepEqual(page.navigation.nodes[0].sessionOrigins,
+    [{ origin: 'claude-desktop', sessions: 2, countBasis: 'declared-session-ids' },
+      { origin: 'codex-desktop', sessions: 3, countBasis: 'transcript-files' }]);
+});
+test('legacy basis and zero recovery keep their exact meaning; invalid basis is omitted', () => {
+  const project = '/legacy-project';
+  const origins = [
+    { origin: 'claude-desktop', sessions: 4, countBasis: 'transcript-files' },
+    { origin: 'codex-desktop', sessions: 2, countBasis: 'not-a-basis' },
+    { origin: 'unknown', sessions: 0, countBasis: 'recovered-project-sighting' },
+  ];
+  const page = publicInventoryPage(runInventoryQuery(build({ projects: [], discoveryProjects: [
+    { path: project, sessionOrigins: origins },
+  ] }, [project]), { scope: 'project', presentation: 'focus' }));
+  assert.deepEqual(page.navigation.nodes[0].sessionOrigins, [
+    origins[0], { origin: 'codex-desktop', sessions: 2 }, origins[2],
+  ]);
 });

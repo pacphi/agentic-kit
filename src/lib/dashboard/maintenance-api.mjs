@@ -455,7 +455,7 @@ const PROJECT_PRESENTATION = {
   repositoryId: ID, repositoryLabel: LABEL, repositoryEvidence: T.oneOf(['git-directory', 'git-pointer', 'git-common-directory-and-backlink', 'project-discovery']),
   repositoryObservedAt: T.int,
   sessionOrigins: T.list(T.obj({ origin: T.oneOf(['claude-desktop', 'codex-desktop', 'unknown']), sessions: T.int,
-    countBasis: T.oneOf(['transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations']) }), 3),
+    countBasis: T.oneOf(['declared-session-ids', 'transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations']) }), 3),
 };
 const PROVIDER = T.obj({ id: T.text(80), version: T.text(40) });
 const COVERAGE = T.obj({
