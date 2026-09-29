@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import { DOC_FOLDERS, NAME_EXCEPTIONS, ROOT_DOCS, RULE_HEADING, layoutProblems } from '../../scripts/docs-layout.mjs';
 
 const RULE = `${RULE_HEADING}\n\nPlans and specs go to docs/plans/.\n`;
@@ -35,4 +37,9 @@ test('enforces lower-case markdown names and root documents', () => {
   assert.deepEqual(ROOT_DOCS, ['README.md', 'CLAUDE.md', 'AGENTS.md']);
   const problems = layoutProblems(tree({ ...base, 'docs/MODELS.md': '', 'docker/USER-GUIDE.md': '', 'maintainer.md': '', 'explainer.html': '' }));
   assert.equal(problems.length, 5);
+});
+
+test('the tracked tree follows the documentation layout', () => {
+  const files = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean);
+  assert.deepEqual(layoutProblems({ files, read: (file) => fs.readFileSync(file, 'utf8') }), []);
 });

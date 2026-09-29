@@ -10,6 +10,21 @@ Ruflo, Agentic QE, Claude Code, Codex, and opt-in OpenCode.
 **Tech Stack**: JavaScript ES modules (`.mjs`), Node.js 22+, TypeScript checking via `tsc`
 **Architecture**: Domain-Driven Design with bounded contexts
 
+## Documentation layout
+
+<!-- Authored by the maintainers, not generated. tests/kit/docs-layout.test.mjs fails if a
+     regeneration drops this section. This repository only: it is not shipped. -->
+
+- Plans go to `docs/plans/YYYY-MM-DD-<feature>.md` and specs to
+  `docs/plans/YYYY-MM-DD-<topic>-design.md`, including the ones Superpowers writes. Never create
+  `docs/superpowers/` or any other folder under `docs/`.
+- Finished plans and specs move to `docs/archive/` in the pull request that completes the work,
+  using `node scripts/docs-relocate.mjs`, with one index row per file in `docs/archive/README.md`.
+- Dated audits and evidence go straight to `docs/archive/`; dormant proposals to `docs/proposals/`.
+- Top-level `docs/*.md` files are living guides, each listed in `docs/README.md`.
+- Markdown file names are lower case. Only `README.md`, `CLAUDE.md`, `AGENTS.md`, and `SKILL.md`
+  keep capitals. Never move an ADR.
+
 ## Quick Start
 
 ### Installation
