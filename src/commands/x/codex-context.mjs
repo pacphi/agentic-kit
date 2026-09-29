@@ -1,6 +1,6 @@
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { inspectCodexContext, manageCodexContext, releaseCodexContext } from '../../lib/codex-context.mjs';
-import { info, ok, warn } from '../../lib/output.mjs';
+import { info, ok, warn, reportFailure } from '../../lib/output.mjs';
 
 export const options = { 'dry-run': { type: 'boolean', default: false }, json: { type: 'boolean', default: false } };
 export const help = `ak x codex-context — manage Codex's native per-model context capacities
@@ -21,7 +21,11 @@ Examples:
 
 export async function run({ flags, positionals, contextOptions = {} }) {
   const choice = positionals[0] ?? 'status';
-  if (!['status', 'max', 'off'].includes(choice) || positionals.length > 1) { warn(help); return 2; }
+  if (!['status', 'max', 'off'].includes(choice) || positionals.length > 1) {
+    const error = 'usage: ak x codex-context [status|max|off] [--dry-run] [--json]';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(help) });
+    return 2;
+  }
   const cfg = loadKitConfig();
   const status = inspectCodexContext(cfg, contextOptions);
   if (choice === 'status' || flags['dry-run']) {

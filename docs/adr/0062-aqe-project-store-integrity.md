@@ -6,6 +6,7 @@
   re-init value taken back, clean release; holder checks that time out refuse; nested repositories
   are not strays; stores fingerprinted at copy time; root checked before backup; applying receipt;
   starter patterns the root holds keep their usage
+- **Updated:** 2026-09-29 — released AQE 3.14.4 passed native macOS and Linux live-owner conformance with `LockHeld` and no `FsyncFailed`; ak retired only the old exact `FsyncFailed`-as-busy exception in AQE startup classification. This is a verified baseline for that rule, not a universal AQE minimum. The 3.14.4 minimum below applies only to store merge. Native Windows AQE conformance remains unverified
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (project memory status and
   stray stores), [ADR-0055](0055-aqe-embedding-lifecycle.md) (the AQE embedding projections this

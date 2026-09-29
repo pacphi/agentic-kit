@@ -63,13 +63,13 @@ export function runGuarded(commands, {
   const owner = ownerRecord();
   try { writeOwner(tempRoot, owner); }
   catch (error) { log(`could not record run owner; kept run root ${tempRoot}: ${error.message}`); return 2; }
-  const identity = fs.lstatSync(tempRoot);
+  const identity = fs.lstatSync(tempRoot, { bigint: true });
   const removeOwnRoot = () => {
     const safe = removableRunRoot(tempRoot, { tmpdir, homedir, requireOwner: false });
     if (!safe.ok) { log(`kept own run root ${tempRoot}: ${safe.reason}`); return false; }
     try {
-      const current = fs.lstatSync(tempRoot);
-      if (current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeMs !== identity.birthtimeMs) {
+      const current = fs.lstatSync(tempRoot, { bigint: true });
+      if (current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeNs !== identity.birthtimeNs) {
         log(`kept own run root ${tempRoot}: directory identity changed`); return false;
       }
       fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });

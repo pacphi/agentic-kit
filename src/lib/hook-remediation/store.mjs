@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { MAX_AUDIT_SOURCE_BYTES, sha256, stableJson } from '../hook-audit/common.mjs';
+import { fileId } from '../file-identity.mjs';
 
 export const HOOK_HEAL_RECEIPT_SCHEMA = 'hook-heal-receipt/v1';
 const RECEIPT_ID = /^tx-[0-9TZ.-]+-[a-f0-9]{16}$/;
@@ -202,7 +203,7 @@ function validImage(image, { preimage = false } = {}) {
       && (image.gid === null || Number.isInteger(image.gid))
       && Number.isInteger(image.specialMode) && image.specialMode >= 0 && image.specialMode <= 0o7000
       && path.isAbsolute(image.parent?.realPath ?? '')
-      && Number.isInteger(image.parent?.dev) && Number.isInteger(image.parent?.ino)
+      && fileId(image.parent?.dev) !== null && fileId(image.parent?.ino) !== null
     ));
 }
 

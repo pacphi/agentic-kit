@@ -31,7 +31,7 @@ import { runHarvest } from './harvest.mjs';
 import { runLifecycle } from './adapters/lifecycle.mjs';
 import { companionLifecycleFor } from './adapters/companion-lifecycle-registry.mjs';
 import { ok, warn, fail, info, heading, captureOutput } from './output.mjs';
-import { rememberLiveCheck, embeddingProbeOutcome } from './live-check-evidence.mjs';
+import { rememberLiveCheck, liveCheckInputsKey, embeddingProbeOutcome } from './live-check-evidence.mjs';
 import { LIVE_CHECK_IDS, SLOW_PROOF_IDS } from './refresh.mjs';
 
 export { LIVE_CHECK_IDS, SLOW_PROOF_IDS };
@@ -107,9 +107,11 @@ export async function observeProjectMemoryRoutes(tmp, env, namespace, deps) {
   try {
     const observation = await probeProjectMemoryRoutes(tmp, env, namespace, deps);
     for (const { level, message } of describeMemoryRoutes(observation)) (level === 'ok' ? ok : warn)(message);
+    return observation;
   } catch (e) {
     // An observation problem must never turn a working CLI proof into a failure.
     warn(`cross-interface routing not observed: ${e.message}`);
+    return null;
   }
 }
 
@@ -132,11 +134,12 @@ async function purgeProofNamespace(tmp, env, namespace, key, runner = runCmd) {
 /** The memory round trip in an isolated folder under `tmpRoot`, removed
  *  whatever happens. `observeRoutes: false` keeps the quick `memory` check to
  *  the CLI round trip: the route observation (the `memory-routes` proof)
- *  starts a real MCP server and can only add warnings, which a live-check
- *  record does not carry.
- *  @param {{ observeRoutes?: boolean, tmpRoot?: string, runner?: typeof runCmd, haveCmd?: typeof have }} [options] */
+ *  starts a real MCP server. Its observation has separate evidence, while
+ *  the CLI round-trip evidence remains under `memory`.
+ *  @param {{ observeRoutes?: boolean, routeVerdict?: boolean, onCliOutcome?: (outcome:{status:string,reason:null})=>void,
+ *    tmpRoot?: string, runner?: typeof runCmd, haveCmd?: typeof have }} [options] */
 export async function verifyMemory({
-  observeRoutes = true, tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have,
+  observeRoutes = true, routeVerdict = false, onCliOutcome, tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have,
 } = {}) {
   heading('memory — store, retrieve, locate the on-disk row, purge, and observe CLI/MCP routing in an isolated dir');
   if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove project memory'); return false; }
@@ -182,17 +185,29 @@ export async function verifyMemory({
     purged = await purgeProofNamespace(tmp, env, namespace, key, runner);
     if (!purged) { fail('isolated namespace purge did not remove the proof row'); return false; }
     ok('isolated proof namespace purged');
-    if (observeRoutes) await observeProjectMemoryRoutes(tmp, env, namespace);
+    onCliOutcome?.({ status: 'passed', reason: null });
+    if (observeRoutes) {
+      const route = /** @type {{status?:string,cliToMcp?:string,mcpToCli?:string}|null} */
+        (await observeProjectMemoryRoutes(tmp, env, namespace));
+      if (routeVerdict) return route?.status === 'observed' &&
+        ['visible', 'not-visible'].includes(route.cliToMcp) &&
+        ['visible', 'not-visible'].includes(route.mcpToCli)
+        ? { status: 'passed', reason: null }
+        : { status: 'inconclusive', reason: 'cross-interface routing not observed completely' };
+    }
     return true;
   } catch (e) {
     fail(`memory proof error: ${e.message}`);
     return false;
   } finally {
-    if (stored && !purged) {
-      await runner('ruflo', ['memory', 'purge', '--namespace', namespace, '--force'],
-        { cwd: tmp, env, timeout: 120_000 });
+    try {
+      if (stored && !purged) {
+        await runner('ruflo', ['memory', 'purge', '--namespace', namespace, '--force'],
+          { cwd: tmp, env, timeout: 120_000 });
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
@@ -451,10 +466,10 @@ async function verifyProjectProviders(root, cfg, { runner, haveCmd }) {
  *  bridge derives agentdb-memory.db from (CLAUDE_FLOW_MEMORY_PATH), and
  *  AGENTDB_PATH. An inherited value of any of them would otherwise receive the
  *  proof rows. Nothing is seeded: the proof is Ruflo's own verbs succeeding. */
-export async function verifyHarvest({ runner = runCmd, haveCmd = have } = {}) {
+export async function verifyHarvest({ tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have } = {}) {
   heading('harvest — record an outcome and distill, in an isolated store');
   if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove the harvest write path'); return false; }
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-')));
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(tmpRoot, 'agentic-kit-harvest-')));
   const swarm = path.join(tmp, '.swarm');
   // Pinned explicitly: a temporary folder inside a Git checkout would make the
   // derived project root the enclosing repository.
@@ -577,7 +592,7 @@ export async function verifyDejaVu({
   const enabled = cfg?.integrations?.tools?.dejaVu?.enabled === true;
   if (!dejaVuProofApplies(cfg)) {
     warn('deja-vu disabled and unowned — skipped');
-    return true;
+    return { status: 'skipped', reason: 'disabled and unowned' };
   }
   if (!adapter) {
     fail('deja-vu lifecycle adapter unavailable');
@@ -637,9 +652,10 @@ const CHECKS = Object.freeze([
   // The full AQE proof remembers only its live embedding request, itself, and
   // only for a backend the kit manages.
   { ...slow('aqe'), run: ({ cfg, cwd, onEvidence }) => verifyAqe({ cfg, cwd, onEvidence }) },
-  // The memory round trip plus the CLI/MCP route observation; its verdict is
-  // the memory check's.
-  { ...slow('memory-routes', 'memory'), run: () => verifyMemory({ observeRoutes: true }) },
+  // The memory round trip plus the CLI/MCP route observation has distinct
+  // evidence; a CLI-only pass cannot establish routing.
+  { ...slow('memory-routes', 'memory-routes'), run: ({ onCliOutcome }) =>
+    verifyMemory({ observeRoutes: true, routeVerdict: true, onCliOutcome }) },
 ].map((check) => Object.freeze(check)));
 
 /**
@@ -673,7 +689,9 @@ const duration = (ms) => (ms < 1000 ? `${ms} ms` : `${Math.round(ms / 1000)} s`)
 async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
   const controller = new AbortController();
   const started = Date.now();
-  const work = captureOutput(() => withAbortSignal(controller.signal, () => check.run(ctx)))
+  let cliOutcome = null;
+  const work = captureOutput(() => withAbortSignal(controller.signal,
+    () => check.run({ ...ctx, onCliOutcome: (outcome) => { cliOutcome = outcome; } })))
     .then(({ result, entries }) => ({ outcome: checkOutcome(result, entries, check.id), entries }),
       () => ({ outcome: { status: 'inconclusive', reason: 'the check could not run' }, entries: [] }));
   const deadline = sleep(timeoutMs);
@@ -687,7 +705,8 @@ async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
     settled = { outcome: { status: 'inconclusive', reason: `no result within ${duration(timeoutMs)}` }, entries: late?.entries ?? [] };
   }
   const { outcome, entries } = settled;
-  return { id: check.id, status: outcome.status, reason: outcome.reason ?? null, elapsedMs: Date.now() - started, entries };
+  return { id: check.id, status: outcome.status, reason: outcome.reason ?? null,
+    elapsedMs: Date.now() - started, entries, cliOutcome };
 }
 
 /**
@@ -706,15 +725,28 @@ export async function runLiveChecks({
   cfg = loadKitConfig(), cwd = process.cwd(), only = [], checks = liveChecksFor(cfg, only),
   timeoutMs, graceMs = LIVE_CHECK_GRACE_MS, source = 'status-refresh-live',
 } = {}) {
-  const remember = (id, outcome) => rememberLiveCheck(id, outcome, { source, cfg, cwd });
+  const remember = (id, outcome, inputsKey) => rememberLiveCheck(id, outcome, { source, cfg, cwd, inputsKey });
   const ctx = { cfg, cwd, onEvidence: remember };
+  // Capture the installed implementation before any proof starts. A package
+  // upgrade while the slow check runs cannot turn an old observation into a
+  // pass for the newly installed CLI.
+  const routeKeys = checks.map((check) => check.id === 'memory-routes'
+    ? liveCheckInputsKey('memory-routes', { cfg, cwd }) : null);
   const results = await Promise.all(checks.map(async (check) => ({
     ...(await runOneLiveCheck(check, ctx, { timeoutMs: timeoutMs ?? check.timeoutMs ?? QUICK_TIMEOUT_MS, graceMs })),
     applies: check.applies?.(cfg ?? {}) ?? true,
   })));
   checks.forEach((check, i) => {
     const evidenceId = check.evidenceId === undefined ? check.id : check.evidenceId;
-    if (evidenceId && results[i].applies) remember(evidenceId, results[i]);
+    if (!results[i].applies || results[i].status === 'skipped') return;
+    if (check.id === 'memory-routes') {
+      remember('memory', results[i].cliOutcome ?? results[i]);
+      if (routeKeys[i] !== liveCheckInputsKey('memory-routes', { cfg, cwd })) {
+        results[i].status = 'inconclusive';
+        results[i].reason = 'installed routing implementation changed during the check';
+      }
+      remember('memory-routes', results[i], routeKeys[i]);
+    } else if (evidenceId) remember(evidenceId, results[i]);
   });
-  return results;
+  return results.map(({ cliOutcome: _cliOutcome, ...result }) => result);
 }

@@ -10,6 +10,11 @@ Windows timing evidence. #251 is done, and the alpha.60 release commit is on `ma
 Publication and global installation were not verified in the execution-plan baseline.
 The historical decision batch and schedule below remain as scope/evidence references;
 the approved execution section governs wherever their authority or timing differs.
+At the 2026-09-29 checkpoint, V3 #276, V5 #274, V4 B1 #273, V4 C3 #277, and
+V4 C4 #278 had merged to `develop@989c5e56`. Remaining V4 implementation
+units were accepted on an isolated branch; its final gates, whole-branch
+review, PR CI and integration remained open. V6 and V7 still have work. The
+final `develop` → `main` PR has not been opened.
 
 ### Approved execution and precedence
 
@@ -308,7 +313,7 @@ One unit commit per line, test-first. The source text is the Branch 9 plan where
 
 1. A relative `XDG_*` value is ignored (Branch 9 Task 6; B6a-6, B2-6).
 2. Re-record seams for `x/daemon-gc.mjs` and `setup.mjs` (Task 8), plus the one for `x/host.mjs` `pick` (deferred 13a) (B6a-3).
-3. `rufloMemoryLocation` names both reasons when the root and the folder are both unsuitable (deferred item 11). `inside()` stops treating equality as "inside", so a `TMPDIR` set to a tool folder is read correctly (B9-12, B0-15).
+3. `rufloMemoryLocation` names both reasons when the root and the folder are both unsuitable (deferred item 11). `inside()` stops treating equality as "inside", so a `TMPDIR` set to a tool folder is read correctly (B9-12, B0-15). Implemented in V4 B3; isolated-branch review pending (`.superpowers/sdd/2026-09-28-follow-ups-v2/b3-report.md`).
 4. N4, as D-4 decides (B9-3).
 5. The stray scan walks dot folders below the root (B5-9, D-7). The real `~/.agentic-qe` home store is listed (B5-11). The `codex-mcp` hint stops suggesting AQE's broken Codex platform setup (agentic-qe#757) (B5-10).
 6. `ruflo-components`: the applied-but-unverified row stops repeating the restart instruction (B0-21). The rows reading "partial — missing: Codex hooks" get a fix line once ruvnet/ruflo#3419 answers; if it is still unanswered at the pre-PR check, this part waits (LQ-2).

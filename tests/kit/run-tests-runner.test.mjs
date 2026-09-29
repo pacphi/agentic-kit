@@ -445,7 +445,10 @@ function cleanupProbe(home) {
       if (own(p)) {
         ownStats++;
         if (mode === 'refusal' && ownStats >= 3) stat.isDirectory = () => false;
-        if (mode === 'identity' && ownStats >= 4) stat.birthtimeMs += 1;
+        if (mode === 'identity' && ownStats >= 4) {
+          if (typeof stat.birthtimeNs === 'bigint') stat.birthtimeNs += 1n;
+          else stat.birthtimeMs += 1;
+        }
       }
       return stat;
     };

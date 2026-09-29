@@ -46,20 +46,20 @@ export function readOwner(root) {
   let record = null;
   try {
     const file = path.join(root, OWNER_FILE);
-    const before = fs.lstatSync(file);
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
-      || before.size > MAX_OWNER_BYTES || (currentUid() !== null && before.uid !== currentUid())) {
+    const before = fs.lstatSync(file, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n
+      || before.size > BigInt(MAX_OWNER_BYTES) || (currentUid() !== null && before.uid !== BigInt(currentUid()))) {
       throw Error('unsafe owner file');
     }
     // Bitwise flags treat an unavailable platform constant as zero.
     fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
-    const opened = fs.fstatSync(fd);
-    if (!opened.isFile() || !sameIdentity(before, opened) || opened.size > MAX_OWNER_BYTES) {
+    const opened = fs.fstatSync(fd, { bigint: true });
+    if (!opened.isFile() || !sameIdentity(before, opened) || opened.size > BigInt(MAX_OWNER_BYTES)) {
       throw Error('owner file changed at open');
     }
     const bytes = Buffer.alloc(MAX_OWNER_BYTES + 1);
     const count = fs.readSync(fd, bytes, 0, bytes.length, 0);
-    if (count > MAX_OWNER_BYTES || !sameIdentity(opened, fs.lstatSync(file))) throw Error('owner file changed at read');
+    if (count > MAX_OWNER_BYTES || !sameIdentity(opened, fs.lstatSync(file, { bigint: true }))) throw Error('owner file changed at read');
     const parsed = JSON.parse(bytes.subarray(0, count).toString('utf8'));
     if (validRecord(parsed, root)) record = parsed;
   } catch { /* Unknown metadata never grants ownership. */ }
@@ -184,7 +184,8 @@ export function defaultProbes(_platform = process.platform) {
   return { listOnly: true, alive: () => null, startedAfter: () => null, completeExit: () => null };
 }
 
-function sameIdentity(a, b) { return a.dev === b.dev && a.ino === b.ino && a.ctimeMs === b.ctimeMs; }
+// Keep inode/device IDs and change times exact; Number stats can alias distinct files.
+function sameIdentity(a, b) { return a.dev === b.dev && a.ino === b.ino && a.ctimeNs === b.ctimeNs; }
 
 /** Revalidate after injected probes; recursive rm can still fail partway through.
  * The fixture seam is not an installed platform containment implementation.
@@ -208,13 +209,13 @@ export function collectAbandonedRoots({ tmpdir, selfRoot, homedir, uid = current
     const safe = removableRunRoot(root, options);
     if (!safe.ok) { keep(root, safe.reason); continue; }
     try {
-      const identity = fs.lstatSync(root);
+      const identity = fs.lstatSync(root, { bigint: true });
       const owner = readOwner(root);
       if (!owner) { keep(root, 'owner changed during inspection'); continue; }
       const proof = proveAbandoned(root, owner, probes);
       if (!proof.abandoned) { keep(root, proof.reason); continue; }
       const boundary = removableRunRoot(root, options);
-      if (!boundary.ok || !sameIdentity(identity, fs.lstatSync(root))
+      if (!boundary.ok || !sameIdentity(identity, fs.lstatSync(root, { bigint: true }))
         || JSON.stringify(owner) !== JSON.stringify(readOwner(root))) {
         keep(root, 'root or owner changed before removal'); continue;
       }

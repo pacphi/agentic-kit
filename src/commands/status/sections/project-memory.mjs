@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { projectDaemonAlive } from '../../../lib/daemons.mjs';
-import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
+import { formatLiveCheckAge as ago, liveCheckInputsKey, readLiveCheck } from '../../../lib/live-check-evidence.mjs';
 import { memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
 import { findStrayMemoryStores, projectMemoryStatus } from '../../../lib/project-memory.mjs';
 import { findProbeRows } from '../../../lib/memory-probe-cleanup.mjs';
@@ -206,7 +206,19 @@ export default {
             ? storeMessage(store)
             : `${path.basename(store.file)} store is unreadable (${store.file}); existing-corpus access unverified`));
         }
-        if (memory.secondary) rows.push(row('memory', 'warn', twoStoreMessage(rufloVersion, platform)));
+        if (memory.secondary) {
+          const routing = readLiveCheck('memory-routes', {
+            inputsKey: liveCheckInputsKey('memory-routes', { routingVersion: rufloVersion, platform }), now,
+          });
+          const observed = typeof rufloVersion === 'string' && rufloVersion.length > 0 &&
+            routing?.status === 'passed' && !routing.invalidated;
+          const message = observed
+            ? twoStoreMessage(rufloVersion, platform).replace('MCP routing needs separate verification.', 'Isolated CLI/MCP routing was observed.')
+            : twoStoreMessage(rufloVersion, platform);
+          rows.push(row('memory', observed ? 'info' : 'warn', observed
+            ? `${message}; isolated CLI/MCP routing observed (${ago(routing.ageMs)}) for this installed CLI version and platform; existing-corpus access unverified`
+            : message));
+        }
         const orphaned = orphanedStoreRow(root, memory);
         if (orphaned) rows.push(orphaned);
         rows.push(...maintenanceRows(root, memory, now));

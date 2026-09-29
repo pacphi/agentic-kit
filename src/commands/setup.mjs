@@ -5,6 +5,7 @@
 //   Project scope (when run inside a git repo / --project): the port of
 //   ruflo-setup-project — init, sanitize, pin, activate, verify, daemon.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { run as runCmd, have } from '../lib/exec.mjs';
@@ -381,21 +382,24 @@ function deployTokenAuditSkill(pkgRoot) {
  *  left alone. Shares HOSTS/hostInstallState/installHost with `ak sync`'s
  *  and `ak host pick`'s own host-install loops; the interactive confirmation
  *  here (vs. their unconditional install) is this command's own UX. */
-async function installEnabledAbsentHosts(cfg, flags) {
+export async function installEnabledAbsentHosts(cfg, flags, lifecycle = {}) {
+  const { installState, install, collectFacts } = {
+    installState: hostInstallState, install: installHost, collectFacts: collectIntegrationFacts, ...lifecycle,
+  };
   let installed = false;
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
-    const st = await hostInstallState(h);
+    const st = await installState(h);
     if (st.method === 'absent') {
       if (await ask(`${h.id} CLI not found — install ${h.pkg} globally?`, true, flags.yes)) {
-        const r = await installHost(h.id);
+        const r = await install(h.id);
         (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
         if (r.ok) {
           installed = true;
           // hostInstallState() above already recorded the pre-install
           // 'absent' evidence; re-probe now so a subsequent `ak status`
           // doesn't read that stale row back.
-          await hostInstallState(h, { refresh: true, record: true, source: 'setup' });
+          await installState(h, { refresh: true, record: true, source: 'setup' });
         }
       } else warn(`${h.id} not installed — enable/install later with: ak host pick`);
     } else {
@@ -404,7 +408,7 @@ async function installEnabledAbsentHosts(cfg, flags) {
   }
   // host-setup covers every host in one call; refresh it once after the
   // loop, not per host, once anything actually changed.
-  if (installed) await collectIntegrationFacts({ cfg, refresh: true, record: true, source: 'setup' });
+  if (installed) await collectFacts({ cfg, refresh: true, record: true, source: 'setup' });
 }
 
 /** Step 6b: host lifecycle wiring — connected MCPs, compact lazy gateway,
@@ -467,7 +471,7 @@ async function printUndetectedHostHints(cfg) {
   }
 }
 
-export async function run_machine({ flags, pkgRoot, cfg }) {
+export async function run_machine({ flags, pkgRoot, cfg, deps = { hostLifecycle: undefined } }) {
   heading('machine setup');
   if (flags['dry-run']) { info('dry-run: would ensure packages (incl. agent-browser and ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
 
@@ -479,7 +483,7 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   // key on `codex` being on PATH / dual-mode enablement). Running them here
   // warned + drifted on genuinely bare machines.
   deployTokenAuditSkill(pkgRoot);
-  await installEnabledAbsentHosts(cfg, flags);
+  await installEnabledAbsentHosts(cfg, flags, deps.hostLifecycle);
   if (!(await applyMachineHostLifecycles(cfg, pkgRoot))) return false;
   if (cfg.codexContext && cfg.integrations?.hosts?.codex) {
     try { await manageCodexContext(cfg, { persist: saveKitConfig }); }
@@ -602,25 +606,52 @@ export async function startProjectDaemon(root, {
   } else warn('daemon failed to start — try: ruflo daemon start');
 }
 
-/** Step 7: write-verification (store → actual on-disk row, then clean up).
- *  The CLI mirrors the write into agentdb-memory.db under the memory root
- *  (CLAUDE_FLOW_MEMORY_PATH, else a config persistPath, else <cwd>/.swarm).
- *  The probe pins that root beside the pinned memory.db, so both copies land
- *  in the stores cleanup checks even when the project's root is redirected;
- *  this is the user's real corpus, so nothing of the probe may be left behind. */
+/** Step 7: verify a real primary write. Ruflo also writes a native mirror
+ * under CLAUDE_FLOW_MEMORY_PATH; keep that disposable mirror in a private
+ * directory so setup cannot create a spare project store. */
 export async function verifyProjectMemoryWrite(root, env, { runner = runCmd } = {}) {
   const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
-  const probeEnv = { ...env, CLAUDE_FLOW_MEMORY_PATH: path.dirname(env?.CLAUDE_FLOW_DB_PATH ?? paths.projectMemoryDb(root)) };
-  const stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env: probeEnv })).code === 0;
-  const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
-  if (!landed) {
+  let mirrorDir;
+  let stored = false;
+  let landed = null;
+  let cleanup;
+  let runnerError = false;
+  let mirrorCleanupError = false;
+  try {
+    mirrorDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-setup-memory-probe-'));
+    const probeEnv = {
+      ...env,
+      CLAUDE_FLOW_DB_PATH: env?.CLAUDE_FLOW_DB_PATH ?? paths.projectMemoryDb(root),
+      CLAUDE_FLOW_MEMORY_PATH: mirrorDir,
+      RUFLO_DAEMON_AUTOSTART: '0',
+    };
+    stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env: probeEnv })).code === 0;
+  } catch {
+    runnerError = true;
+  } finally {
+    // A failed command may still have written its primary row. Keep the
+    // existing refusal behavior for unreadable or busy project stores.
+    if (mirrorDir) {
+      try {
+        landed = findMemoryEntry(root, '_setup', probeKey);
+        cleanup = removeMemoryProbe(root, '_setup', probeKey);
+      } catch {
+        runnerError = true;
+      } finally {
+        try { fs.rmSync(mirrorDir, { recursive: true, maxRetries: 3 }); }
+        catch { mirrorCleanupError = true; }
+      }
+    }
+  }
+  if (cleanup?.failed.length) {
+    warn(`memory probe cleanup failed in ${cleanup.failed.map((f) => `${path.basename(f.file)} (${f.kind})`).join(', ')} — remove ${probeKey} from _setup manually`);
+  }
+  if (mirrorCleanupError) warn(`memory probe temporary mirror cleanup failed at ${mirrorDir} — inspect it manually`);
+  if (!stored || !landed || runnerError || cleanup?.failed.length || mirrorCleanupError) {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
     return;
   }
-  const cleanup = removeMemoryProbe(root, '_setup', probeKey);
-  if (cleanup.failed.length) {
-    warn(`memory write verified, but probe cleanup failed in ${cleanup.failed.map((f) => `${path.basename(f.file)} (${f.kind})`).join(', ')} — remove ${probeKey} from _setup manually`);
-  } else ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
+  ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
 }
 
 function reportProjectGuidance(result) {
@@ -926,6 +957,7 @@ async function applySetupCodexRepairs(flags, repairPlan, cwd, repairTopology) {
 
 export async function run({
   flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE,
+  deps = { hostLifecycle: undefined },
   ...runtimeOverrides
 }) {
   const runtime = { ...DEFAULT_SETUP_RUNTIME, ...runtimeOverrides };
@@ -966,7 +998,7 @@ export async function run({
     flags, cfg, hostFlags, companionPreflight, dejaVuFlagsResult,
   });
 
-  if (!(await runtime.machineSetup({ flags, pkgRoot, cfg }))) return 1;
+  if (!(await runtime.machineSetup({ flags, pkgRoot, cfg, deps }))) return 1;
   if (!flags['dry-run'] && cfg.aqe !== false) {
     // Persist the selected choice even on failure, so retry/sync has an exact plan.
     saveKitConfig(cfg);

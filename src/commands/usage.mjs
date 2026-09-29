@@ -2,7 +2,7 @@
 // offline text scorecard (`score`) rendered from the SAME local-transcript
 // aggregate `ak dashboard`'s Usage tab reads — no cost/token/percentile
 // arithmetic is redone here; see the score section below for the boundary.
-import { heading, info, ok, warn, dim } from '../lib/output.mjs';
+import { heading, info, ok, warn, dim, reportFailure } from '../lib/output.mjs';
 import { stripUnsafeChars } from '../lib/text-safety.mjs';
 import { readIndex } from '../lib/usage-index.mjs';
 import {
@@ -321,7 +321,8 @@ function scoreProjection(agg, windowDays) {
 async function runScore({ flags, deps }) {
   const windowDays = parseScoreWindow(flags.window ?? '14');
   if (windowDays == null) {
-    warn(`ak usage score: --window must be 7, 14, or 30 (got ${JSON.stringify(flags.window)})`);
+    const message = `ak usage score: --window must be 7, 14, or 30 (got ${JSON.stringify(flags.window)})`;
+    reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => warn(message) });
     return 2;
   }
   const readAgg = deps.readIndex ?? readIndex;
@@ -953,7 +954,8 @@ function printDeepPass(deep) {
 async function runPrompts({ flags, deps }) {
   const win = parsePromptWindow(flags.window);
   if (win == null) {
-    warn(`ak usage prompts: --window must be 7, 14, 30, or all (got ${JSON.stringify(flags.window)})`);
+    const message = `ak usage prompts: --window must be 7, 14, 30, or all (got ${JSON.stringify(flags.window)})`;
+    reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => warn(message) });
     return 2;
   }
   const readAgg = deps.readIndex ?? readIndex;
@@ -1087,6 +1089,12 @@ export async function run({ flags, positionals, deps = {} }) {
   const provider = positionals[1];
   const cacheFile = deps.cacheFile ?? openRouterActivityFile();
 
+  if (['score', 'prompts'].includes(action) && positionals.length > 1) {
+    const message = `unexpected argument '${positionals[1]}'`;
+    reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => warn(message) });
+    return 2;
+  }
+
   if (action === 'status' && provider === undefined) {
     return runOpenRouterStatus({ flags, cacheFile, read: deps.read ?? readOpenRouterActivity });
   }
@@ -1096,6 +1104,7 @@ export async function run({ flags, positionals, deps = {} }) {
     return runOpenRouterRefresh({ flags, cacheFile, refresh: deps.refresh ?? refreshOpenRouterActivity });
   }
 
-  warn('usage: ak usage status | ak usage refresh openrouter | ak usage score | ak usage prompts');
+  const message = 'usage: ak usage status | ak usage refresh openrouter | ak usage score | ak usage prompts';
+  reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => warn(message) });
   return 2;
 }

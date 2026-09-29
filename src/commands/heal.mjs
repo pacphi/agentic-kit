@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { reportFailure } from '../lib/output.mjs';
 
 import { collectHookAudit } from './audit.mjs';
 import {
@@ -99,25 +100,28 @@ function validateMode(flags) {
   if (flags.apply && !flags.yes) throw new TypeError('--apply requires --yes');
 }
 
+function usageError(flags, message, showHelp = false) {
+  reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => {
+    console.error(message);
+    if (showHelp) console.log(help);
+  } });
+  return 2;
+}
+
 export async function run({ flags, positionals, detectVersionFn, loadConfigFn }) {
   if (positionals.length !== 1 || positionals[0] !== 'hooks') {
-    console.error('ak heal requires the hooks subcommand');
-    console.log(help);
-    return 2;
+    return usageError(flags, 'ak heal requires the hooks subcommand', true);
   }
   try { validateMode(flags); } catch (error) {
-    console.error(`hook healing refused: ${error.message}`);
-    return 2;
+    return usageError(flags, `hook healing refused: ${error.message}`);
   }
   const transactionsRoot = transactionRoot(flags);
   if (flags.undo && flags.recover) {
-    console.error('hook healing refused: --undo and --recover are mutually exclusive');
-    return 2;
+    return usageError(flags, 'hook healing refused: --undo and --recover are mutually exclusive');
   }
   if (flags.undo || flags.recover) {
     if ((flags.action?.length ?? 0) || flags['plan-digest']) {
-      console.error('hook healing refused: rollback/recovery cannot be combined with plan action flags');
-      return 2;
+      return usageError(flags, 'hook healing refused: rollback/recovery cannot be combined with plan action flags');
     }
     const result = flags.recover
       ? (flags.apply
@@ -145,8 +149,7 @@ export async function run({ flags, positionals, detectVersionFn, loadConfigFn })
       return audit.summary.invalidSources || audit.summary.configurationIssues ? 1 : 0;
     }
     if (!flags.action?.length || !flags['plan-digest']) {
-      console.error('hook healing refused: apply requires --action and --plan-digest from a preview');
-      return 2;
+      return usageError(flags, 'hook healing refused: apply requires --action and --plan-digest from a preview');
     }
     if (unfinishedTransactions.length) {
       throw new Error(`unfinished hook transaction(s) require --recover first: ${unfinishedTransactions.map((item) => item.id).join(', ')}`);
@@ -160,7 +163,6 @@ export async function run({ flags, positionals, detectVersionFn, loadConfigFn })
     });
     return printResult(result, flags.json);
   } catch (error) {
-    console.error(`hook healing failed: ${error.message}`);
-    return 2;
+    return usageError(flags, `hook healing failed: ${error.message}`);
   }
 }
