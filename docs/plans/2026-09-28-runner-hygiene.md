@@ -4,6 +4,8 @@
 
 Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Tasks 10/5/7 and Task 11 were independently accepted. Task 12 adds guarded `focus <files…>` and a bounded POSIX interrupted-run proof: a completed focus run retains an interrupted root while its child lives, after that child exits, and while another runner is live. Default sibling handling remains list-only on every platform; native Windows/Linux behavior is unmeasured. No backlog removal, push, PR or merge has occurred. The creator census is complete: 647 sites classified, zero unresolved current lifecycles.
 
+LQ1 source inspection refutes the claimed missing selector propagation: the runner copies its input environment and removes only `FORCE_COLOR`. A guarded-child sentinel regression is green on the original implementation and fails when that copy is removed. LQ4 Chrome environment narrowing is in progress.
+
 ## Contract and dependencies
 
 The [v2 scope](2026-09-28-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.

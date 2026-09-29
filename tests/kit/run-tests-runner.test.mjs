@@ -164,6 +164,21 @@ test('the suite runs without the shell FORCE_COLOR', (t) => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
+test('guarded runner preserves tool selectors while scrubbing FORCE_COLOR', (t) => {
+  const { home, repo, env } = sandbox(t);
+  const probe = stub(home, 'selectors.mjs', `
+    import assert from 'node:assert/strict';
+    assert.equal(process.env.AQE_EMBEDDER_PROVIDER, 'sentinel-provider');
+    assert.equal(process.env.AQE_EMBEDDER_MODEL, 'sentinel-model');
+    assert.equal(process.env.FORCE_COLOR, undefined);
+  `);
+  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', probe], {
+    env: { ...env, AQE_EMBEDDER_PROVIDER: 'sentinel-provider', AQE_EMBEDDER_MODEL: 'sentinel-model', FORCE_COLOR: '3' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
 test('home temp base is refused before creating a run root', (t) => {
   const { home, repo, env } = sandbox(t);
   const before = fs.readdirSync(home);
