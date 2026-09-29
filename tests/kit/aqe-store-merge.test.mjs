@@ -10,29 +10,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './helpers/temp-dir.mjs';
+import { buildStore, EXPERIENCE_DDL } from './helpers/aqe-store-merge-fixture.mjs';
 import { withDb } from '../../src/lib/sqlite.mjs';
 import { mergeAqeStores, archiveSlug } from '../../src/lib/aqe-store-merge.mjs';
-
-const SCHEMA = fs.readFileSync(new URL('../fixtures/aqe-store/schema-3.14.4.sql', import.meta.url), 'utf8');
-// sqlite_sequence is reserved and FTS5 creates its own shadow tables.
-const SHADOW = /^CREATE TABLE (sqlite_sequence|'qe_patterns_fts_(data|idx|docsize|config)')/;
-const STATEMENTS = SCHEMA.split(/;\s*\n(?=CREATE)/).map((s) => s.trim().replace(/;$/, '')).filter((s) => s && !SHADOW.test(s));
-const EXPERIENCE_DDL = STATEMENTS.filter((s) => /captured_experiences/.test(s));
-
-/** A store as AQE 3.14.4 lays it out; `experiences: null` = no table yet (a fresh store). */
-function buildStore(dir, { patterns = [], experiences = [], witness = 0 } = {}) {
-  fs.mkdirSync(dir, { recursive: true });
-  const db = new DatabaseSync(path.join(dir, 'memory.db'));
-  for (const s of STATEMENTS) if (experiences !== null || !/captured_experiences/.test(s)) db.exec(s);
-  db.exec('PRAGMA journal_mode = WAL');
-  const insertPattern = db.prepare('INSERT INTO qe_patterns (id, pattern_type, qe_domain, domain, name) VALUES (?, ?, ?, ?, ?)');
-  for (const name of patterns) insertPattern.run(`${path.basename(path.dirname(dir))}-${name}`, 'workflow', 'test-generation', 'test', name);
-  for (const id of experiences ?? []) db.prepare('INSERT INTO captured_experiences (id, task, agent) VALUES (?, ?, ?)').run(id, 'task', 'agent');
-  const insertWitness = db.prepare('INSERT INTO witness_chain (prev_hash, action_hash, action_type, timestamp, actor) VALUES (?, ?, ?, ?, ?)');
-  for (let i = 0; i < witness; i += 1) insertWitness.run(`p${i}`, `a${i}-${dir}`, 'PATTERN_CREATE', new Date(i * 1000).toISOString(), 'aqe');
-  db.close();
-  fs.writeFileSync(path.join(dir, 'patterns.rvf'), 'rvf');
-}
 
 // AQE 3.14.4 creates this table on demand (AQE/dist/integrations/ruvector/brain-table-ddl.js:163-167).
 const RELATIONSHIPS_DDL = `CREATE TABLE IF NOT EXISTS pattern_relationships (
