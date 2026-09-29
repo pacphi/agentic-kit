@@ -258,6 +258,27 @@ test('status reports the user-level store and stray stores outside projects, for
   assert.match(strays[0].message, /leaves them in place/);
 });
 
+test('user status reports AQE home data separately without calling an empty folder healthy', async (t) => {
+  const home = sandbox(t);
+  const aqeDir = path.join(home, '.agentic-qe');
+  fs.mkdirSync(aqeDir);
+  let rows = await userMemory.collect({ home, env: {} });
+  let aqe = rows.find((r) => r.message.includes(aqeDir));
+  assert.ok(aqe);
+  assert.equal(aqe.level, 'info');
+  assert.equal(aqe.fix, null);
+  assert.match(aqe.message, /AQE.*memory\.db absent.*unverified/);
+  assert.doesNotMatch(aqe.message, /Ruflo|healthy|merge|move/i);
+
+  fs.writeFileSync(path.join(aqeDir, 'memory.db'), 'placeholder');
+  fs.writeFileSync(path.join(aqeDir, 'memory.db-wal'), 'wal');
+  rows = await userMemory.collect({ home, env: {} });
+  aqe = rows.find((r) => r.message.includes(aqeDir));
+  assert.match(aqe.message, /AQE.*memory\.db present.*14 B.*unverified/);
+  assert.doesNotMatch(aqe.message, /Ruflo|healthy|merge|move/i);
+  assert.equal(rows.filter((r) => /stray Ruflo/.test(r.message)).length, 0);
+});
+
 test('Claude mode from the home folder pins both memory variables to the user-level store', (t) => {
   const home = sandbox(t);
   const launch = rufloMcpLaunch(home, { RUFLO_INTELLIGENCE_MODE: 'fast' }, { cfg, rufloVersion: '3.46.1', home, host: 'claude' });
