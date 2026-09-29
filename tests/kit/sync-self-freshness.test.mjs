@@ -144,7 +144,70 @@ test('partial self answers retry once per TTL without renewing the cached observ
     tag === 'next' ? '4.0.0-alpha.51' : null });
   assert.equal(recovered.latest, '4.0.0-alpha.51');
   assert.deepEqual(loadKitConfig().versionCheck.self,
-    { last: now, observedAt: now, best: { version: '4.0.0-alpha.51', tag: 'next' } });
+    { last: now, observedAt: now, best: { version: '4.0.0-alpha.51', tag: 'next' }, lastTags: ['latest', 'next'] });
+});
+
+test('a stable lookup cannot make an untried prerelease channel fresh', async t => {
+  seed('4.0.0');
+  const cfg = loadKitConfig();
+  cfg.versionCheck.self = { last: 100, observedAt: 80, best: { version: '4.0.0', tag: 'latest' } };
+  writeKitConfig(home, cfg);
+  let now = 200_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const stableTags = [];
+  await selfDrift({ pkgRoot, fetchLatest: async (_pkg, tag) => {
+    stableTags.push(tag); return null;
+  } });
+  assert.deepEqual(stableTags, ['latest']);
+  const stable = loadKitConfig().versionCheck.self;
+  assert.deepEqual(stable, {
+    last: now, observedAt: 80, best: { version: '4.0.0', tag: 'latest' }, lastTags: ['latest'],
+  });
+  fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ name: KIT_PKG, version: '4.0.0-alpha.1' }));
+  now += 1000;
+  const prereleaseTags = [];
+  const offline = async (_pkg, tag) => { prereleaseTags.push(tag); return null; };
+  const first = await selfDrift({ pkgRoot, fetchLatest: offline });
+  assert.deepEqual(prereleaseTags, ['latest', 'next']);
+  assert.deepEqual([first.latest, first.tag], ['4.0.0', 'latest']);
+  const afterFirst = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+  await selfDrift({ pkgRoot, fetchLatest: offline });
+  assert.deepEqual(prereleaseTags, ['latest', 'next']);
+  assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), afterFirst);
+  assert.equal(loadKitConfig().versionCheck.self.observedAt, 80);
+});
+
+test('a legacy latest-only record does not suppress an untried next channel', async t => {
+  seed('4.0.0-alpha.1');
+  const cfg = loadKitConfig();
+  cfg.versionCheck.self = { last: 200_000_000, observedAt: 100, best: { version: '4.0.0', tag: 'latest' } };
+  writeKitConfig(home, cfg);
+  t.mock.method(Date, 'now', () => 200_001_000);
+  const tags = [];
+  await selfDrift({ pkgRoot, fetchLatest: async (_pkg, tag) => { tags.push(tag); return null; } });
+  assert.deepEqual(tags, ['latest', 'next']);
+  assert.equal(loadKitConfig().versionCheck.self.observedAt, 100);
+});
+
+test('a successful stable observation also leaves next untried after a channel switch', async t => {
+  seed('4.0.0');
+  const cfg = loadKitConfig();
+  cfg.versionCheck.self.last = 100;
+  writeKitConfig(home, cfg);
+  let now = 200_000_000;
+  t.mock.method(Date, 'now', () => now);
+  await selfDrift({ pkgRoot, fetchLatest: async () => '4.0.1' });
+  assert.deepEqual(loadKitConfig().versionCheck.self.lastTags, ['latest']);
+  assert.equal(loadKitConfig().versionCheck.self.observedAt, now);
+  fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ name: KIT_PKG, version: '4.0.0-alpha.1' }));
+  now += 1000;
+  const tags = [];
+  const result = await selfDrift({ pkgRoot, fetchLatest: async (_pkg, tag) => {
+    tags.push(tag); return tag === 'next' ? '4.1.0-alpha.1' : null;
+  } });
+  assert.deepEqual(tags, ['latest', 'next']);
+  assert.deepEqual([result.latest, result.tag], ['4.1.0-alpha.1', 'next']);
+  assert.deepEqual(loadKitConfig().versionCheck.self.lastTags, ['latest', 'next']);
 });
 
 test('stable installs reject cached next-channel candidates when latest is unavailable', async () => {

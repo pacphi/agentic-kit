@@ -159,17 +159,20 @@ async function fetchSelfCandidate(tags, cachedBest, fetchLatest) {
   return { best, observed, answered };
 }
 
-/** `last` and `observedAt` describe the winning candidate; `attempt` only
- *  throttles a lookup that could not update it. The attempt's ordered tag set
- *  prevents a stable-channel retry from suppressing an untried next channel. */
+/** `observedAt` describes the winning candidate; `last` and `lastTags` scope
+ *  the latest completed check. `attempt` throttles a lookup that could not
+ *  update that check. Neither stamp makes a cached winner newly observed. */
 function selfRecord(cached, usable, { best, observed, answered }, tags, now = Date.now()) {
-  if (observed) return { last: now, best, observedAt: now };
+  if (observed) return { last: now, best, observedAt: now, lastTags: tags };
   if (answered || (cached?.best && !usable)) {
     return { ...cached, attempt: { at: now, tags } };
   }
   const { attempt: _priorAttempt, ...prior } = cached ?? {};
-  return { ...prior, last: now, observedAt: cached?.observedAt ?? cached?.last };
+  return { ...prior, last: now, observedAt: cached?.observedAt ?? cached?.last, lastTags: tags };
 }
+
+const sameTags = (recorded, tags) => Array.isArray(recorded) && recorded.length === tags.length
+  && tags.every((tag, index) => recorded[index] === tag);
 
 /** Look the kit up on its channels; with `record`, save what selfRecord keeps.
  *  Returns the winning candidate. */
@@ -189,7 +192,8 @@ async function lookUpSelf(cfg, cached, { tags, cachedBest, fetchLatest, record }
  *  higher of latest/next wins. Cached in kit.json alongside versionCheck.
  *  Failed lookups preserve eligible cached evidence (see selfRecord); an
  *  `attempt` stamp limits partial/unusable retries to once per tag set and TTL.
- *  `force` retries within the TTL. cacheOnly=true reports the recorded best with no
+ *  `lastTags` scopes completed checks. `force` retries within the TTL.
+ *  cacheOnly=true reports the recorded best with no
  *  network and no write (`ak sync --skip self`); record=false reports what the
  *  lookup found without saving it (ADR-0063).
  *  @param {{ pkgRoot?: string, force?: boolean, cacheOnly?: boolean, record?: boolean,
@@ -208,11 +212,16 @@ export async function selfDrift({ pkgRoot, force = false, cacheOnly = false, rec
   const now = Date.now();
   const attempt = cached?.attempt;
   const attemptFresh = Number.isSafeInteger(attempt?.at) && attempt.at > 0 && attempt.at <= now
-    && Array.isArray(attempt.tags) && attempt.tags.length === tags.length
-    && tags.every((tag, index) => attempt.tags[index] === tag)
+    && sameTags(attempt.tags, tags)
     && now - attempt.at < ttlMs;
-  const fresh = !force && ((cached?.last && now - cached.last < ttlMs
-    && (!cached.best || cachedBest)) || attemptFresh);
+  // Older records have no scope: a `next` winner proves both tags were tried;
+  // otherwise only the single latest channel is safe to reuse.
+  const lastScope = cached?.lastTags === undefined
+    ? (tags.length === 1 || cached?.best?.tag === 'next')
+    : sameTags(cached.lastTags, tags);
+  const lastFresh = Number.isSafeInteger(cached?.last) && cached.last > 0 && cached.last <= now
+    && now - cached.last < ttlMs && lastScope && (!cached.best || cachedBest);
+  const fresh = !force && (lastFresh || attemptFresh);
   const best = fresh || cacheOnly ? cachedBest : await lookUpSelf(cfg, cached, { tags, cachedBest, fetchLatest, record });
   return {
     pkg: KIT_PKG,

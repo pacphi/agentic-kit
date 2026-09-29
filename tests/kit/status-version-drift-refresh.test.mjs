@@ -151,7 +151,7 @@ function seedSelfHome({ ageMs = 0 } = {}) {
       ttlHours: 24,
       last: Date.now(),
       seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' },
-      self: { last: Date.now() - ageMs, best: { version: '0.0.1', tag: 'latest' } },
+      self: { last: Date.now() - ageMs, best: { version: '0.0.1', tag: 'latest' }, lastTags: ['latest', 'next'] },
     },
   });
   writeKitConfig(HOME, cfg);
