@@ -50,6 +50,7 @@ import {
   MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit,
 } from './usage-telemetry.mjs';
 import { parseClaude, parseCodex } from './usage-parsers.mjs';
+import { reconcileClaudeMessages } from './usage-claude-dedup.mjs';
 import { openCodexRollout } from './codex-rollout-reader.mjs';
 import { maskSecrets, applyCodexLedger, aggregate, sessionPayload } from './usage-aggregate.mjs';
 
@@ -767,6 +768,7 @@ function withWindowLedger(entry, windowConfigDir) {
 function compatibleCostStateCache(c, hit) {
   return c.provider !== 'claude' || (Object.hasOwn(hit.session ?? {}, 'claudeCostState')
     && Object.hasOwn(hit.session ?? {}, 'claudeMessageCoverage')
+    && Array.isArray(hit.session.claudeMessages)
     && (!hit.session.claudeCostState || Object.hasOwn(hit.session.claudeCostState, 'startMs')));
 }
 
@@ -978,7 +980,7 @@ async function scan(o = {}) {
   // `previous: true` caller would find its "current" totals silently
   // absorbing what should have been the previous window (the bug this fixes).
   const displayCutoff = now - days * DAY_MS;
-  const result = aggregate(applyCodexLedger(records, ledger), {
+  const result = aggregate(reconcileClaudeMessages(applyCodexLedger(records, ledger)), {
     days, now, cutoff: displayCutoff, deps, previous, prompts,
   });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);

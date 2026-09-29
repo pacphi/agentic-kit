@@ -7,12 +7,16 @@
 
 ## Status
 
-Active. Units 1–10, 20 and 21 are accepted. Unit 11 captures Claude Code's
+Active. Units 1–11, 20 and 21 are accepted. Unit 11 captures Claude Code's
 latest valid cumulative `cost-state` checkpoint as a separate reconciliation
 signal. It reports provable time or token scope differences while preserving
 message-derived cost totals. The observed checkpoint has no end time or serving
-provider attestation, so equal counters remain unverified. Unit 11 awaits
-independent review before Unit 12.
+provider attestation, so equal counters remain unverified. Unit 12 now retains
+bounded, hashed Claude API message identities per cached file and reconciles
+copied charges after discovery. Aggregate responses/tokens/cost count a shared
+message once; each session's `responses` still counts what its transcript
+recorded, with `accountedResponses` showing its aggregate share. Unit 12 awaits
+independent review before Unit 13.
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin

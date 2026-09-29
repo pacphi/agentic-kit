@@ -671,6 +671,18 @@ function collectClaudeToolNames(rec, toolUses) {
 /** Did this decoded usage carry any token evidence at all? */
 const hasClaudeUsage = (u) => u.input + u.output + u.cacheRead + u.cacheWrite > 0;
 
+function claudeCrossFileIdentity(e) {
+  const messageId = e.message.id;
+  const requestId = e.requestId;
+  // These are the two observed Claude API ID forms. An arbitrary/malformed
+  // string is not proof that two files hold one provider message.
+  const rawId = typeof messageId === 'string' && /^msg_[A-Za-z0-9_-]{1,252}$/u.test(messageId)
+    ? ['message', messageId] : typeof requestId === 'string' && /^req_[A-Za-z0-9_-]{1,252}$/u.test(requestId)
+      ? ['request', requestId] : null;
+  const model = boundedClaudeModel(e.message.model);
+  return rawId ? sha(JSON.stringify(['claude', claudeProviderFromModelId(model), model, ...rawId]), 64) : null;
+}
+
 /**
  * Stage one assistant transcript line under its API message id. Claude Code
  * writes ONE line per content block (thinking / text / each tool_use) and
@@ -680,22 +692,22 @@ const hasClaudeUsage = (u) => u.input + u.output + u.cacheRead + u.cacheWrite > 
  * A later line with no token evidence never displaces an earlier one that had
  * some (honest-absent, same rule as the context sample below). A line with no
  * id at all is its own message: nothing is dropped and nothing is merged with
- * an unrelated line. Dedup is scoped to ONE transcript — the same id can
- * reappear in a subagent's file, and that cross-file overlap is not attempted.
+ * an unrelated line. A validated API identity is also retained as a hash for
+ * scan-wide accounting after every file has been parsed or loaded from cache.
  */
-function stageClaudeMessage(msgState, decoded, at, model, recordedAtMs) {
-  const key = decoded.messageId ?? `line:${msgState.seq++}`;
+function stageClaudeMessage(msgState, decoded, at, model, recordedAtMs, identity) {
+  const key = identity ?? `line:${msgState.seq++}`;
   const prior = msgState.groups.get(key);
   if (prior && hasClaudeUsage(prior.usage) && !hasClaudeUsage(decoded.usage)) return;
   // Re-set keeps the Map's first-seen insertion order, so flush order is stable.
-  msgState.groups.set(key, { at, model, usage: decoded.usage, recordedAtMs });
+  msgState.groups.set(key, { at, model, usage: decoded.usage, recordedAtMs, identity });
 }
 
 /** Account every staged message exactly once: response count, punchcard,
  *  the per-day/model usage row and the context sample — all from the message's
  *  last line. Runs after the whole transcript has been read. */
 function flushClaudeMessages(rec, msgState, windowLog) {
-  for (const { at, model, usage, recordedAtMs } of msgState.groups.values()) {
+  for (const { at, model, usage, recordedAtMs, identity } of msgState.groups.values()) {
     if (hasClaudeUsage(usage)) {
       if (recordedAtMs === null) rec.claudeMessageCoverage.missingTimestampMessages++;
       else {
@@ -707,6 +719,9 @@ function flushClaudeMessages(rec, msgState, windowLog) {
     const pk = punchKey(at);
     rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
     addUsage(rec, localDay(at), model, { ...usage, responses: 1 });
+    if (identity) rec.claudeMessages.push({ identity, at, day: localDay(at), model,
+      usage: { input: usage.input, output: usage.output, cacheRead: usage.cacheRead,
+        cacheWrite: usage.cacheWrite, cacheWrite1h: usage.cacheWrite1h ?? 0 } });
     // Context pressure: the tokens actually IN the model's window for this
     // message (fresh input plus what got served from cache) — the last message
     // wins so the field reflects the LAST completion, not a running total.
@@ -729,7 +744,7 @@ function flushClaudeMessages(rec, msgState, windowLog) {
  *  latency/model/tool accounting plus its turn row. Usage, response count,
  *  punchcard and context sample are STAGED per message id here and accounted
  *  once by flushClaudeMessages. */
-function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns) {
+function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns, identity) {
   noteSpan(rec, ms);
   const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
 
@@ -766,7 +781,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
   const model = boundedClaudeModel(decoded.model);
   if (!rec.models.includes(model)) rec.models.push(model);
 
-  stageClaudeMessage(msgState, decoded, at, model, Number.isFinite(ms) ? ms : null);
+  stageClaudeMessage(msgState, decoded, at, model, Number.isFinite(ms) ? ms : null, identity);
 
   const tools = collectClaudeToolNames(rec, decoded.toolUses);
   if (withTurns) {
@@ -784,6 +799,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
  */
 export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = null }) {
   const rec = blankSession(id, 'claude');
+  rec.claudeMessages = [];
   rec.claudeMessageCoverage = { firstAtMs: null, lastAtMs: null, missingTimestampMessages: 0 };
   rec.sessionOrigin = usageRecordOrigin(raw, 'claude');
   const observedProviders = new Set();
@@ -818,7 +834,9 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
     // A transcript's assistant model is tied to this session. Current global
     // settings and process.env are not historical session evidence.
     if (!decoded.isApiError) observedProviders.add(claudeProviderFromModelId(boundedClaudeModel(e.message.model)));
-    recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns);
+    // The hash preserves API identity across copied files without persisting
+    // a raw provider ID in the cache. Different ID kinds/providers cannot meet.
+    recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns, claudeCrossFileIdentity(e));
   }
   flushClaudeMessages(rec, msgState, windowLog);
 

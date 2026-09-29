@@ -909,13 +909,17 @@ function buildSessionRow(rec, usage, verdict) {
     start: new Date(rec.start ?? rec.end).toISOString(),
     minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
     prompts: rec.prompts, responses: rec.responses, exceptions: rec.exceptions,
+    // Transcript response count stays per session; shared copies have a
+    // separate count for the global accounting folds.
+    ...(rec.accountedResponses === undefined ? {} : { accountedResponses: rec.accountedResponses }),
+    _accountedResponses: rec.accountedResponses ?? rec.responses,
     sidechain: rec.sidechain, threadSource: rec.threadSource, parentSessionId: rec.parentSessionId ?? null,
     models: rec.models.slice(),
     input, output, cacheRead, cacheWrite,
     tokens: input + output + cacheRead + cacheWrite,
     cost: round(cost),
     costEvidence: usage.costEvidence,
-    claudeCostState: reconcileClaudeCostState(rec),
+    claudeCostState: reconcileClaudeCostState(rec.originalUsage ? { ...rec, usage: rec.originalUsage } : rec),
     acquisitionCoverage: rec.acquisitionCoverage ?? null,
     // What the cache avoided for THIS session, so the window total is
     // auditable a row at a time rather than only in aggregate.
@@ -1038,7 +1042,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
 
   for (const s of sessions) {
     const source = sourceKey(s);
-    totals.prompts += s.prompts; totals.responses += s.responses;
+    totals.prompts += s.prompts; totals.responses += s._accountedResponses;
     // Only a MAIN-thread prompt is a human typing. A subagent's prompts are
     // written by the harness, so counting them would inflate every
     // per-prompt denominator with work nobody asked for by hand.
@@ -1065,7 +1069,8 @@ function foldSessionTotals(sessions, byDay, byModel) {
     spanMs += s._span[1] - s._span[0];
 
     const hostBucket = bucket(byHost, s.host ?? 'unknown');
-    addTo(hostBucket, s);
+    const accounted = { ...s, responses: s._accountedResponses };
+    addTo(hostBucket, accounted);
     // Aborts are host-capability evidence (codex and opencode record a user
     // stop; claude does not), so they are kept per host — a reader dividing
     // by "responses that could have recorded one" needs them apart.
@@ -1078,14 +1083,14 @@ function foldSessionTotals(sessions, byDay, byModel) {
         addTo(bucket(byProvider, provider), { ...s, ...usage });
       }
     } else {
-      addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
+      addTo(bucket(byProvider, s.provider ?? 'unknown'), accounted);
     }
     // 'not-recorded' is a first-class key, not a display fallback: a transcript
     // that carried no mode evidence must not be folded into a real posture.
-    addTo(bucket(byMode, s.mode ?? 'not-recorded'), s);
-    addTo(bucket(bySource, source), s);
-    addTo(bucket(byProject, s.project), s);
-    addTo(bucket(byCategory, s.category), s);
+    addTo(bucket(byMode, s.mode ?? 'not-recorded'), accounted);
+    addTo(bucket(bySource, source), accounted);
+    addTo(bucket(byProject, s.project), accounted);
+    addTo(bucket(byCategory, s.category), accounted);
     foldSessionByModel(byModel, s);
     // Exceptions ride the SAME first-billed-day attribution as the session
     // count, so the reliability trend and the session trend are drawn from one
@@ -1339,7 +1344,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
   const projectTree = buildProjectTree(tree);
   for (const s of sessions) {
     delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced; delete s._providerUsage;
-    delete s._typedTokens; delete s._questions; delete s._personas;
+    delete s._typedTokens; delete s._questions; delete s._personas; delete s._accountedResponses;
   }
   const codexRateLimits = buildCodexRateLimits(sessions);
 
