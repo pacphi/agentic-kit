@@ -2,9 +2,11 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { sandboxHome, rmrf } from './helpers/home-sandbox.mjs';
+import { isolateProject, REPO_ROOT } from './helpers/project-isolation.mjs';
 
 const home = sandboxHome('ak-setup-host-rerecord');
 after(() => rmrf(home));
+isolateProject('ak-setup-host-rerecord');
 const setup = await import('../../src/commands/setup.mjs');
 const cfg = { integrations: { hosts: { claude: false, codex: true, opencode: false } } };
 
@@ -44,7 +46,7 @@ test('setup run passes its host lifecycle through the machine setup boundary', a
   let received;
   await setup.run({
     flags: { 'dry-run': true, minimal: true, 'no-aqe': true, 'no-ruvnet-brain': true, 'no-agent-browser': true, yes: true },
-    pkgRoot: process.cwd(),
+    pkgRoot: REPO_ROOT,
     deps: { hostLifecycle: lifecycle },
     machineSetup: async args => { received = args.deps?.hostLifecycle; return false; },
   });
