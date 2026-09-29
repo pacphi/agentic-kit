@@ -1,5 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { registerHooks } from 'node:module';
 import { sandboxHome, rmrf } from './helpers/home-sandbox.mjs';
 
 const home = sandboxHome('ak-setup-host-rerecord');
@@ -48,4 +49,56 @@ test('setup run passes its host lifecycle through the machine setup boundary', a
     machineSetup: async args => { received = args.deps?.hostLifecycle; return false; },
   });
   assert.equal(received, lifecycle);
+});
+
+test('real run_machine passes injected lifecycle to the host installation loop', async () => {
+  const stubs = new Map([
+    ['../lib/versions.mjs', "export const installedVersion = () => '3.48.0'; export const cmpVersions = () => 0;"],
+    ['../lib/heal.mjs', "export const healNatives = async () => ({ ok: true, detail: 'stub' }); export const healAidefence = async () => ({ ok: true, detail: 'stub' });"],
+    ['../lib/exec.mjs', "export const have = async () => false; export const run = async () => { throw Error('real command reached'); };"],
+    ['../lib/providers.mjs', `
+      export const HOSTS = [{ id: 'codex', pkg: '@openai/codex' }];
+      export const hostInstallState = async () => { throw Error('default host probe reached'); };
+      export const installHost = async () => { throw Error('default installer reached'); };
+      export const collectIntegrationFacts = async () => { throw Error('default facts collector reached'); };
+      export const migrateRetiredRoutesInConfig = () => {};
+      export const printActivityRoutingTable = () => {};
+      export const convergeProviderStack = () => {};
+      export const applySetupHostFlags = () => {};
+      export const guidanceContext = () => {};
+      export const reportRetiredRouteChanges = () => {};
+    `],
+    ['../lib/adapters/lifecycle-registry.mjs', `
+      export const hostsWithLifecycle = () => [];
+      export const lifecycleAdapterFor = () => { throw Error('host lifecycle reached'); };
+      export const lifecycleExecutionEnabled = () => false;
+      export const detectionBinFor = () => { throw Error('host lifecycle reached'); };
+    `],
+    ['../lib/ruflo-components/apply.mjs', "export const reconcileRufloComponents = async () => { throw Error('components reached'); };"],
+    ['./status/sections/ruflo-components.mjs', "export const componentResultReport = () => [];"],
+  ]);
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (context.parentURL?.includes('/src/commands/setup.mjs?b2-machine') && stubs.has(specifier)) {
+        return { url: `data:text/javascript,${encodeURIComponent(stubs.get(specifier))}`, shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+  const isolatedSetup = await import('../../src/commands/setup.mjs?b2-machine');
+  const sentinel = new Error('injected host lifecycle reached');
+  const machineCfg = {
+    agentBrowser: false, aqe: false, ruvnetBrain: false, security: false,
+    integrations: { hosts: { codex: true } },
+  };
+  let calls = 0;
+  await assert.rejects(isolatedSetup.run_machine({
+    flags: { yes: true }, cfg: machineCfg, pkgRoot: home,
+    deps: { hostLifecycle: {
+      installState: async () => { calls++; throw sentinel; },
+      install: async () => { throw Error('injected installer reached'); },
+      collectFacts: async () => { throw Error('injected facts reached'); },
+    } },
+  }), error => error === sentinel);
+  assert.equal(calls, 1);
 });
