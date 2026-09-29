@@ -2,9 +2,13 @@
 
 ## Status
 
-Research snapshot: 2026-09-28, `e2f9dcae0554ff63921df618a819fd5e6afe80d2`, macOS Darwin 27.0.0, Node 26.4.0; Node 22.22.3 used for CLI checks. Proposed behavior is **list-only for abandoned sibling roots on macOS, Linux and Windows**. No candidate establishes complete descendant liveness. This uses B9-R5's explicit fallback, preserves B9-R1–R8, and introduces no native sweeper or deletion authority.
+**Research complete.** The selected list-only policy was implemented and independently
+reviewed in the [execution plan](2026-09-28-plan-runner-hygiene.md), through `e0fcc2eb`.
+The remainder of this document preserves the initial research snapshot and its limits.
 
-The [execution plan](2026-09-28-runner-hygiene.md) maps subsequent work. Raw commands, JSON results, full lexical census, counts and literal experiment paths are retained in ignored `.superpowers/sdd/2026-09-28-runner-hygiene/`. No production/test code changed. Current creator lifecycles are fully classified below; native Windows/Linux behavior remains explicitly unmeasured.
+Research snapshot: 2026-09-28, `e2f9dcae0554ff63921df618a819fd5e6afe80d2`, macOS Darwin 27.0.0, Node 26.4.0; Node 22.22.3 used for CLI checks. Selected behavior is **list-only for abandoned sibling roots on macOS, Linux and Windows**. No candidate establishes complete descendant liveness. This uses B9-R5's explicit fallback, preserves B9-R1–R8, and introduces no native sweeper or deletion authority.
+
+The [execution plan](2026-09-28-plan-runner-hygiene.md) maps subsequent work. Raw commands, JSON results, full lexical census, counts and literal experiment paths are retained in ignored `.superpowers/sdd/2026-09-28-runner-hygiene/`. No production/test code changed during this research unit. Creator lifecycles at that baseline are fully classified below; native Windows/Linux behavior remains explicitly unmeasured.
 
 ## Verified runner and creator behavior
 
@@ -36,7 +40,7 @@ Literal Windows temp paths in ruflo-memory-location tests are injected path-clas
 
 ## The fourteen reported post-runner leaks
 
-The [archived premise table](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md#premise-verification-done-by-the-planner-tasks-carry-the-evidence-forward) records fourteen newer folders by prefix. These are historical observations, not fourteen reproduced failures today.
+The [archived premise table](2026-09-28-superpowers-plan-branch-9-follow-ups.md#premise-verification-done-by-the-planner-tasks-carry-the-evidence-forward) records fourteen newer folders by prefix. These are historical observations, not fourteen reproduced failures today.
 
 | Historical entries | Attributed creator and cleanup | What can be concluded |
 |---|---|---|

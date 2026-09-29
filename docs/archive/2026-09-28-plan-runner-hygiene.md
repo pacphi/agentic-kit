@@ -2,19 +2,38 @@
 
 ## Status
 
-Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Tasks 10/5/7 and Task 11 were independently accepted. Task 12 adds guarded `focus <files…>` and a bounded POSIX interrupted-run proof: a completed focus run retains an interrupted root while its child lives, after that child exits, and while another runner is live. Default sibling handling remains list-only on every platform; native Windows/Linux behavior is unmeasured. No backlog removal, push, PR or merge has occurred. The creator census is complete: 647 sites classified, zero unresolved current lifecycles.
+**Implemented and independently reviewed**, captured before PR integration on 2026-09-29.
+Code head `e0fcc2eb` passed all local unit, UI, typecheck, lint, complexity, Markdown,
+build and internal-link gates. Unit results: 5,947 passed, zero failed, six native
+Windows-only skips; coverage 94.33% lines, 83.27% branches and 93.47% functions.
+System Chrome passed 495 dashboard checks and 15 Node UI tests. Native Windows
+and Linux Chrome proof remain the feature PR's CI gate at this capture point.
 
-LQ1 source inspection refutes the claimed missing selector propagation: the runner copies its input environment and removes only `FORCE_COLOR`. A guarded-child sentinel regression is green on the original implementation and fails when that copy is removed. LQ4 now uses an explicit Chrome launch environment with a private home and temp root; the local macOS system Chrome passed the full guarded UI suite (495 dashboard checks, 15 Node UI tests). Guarded unit, TypeScript and targeted ESLint gates passed. Native Windows and Linux Chrome behavior remains unmeasured.
+Delivered: the About renderer regression, exact concurrent-writer exceptions,
+owner records and guarded focused runs, list-only sibling handling on every platform,
+Chrome environment isolation, tool-selector propagation regression, and owned-process
+exit/cancellation checks. A participating test acquires a run-bound hold before launching
+its children; uncertainty retains its own fixture and the enclosing run root. Holds do
+not discover unregistered descendants or authorize sibling removal.
 
-The Windows smoke lifetime follow-up uses a held fork and parent close acknowledgment. The smoke waits for the fork's `close` or `error`, checks its exit status, and establishes both exits before sandbox removal; uncertain exits retain the sandbox. A bounded pre-release observation detects early parent exit, and a local removed-wait mutation fails the focused test. The guarded suite also covers fork failure, stalled-fork cleanup, and launch failure. This establishes the lifecycle gap locally; native Windows CI remains the required platform proof for the reported `EPERM`.
+Task 13's immutable inventory and literal-path list were independently reviewed against
+snapshot `c4aa2015ccd66c47f99f9204d0444faac007e83e9a8b709ddcee04791819e6bb`:
+33,978 entries before the runner cutoff, four afterward and three legacy ownerless roots;
+27 unattributed, 21 recent and one lsof-matched entry were retained separately. The private
+handoff contains machine paths and stays outside git. Age, prefix attribution and lsof
+absence do not establish deletion safety. No backlog removal was performed.
 
-Round 2 review found that local sandbox retention alone did not stop the guarded runner from removing its own root after a failing test. The runner now prepares a private hold directory before running commands. The smoke acquires a run-bound hold before launching its owned processes and releases it only after both exits are established. An unresolved or unreadable hold retains the own root, while clean runs and ordinary failures still remove it. Guarded tests prove retention with a live bounded child, parallel holds, and exit precedence. Native Windows CI is still pending.
+The source-bound research census recorded 647 sites in 279 files at its stated baseline;
+it does not count later edits or prove historical leak causes. LQ-1's propagation-defect
+premise was refuted, and a mutation-tested regression preserves the existing behavior.
+Final review found one cancellation-order defect; `e0fcc2eb` fixed it and passed scoped
+rereview. Releases, global installation and the aggregate main merge remain separately gated.
 
 ## Contract and dependencies
 
-The [v2 scope](2026-09-28-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.
+The [v2 scope](../plans/2026-09-28-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.
 
-The [cleanup design](2026-09-28-test-temp-folder-cleanup-design.md) selects B9-R5's explicit list-only fallback. Task 11 must not interpret a dead PID, empty process group, empty registry or empty handle scan as proof of abandonment. Task 12 must keep the interrupted root even after its known child exits on list-only platforms. This conditions the archived example's removal assertion; it does not relax B9-R5.
+The [cleanup design](2026-09-28-research-test-temp-folder-cleanup.md) selects B9-R5's explicit list-only fallback. Task 11 must not interpret a dead PID, empty process group, empty registry or empty handle scan as proof of abandonment. Task 12 must keep the interrupted root even after its known child exits on list-only platforms. This conditions the archived example's removal assertion; it does not relax B9-R5.
 
 ## File, test and dependency map
 
