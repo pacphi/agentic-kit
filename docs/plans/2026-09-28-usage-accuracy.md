@@ -36,7 +36,12 @@ retain their original marker but cannot contribute incompatible day/punchcard ro
 source health reports `timezoneCacheEntriesExcluded`. Unset `TZ` uses the runtime's
 resolved machine zone; an unresolved zone declines cache and aggregate-memo reuse.
 Schema remains 26, preserving Unit 15's independent OpenCode cost marker. Unit 13
-awaits independent review before Unit 14.
+is accepted. Unit 14 adds count-only Claude record coverage for known handled,
+known ignored, unknown, invalid-type and malformed JSON lines. A v26 cache entry
+without those counters reparses; unknown or malformed records degrade source
+health without changing message usage or cost. The bounded real-data sample and
+focused verification are in the ignored task14 handoff report. Unit 14 awaits
+independent review before Unit 16.
 
 Pricing retains its existing local `row.day` contract (`usage-parsers.localDay`,
 `pricing.costOf`, and the cache-saving probes documented in usage metrics). Cold

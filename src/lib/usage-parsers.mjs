@@ -792,13 +792,33 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
   }
 }
 
+// Established Claude Code bookkeeping records with no message usage. New
+// record types are never added implicitly to this list.
+const CLAUDE_IGNORED_RECORD_TYPES = new Set(['bridge-session', 'file-history-snapshot', 'queue-operation',
+  'atis-latch', 'last-prompt', 'attachment', 'mode', 'permission-mode',
+  'agent-name', 'agent-setting', 'system', 'progress', 'summary']);
+function claudeRecordCounter(type) {
+  if (typeof type !== 'string' || !type) return 'invalidTypeRecords';
+  if (type === 'user' || type === 'assistant' || type === 'cost-state' || type === 'ai-title') return 'knownHandledRecords';
+  return CLAUDE_IGNORED_RECORD_TYPES.has(type) ? 'knownIgnoredRecords' : 'unknownRecords';
+}
+function* knownClaudeLines(raw, stats) {
+  for (const e of jsonLines(raw, stats)) {
+    const counter = claudeRecordCounter(e.type);
+    stats[counter]++;
+    if (counter !== 'invalidTypeRecords' && counter !== 'unknownRecords') yield e;
+  }
+}
+
 /**
- * Parse one Claude transcript. Returns `{ session, turns }`; `turns` is only
- * populated when `withTurns` (the reader path) — the scan path does not need
- * message bodies and holding them would balloon memory over 3,000 files.
+ * Parse one Claude transcript. Returns `{ session, turns, parseStats }`;
+ * `turns` is only populated when `withTurns` (the reader path) — the scan path
+ * does not need message bodies and holding them would balloon memory.
  */
 export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = null }) {
   const rec = blankSession(id, 'claude');
+  const parseStats = { knownHandledRecords: 0, knownIgnoredRecords: 0,
+    unknownRecords: 0, invalidTypeRecords: 0, malformedRecords: 0 };
   rec.claudeMessages = [];
   rec.claudeMessageCoverage = { firstAtMs: null, lastAtMs: null, missingTimestampMessages: 0 };
   rec.sessionOrigin = usageRecordOrigin(raw, 'claude');
@@ -811,7 +831,7 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
   // Assistant lines staged per API message id — see stageClaudeMessage.
   const msgState = { groups: new Map(), seq: 0 };
 
-  for (const e of jsonLines(raw)) {
+  for (const e of knownClaudeLines(raw, parseStats)) {
     if (e.type === 'cost-state') {
       rec.claudeCostState = recordClaudeCostState(rec.claudeCostState, e, id);
       continue;
@@ -847,7 +867,7 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
 
   rec.title = maskSecrets(titleState.aiTitle || clip(titleState.firstPrompt)) || '(untitled)';
   if (rec.project === 'unknown') applyProject(rec, projectLabel(null, dirName));
-  return { session: seal(rec), turns };
+  return { session: seal(rec), turns, parseStats };
 }
 
 function codexParseStats() {

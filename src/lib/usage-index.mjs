@@ -190,6 +190,8 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // The unreleased v26 migration also records per-turn imported exclusion evidence.
 // A v26 Claude entry written before cost-state support lacks `claudeCostState`;
 // reparse that entry in place rather than bumping the unreleased schema again.
+// Claude record coverage is also added within v26: entries without its count-only
+// parseStats reparse, so a legacy cache never manufactures a zero unknown count.
 export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
 // OpenCode cost interpretation changed within schema 26. This entry-level
 // marker distinguishes a new parse from an older coalesced row, including
@@ -371,6 +373,37 @@ function attachTelemetryHealth(health, common, diagnostics = health.diagnostics)
 function claudeParseHealth(root, common) {
   if (root.status !== 'ok' || common.unitsSeen === common.unitsParsed) return root;
   return { ...root, status: 'degraded', reason: 'transcript-parse-incomplete' };
+}
+
+const CLAUDE_RECORD_COUNTERS = ['knownHandledRecords', 'knownIgnoredRecords',
+  'unknownRecords', 'invalidTypeRecords', 'malformedRecords'];
+function validClaudeRecordStats(stats) {
+  return stats && typeof stats === 'object' && !Array.isArray(stats)
+    && Object.keys(stats).length === CLAUDE_RECORD_COUNTERS.length
+    && CLAUDE_RECORD_COUNTERS.every((key) => Number.isSafeInteger(stats[key]) && stats[key] >= 0);
+}
+function emptyClaudeRecordDiagnostics() {
+  return { knownHandledRecords: 0, knownIgnoredRecords: 0, unknownRecords: 0,
+    invalidTypeRecords: 0, malformedRecords: 0 };
+}
+function addClaudeRecordDiagnostics(target, stats, provider) {
+  if (provider !== 'claude' || !validClaudeRecordStats(stats)) return;
+  for (const key of CLAUDE_RECORD_COUNTERS) target[key] += stats[key];
+}
+function claudeRecordCoverage(root, common, counts) {
+  const incomplete = root.status !== 'ok' || common.unitsSeen !== common.unitsParsed
+    || counts.unknownRecords > 0 || counts.invalidTypeRecords > 0 || counts.malformedRecords > 0;
+  return { ...counts, coverage: root.status === 'absent' || (root.status === 'ok' && common.unitsSeen === 0)
+    ? 'not-observed' : common.unitsParsed === 0 ? 'unknown' : incomplete ? 'incomplete' : 'complete' };
+}
+function finalizeClaudeRecordHealth(root, common, counts) {
+  const base = attachTelemetryHealth(claudeParseHealth(root, common), common);
+  const records = claudeRecordCoverage(root, common, counts);
+  const incompleteRecords = root.status === 'ok' && common.unitsSeen === common.unitsParsed
+    && records.coverage === 'incomplete';
+  return { ...base,
+    ...(incompleteRecords ? { status: 'degraded', reason: 'transcript-record-coverage-incomplete' } : {}),
+    diagnostics: { ...base.diagnostics, records } };
 }
 
 function defaultRoots() {
@@ -803,6 +836,7 @@ function withWindowLedger(entry, windowConfigDir) {
 function compatibleCostStateCache(c, hit) {
   return c.provider !== 'claude' || (Object.hasOwn(hit.session ?? {}, 'claudeCostState')
     && Object.hasOwn(hit.session ?? {}, 'claudeMessageCoverage')
+    && validClaudeRecordStats(hit.parseStats)
     && validClaudeMessageClaims(hit.session)
     && (!hit.session.claudeCostState || Object.hasOwn(hit.session.claudeCostState, 'startMs')));
 }
@@ -830,7 +864,7 @@ function withClaudeIdentityEligibility(session, candidate, cutoff) {
  *  bookkeeping — which is genuinely provider-specific (codex tracks file
  *  counts and yield diagnostics no other source has) — is not inlined into
  *  the generic scan loop's own complexity. */
-function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}, timeContext = localTimeContext()) {
+function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, claudeRecordDiagnostics, readLimits = {}, timeContext = localTimeContext()) {
   const hit = cache?.entries?.[c.file];
   // `updatedMs` exists only on OpenCode candidates (its rows are rewritten in
   // place, so created-time and count cannot see a finished turn); file-backed
@@ -854,6 +888,7 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
     || recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure });
   if (counted && commonDiagnostics[c.provider]) {
     recordTelemetryUnit(commonDiagnostics[c.provider], session);
+    addClaudeRecordDiagnostics(claudeRecordDiagnostics, parseStats, c.provider);
     if (c.provider === 'codex') {
       addTelemetryDiagnostics(commonDiagnostics.codex, {
         unknownKinds: parseStats?.unknownItemTypes,
@@ -1005,6 +1040,7 @@ async function scan(o = {}) {
   const entries = {};
   const records = [];
   const codexDiagnostics = emptyCodexDiagnostics();
+  const claudeRecordDiagnostics = emptyClaudeRecordDiagnostics();
   const commonDiagnostics = {
     claude: emptyTelemetryDiagnostics(),
     codex: emptyTelemetryDiagnostics(),
@@ -1015,7 +1051,7 @@ async function scan(o = {}) {
 
   notify(onProgress, { scanned: 0, total, phase: 'scan' });
   for (const c of candidates) {
-    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits, timeContext);
+    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics, claudeRecordDiagnostics, readLimits, timeContext);
     if (session) {
       entries[c.file] = {
         ...key, session,
@@ -1070,7 +1106,7 @@ async function scan(o = {}) {
   });
   result.sourceHealth = {
     claude: {
-      ...attachTelemetryHealth(claudeParseHealth(claudeHealth, commonDiagnostics.claude), commonDiagnostics.claude),
+      ...finalizeClaudeRecordHealth(claudeHealth, commonDiagnostics.claude, claudeRecordDiagnostics),
       identityCoverage: { horizonDays: identityDays,
         horizonCoversComparison: unknownEligibility === 0 && 2 * requestedDays <= MAX_CLAUDE_IDENTITY_DAYS,
         horizonCoversRequestedHistory: unknownEligibility === 0 && Number(lookbackDays ?? days) <= identityDays,
