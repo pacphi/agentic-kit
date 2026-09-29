@@ -4,9 +4,45 @@
 
 ## Status
 
-Active, not yet started. The §1 decision batch is awaiting the maintainer's answers. D-2's first
-release (`4.0.0-alpha.60`, carrying #263's breaking changes) is being cut ahead of branch V1, per
-D-2 option A.
+Active under the maintainer-confirmed [develop execution plan](2026-09-28-remediation-v2-develop-execution.md)
+(2026-09-28). V1 #267 and V2 #264/#266/#269 are delivered; #262 still needs residual
+Windows timing evidence. #251 is done, and the alpha.60 release commit is on `main`.
+Publication and global installation were not verified in the execution-plan baseline.
+The historical decision batch and schedule below remain as scope/evidence references;
+the approved execution section governs wherever their authority or timing differs.
+
+### Approved execution and precedence
+
+The [confirmed execution plan](2026-09-28-remediation-v2-develop-execution.md) governs
+branch sources, integration, releases, operations and completion. All Appendix A and B
+rows remain in scope. In particular:
+
+- V1 and both V2 taxonomy PRs are already delivered; use their evidence and do not
+  replay their implementation. #262 remains open until its ten-run before/after
+  evidence is recovered or the missing evidence is explicitly reported.
+- Bootstrap establishes `develop` from a verified current `main`. Every new feature
+  branch starts from current `develop`; every feature PR targets `develop`. The
+  controller may squash-merge only after required CI, including Windows, and
+  independent review pass. The aggregate `develop` → `main` PR is opened for human
+  review and left unmerged. References below to cutting branches from, merging into,
+  or fast-forwarding `main` for intermediate work mean `develop` for new work.
+- D-1's cleanup language grants no automatic deletion. Preserve existing work and
+  unit-commit/evidence records. Real store operations, upstream submissions, paid
+  runs, and destructive cleanup retain their explicit approval gates.
+- The alpha.60 commit is already on `main`; verify its actual published state before
+  any release decision. D-2's intermediate and close-out release schedule, including
+  alpha.61, and §2's install prerequisite are deferred until after human approval of
+  the final main PR and an independent release gate. Do not publish, install or sync
+  a new artifact merely to satisfy the historical schedule.
+- D-3 through D-19 follow the confirmed execution plan's dispositions and current
+  evidence. D-3 and D-8 have landed. Execution uses bounded concurrency and exact
+  worktree ownership, rather than the original five-way Wave 2 schedule.
+- For review readiness, reconcile every Appendix row to delivered evidence, an
+  approved disposition, a named open issue or a separately gated operation. Keep
+  the final main PR open. DoD §6's publication, global install, live-store work,
+  machine cleanup, future release dispatch and archive/memory operations are
+  operational completion gates after human review, not prerequisites to opening
+  that PR. Codex personal-memory updates require a direct user request.
 
 **Goal:** Finish everything left over from [remediation program v1](2026-09-26-remediation-program.md) in seven branches. The maintainer's attention goes into one decision sitting up front and a short list of named interrupts. v1 took about 28 attended hours; v2 aims for under 4 (§4 adds it up).
 
