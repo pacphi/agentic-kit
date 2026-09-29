@@ -86,6 +86,66 @@ function sandbox({ sessions = [], messages = [] } = {}) {
 
 const opts = (sb, extra = {}) => ({ days: 14, now: NOW, roots: sb.roots, cachePath: sb.cachePath, deps: deps(), ...extra });
 
+test('cached OpenCode child fingerprints cannot enter current or previous prompt projections', async () => {
+  const current = NOW - DAY;
+  const prior = NOW - 15 * DAY;
+  const sb = sandbox({
+    sessions: [
+      { id: 'parent', directory: '/x', title: 'parent', timeCreated: current },
+      { id: 'child', directory: '/x', title: 'child', parentId: 'parent', timeCreated: current },
+      { id: 'prior-child', directory: '/x', title: 'prior child', parentId: 'parent', timeCreated: prior },
+    ],
+    messages: [
+      userMsg('pu', 'parent', current), assistantMsg('pa', 'parent', current + 1000, { cost: 0.2 }),
+      userMsg('cu', 'child', current), assistantMsg('ca', 'child', current + 1000, { provider: 'alpha', cost: 0.3 }),
+      userMsg('ou', 'prior-child', prior), assistantMsg('oa', 'prior-child', prior + 1000, { cost: 0.4 }),
+    ],
+  });
+  try {
+    const db = new DatabaseSync(sb.dbFile);
+    const insert = db.prepare('INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const [id, messageId, sessionId, at] of [
+      ['p1', 'pu', 'parent', current], ['p2', 'cu', 'child', current], ['p3', 'ou', 'prior-child', prior],
+    ]) insert.run(id, messageId, sessionId, at, at, JSON.stringify({ type: 'text', text: 'Run the tests' }));
+    db.close();
+    const options = opts(sb, { lookbackDays: 28, previous: true, prompts: true });
+    const cold = await buildIndex(options);
+    assert.equal(cold.totals.typedPrompts, 1);
+    assert.equal(cold.totals.humanPrompts, 1);
+    assert.equal(cold.totals.cost, 0.5);
+    assert.equal(cold.sessions.find((s) => s.id === 'child').typedPrompts, 0);
+    assert.equal(cold.previous.totals.typedPrompts, 0);
+    assert.deepEqual(cold.promptPatterns.corpus, { fingerprints: 1, typed: 1 });
+    assert.deepEqual(Object.keys(cold.promptBaselines), [], 'a prior child alone does not define an operator baseline');
+    const selected = await readSession('child', { roots: sb.roots, deps: deps() });
+    assert.equal(selected.meta.sidechain, true);
+    assert.equal(selected.meta.cost, 0.3);
+    assert.equal(selected.turns[0].text, 'Run the tests');
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    const parentFP = cache.entries['opencode://parent'].session.promptFPs[0];
+    for (const id of ['child', 'prior-child']) {
+      cache.entries[`opencode://${id}`].session.promptFPs = [parentFP];
+    }
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const warm = await buildIndex(options);
+    assert.equal(warm.totals.typedPrompts, 1);
+    assert.equal(warm.sessions.find((s) => s.id === 'child').typedPrompts, 0);
+    assert.equal(warm.previous.totals.typedPrompts, 0);
+    assert.deepEqual(warm.promptPatterns.corpus, { fingerprints: 1, typed: 1 });
+    assert.deepEqual(warm.promptPatterns.exactRepeats, []);
+    assert.deepEqual(Object.keys(warm.promptBaselines), []);
+    assert.equal(warm.totals.cost, 0.5);
+    assert.equal(warm.byProvider.alpha.cost, 0.3);
+    assert.equal(warm.byProvider.alpha.tokens, 1320);
+    assert.equal(warm.byProvider.opencode.cost, 0.2);
+    assert.equal(warm.totals.tokens, 2640);
+    assert.equal(warm.sessions.find((s) => s.id === 'child').threadSource, 'subagent');
+    assert.equal(JSON.parse(fs.readFileSync(sb.cachePath, 'utf8')).entries['opencode://child'].session.promptFPs.length, 1,
+      'the warm scan reused the old cached record, so aggregation must defend itself');
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
 test('scan aggregates opencode sessions: host bucket, provider bucket, tokens, and OBSERVED cost preferred over the pricing stub', async () => {
   const at = NOW - DAY;
   const sb = sandbox({

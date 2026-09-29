@@ -195,15 +195,16 @@ function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage })
   // Opens the prompt→assistant-message latency window; closed by the next
   // recordAssistantMessage (mirrors parseClaude/parseCodex's latState).
   rec.pendingPromptMs = at;
-  // Every opencode user message IS a prompt-kind turn (this source carries no
-  // harness-injected user rows), so it always fingerprints — on BOTH paths,
-  // which is why the scan path now loads user text parts (see loadTextParts).
-  // I1: that makes this the WIDEST of the three fingerprinted populations —
+  // Main-session user messages are prompt-kind turns. A child session's user
+  // messages are agent-written, so they do not enter the prompt fingerprint
+  // layer, though its prompts and usage remain accounted for on BOTH paths.
+  // The scan path loads user text parts for main-session fingerprints.
+  // I1: main sessions are the widest of the three fingerprinted populations —
   // claude gates on userTurnKind, codex additionally on
-  // CODEX_MACHINE_ENVELOPE_RE, opencode on nothing. Compare per provenance tag,
+  // CODEX_MACHINE_ENVELOPE_RE, opencode on no further turn kind. Compare per provenance tag,
   // never in total.
   const text = messagePartsText(partsByMessage, rowId, ['text']);
-  notePromptFingerprint(rec, text, 'prompt');
+  if (!rec.sidechain) notePromptFingerprint(rec, text, 'prompt');
   if (!withTurns) return;
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
 }

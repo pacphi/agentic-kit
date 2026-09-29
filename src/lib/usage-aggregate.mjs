@@ -339,7 +339,9 @@ function firstBilledDay(rec) {
  * already a managed artifact.
  */
 function v16Projection(rec) {
-  const fps = rec.promptFPs;
+  // Schema-26 caches can still contain fingerprints written before OpenCode
+  // child sessions were excluded. Treat those as measured zero on consumption.
+  const fps = rec.host === 'opencode' && isSubagentSession(rec) ? [] : rec.promptFPs;
   if (!Array.isArray(fps)) {
     return { typedPrompts: null, tapPrompts: null, _typedTokens: [], _questions: 0, _personas: 0 };
   }
@@ -430,6 +432,7 @@ function buildPromptBaselines(records, { days, now }) {
   const endDay = localDay(now - days * DAY_MS);
   const perHost = Object.create(null);
   for (const rec of records) {
+    if (rec?.host === 'opencode' && isSubagentSession(rec)) continue;
     if (!rec || !Array.isArray(rec.promptFPs)) continue;
     const day = firstBilledDay(rec);
     if (day === null || day < startDay || day >= endDay) continue;
@@ -522,6 +525,7 @@ function decoratePromptFP(fp, rec, day) {
 function windowFingerprints(records, cutoff) {
   const out = [];
   for (const rec of records) {
+    if (rec?.host === 'opencode' && isSubagentSession(rec)) continue;
     if (!rec?.responses || !Array.isArray(rec.promptFPs)) continue;
     if (rec.end == null || rec.end < cutoff) continue;
     const day = firstBilledDay(rec);

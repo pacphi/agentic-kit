@@ -165,8 +165,8 @@ second time. The cache marker extends cost-trust-v2 with observations-v1; schema
 The bounded local metadata sample contained three sessions, no compaction parts,
 no in-flight markers and no populated session counters. Its database digest was
 unchanged. This is not positive affected-user evidence; synthetic fixtures cover
-the supported and failure cases. Unit 18 awaits independent review; Unit 19 has
-not started. Detailed commands and evidence are in the ignored task18 report.
+the supported and failure cases. Detailed commands and evidence are in the
+ignored task18 report.
 
 
 Unit 18 review fixes bind warm reuse to a SHA-256 digest of the selected session's
@@ -180,4 +180,23 @@ whole-database payload hash or prompt-body hash is used.
 Response-free request evidence now remains in the current/previous compaction
 bounds. Refused acquisitions contribute only their unknown bound, preserving the
 existing rule that they do not become ordinary zero-cost session rows. Neither
-path manufactures responses, tokens or billing. Review fixes await rereview.
+path manufactures responses, tokens or billing. Unit 18 was accepted before
+Unit 19 began.
+
+
+## Unit 19 candidate: OpenCode child prompt fingerprints
+
+OpenCode sessions with a nonempty `parent_id` retain prompts, turns, tokens,
+provider costs and subagent classification, but produce no prompt fingerprints.
+Both scan and selected-session parsing apply this rule. Aggregation also excludes
+old cached child fingerprints from typed-prompt metrics, current prompt patterns
+and historical baselines; the cached bytes remain until normal invalidation.
+Main-session behavior and Unit 18 cache identity, timezone and observation marker
+checks remain intact. Schema 26 is unchanged.
+
+Synthetic native-schema tests cover matching and distinct parent/child text,
+child-only historical windows, absent parent rows, scan/read parity, stale warm
+cache consumption and retained provider usage. The prior bounded preflight found
+no child sessions; it does not establish current-user impact. Unit 19 awaits
+independent review before Unit 24. Commands and results are in the ignored
+task19 report.

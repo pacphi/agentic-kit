@@ -397,6 +397,59 @@ test('parseSession fingerprints user messages on the scan path, not only withTur
   rm(d);
 });
 
+test('an OpenCode child keeps its prompt and usage but never fingerprints its user turns', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [
+        { id: 'parent', directory: '/x', title: 'parent' },
+        { id: 'child', directory: '/x', title: 'child', parentId: 'parent' },
+        { id: 'different-child', directory: '/x', title: 'other', parentId: 'parent' },
+      ],
+      messages: [
+        userMsg('pu', 'parent', T), assistantMsg('pa', 'parent', T + 1000, { cost: 0.2 }),
+        userMsg('cu', 'child', T), assistantMsg('ca', 'child', T + 1000, { cost: 0.3 }),
+        userMsg('du', 'different-child', T),
+      ],
+      parts: [
+        { id: 'pp', messageId: 'pu', sessionId: 'parent', at: T, data: { type: 'text', text: 'Run the tests' } },
+        { id: 'cp', messageId: 'cu', sessionId: 'child', at: T, data: { type: 'text', text: 'Run the tests' } },
+        { id: 'dp', messageId: 'du', sessionId: 'different-child', at: T, data: { type: 'text', text: 'Review the database migration' } },
+      ],
+    });
+    for (const withTurns of [false, true]) {
+      const parent = parseSession({ dbFile, id: 'parent', withTurns }).session;
+      const child = parseSession({ dbFile, id: 'child', withTurns }).session;
+      assert.equal(parent.promptFPs.length, 1);
+      assert.deepEqual(child.promptFPs, []);
+      assert.deepEqual(parseSession({ dbFile, id: 'different-child', withTurns }).session.promptFPs, []);
+      assert.equal(child.prompts, 1);
+      assert.equal(child.sidechain, true);
+      assert.equal(child.threadSource, 'subagent');
+      assert.equal(child.usage[0].costObserved, 0.3);
+    }
+  } finally { rm(d); }
+});
+
+test('only a nonempty parent_id is child evidence, even when the parent row is absent', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [
+        { id: 'orphan', directory: '/x', title: 'orphan', parentId: 'missing' },
+        { id: 'blank', directory: '/x', title: 'blank', parentId: '' },
+      ],
+      messages: [userMsg('ou', 'orphan', T), userMsg('bu', 'blank', T)],
+    });
+    const orphan = parseSession({ dbFile, id: 'orphan' }).session;
+    const blank = parseSession({ dbFile, id: 'blank' }).session;
+    assert.equal(orphan.sidechain, true);
+    assert.deepEqual(orphan.promptFPs, []);
+    assert.equal(blank.sidechain, false);
+    assert.equal(blank.promptFPs.length, 1);
+  } finally { rm(d); }
+});
+
 test('a user message with no text part fingerprints as an attachment-only control turn', () => {
   const d = tmp();
   const dbFile = buildDb(path.join(d, 'opencode.db'), {
