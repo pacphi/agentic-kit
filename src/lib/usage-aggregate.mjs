@@ -1,4 +1,4 @@
-import { rowCostEvidence, sessionCostEvidence, acquisitionSummary } from './usage-cost.mjs';
+import { rowCostEvidence, sessionCostEvidence, acquisitionSummary, reconcileClaudeCostState } from './usage-cost.mjs';
 import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 import { classifySessionSurface } from './session-surface.mjs';
 // usage-aggregate.mjs — pure arithmetic over ALREADY-PARSED session records:
@@ -895,7 +895,7 @@ function sessionProviderIdentity(rec) {
   return { provider, providerProvenance: provider ? 'observed' : 'unknown' };
 }
 
-function buildSessionRow(rec, usage, verdict) {
+function buildSessionRow(rec, usage, verdict, deps) {
   const { input, output, cacheRead, cacheWrite, cost, cacheSaved, firstDay } = usage;
   return {
     id: rec.id, host: rec.host ?? rec.provider,
@@ -915,6 +915,7 @@ function buildSessionRow(rec, usage, verdict) {
     tokens: input + output + cacheRead + cacheWrite,
     cost: round(cost),
     costEvidence: usage.costEvidence,
+    claudeCostState: reconcileClaudeCostState(rec, deps),
     acquisitionCoverage: rec.acquisitionCoverage ?? null,
     // What the cache avoided for THIS session, so the window total is
     // auditable a row at a time rather than only in aggregate.
@@ -971,7 +972,7 @@ function buildSessionRows(records, { cutoff, endMs = null, deps, byDay, byModel,
       title: rec.title, skill: rec.skill, plugin: rec.plugin,
       tools: rec.tools, prompts: rec.prompts, responses: rec.responses,
     }) ?? {};
-    sessions.push(buildSessionRow(rec, usage, verdict));
+    sessions.push(buildSessionRow(rec, usage, verdict, deps));
   }
   return sessions;
 }
@@ -1479,6 +1480,7 @@ export function sessionPayload(rec, turns, deps) {
       // because fmtUsd(undefined) is the truthy string "$0.00".
       cost: sessionCost(rec, deps),
       costEvidence: sessionCostEvidence(rec, deps),
+      claudeCostState: reconcileClaudeCostState(rec, deps),
       acquisitionCoverage: rec.acquisitionCoverage ?? null,
       ...usage, tokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
     },

@@ -14,6 +14,7 @@ import { repoRoot } from './paths.mjs';
 import { windowAt } from './claude-window-ledger.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
+import { recordClaudeCostState } from './usage-cost.mjs';
 import { codexReplayPlan, isCodexReplayLine } from './codex-replay.mjs';
 import {
   newCodexUsageWalk, noteCodexWalkModel, noteCodexWalkResponse, walkCodexTokenCount, codexWalkRows,
@@ -227,6 +228,7 @@ export function blankSession(id, provider) {
     // count completed context replacements, never extra token spend.
     codexEffort: null, firstTokenMs: null, compactions: 0,
     compactionEvidence: { lowerBound: 0, upperBound: 0 },
+    claudeCostState: null,
     // v11: cross-host permission posture (usage-modes.normalizeMode), a
     // response-latency histogram, THIS session's own engaged seconds, model
     // context-window detail, and codex's explicit-abort count. Every field
@@ -785,6 +787,10 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
   const msgState = { groups: new Map(), seq: 0 };
 
   for (const e of jsonLines(raw)) {
+    if (e.type === 'cost-state') {
+      rec.claudeCostState = recordClaudeCostState(rec.claudeCostState, e, id);
+      continue;
+    }
     const ms = toMs(e.timestamp);
     if (e.type === 'ai-title') { if (typeof e.aiTitle === 'string') titleState.aiTitle = e.aiTitle; continue; }
     if (typeof e.attributionSkill === 'string' && !rec.skill) rec.skill = e.attributionSkill;

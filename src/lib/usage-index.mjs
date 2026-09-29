@@ -184,6 +184,8 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // responses whose provider reported no tokens (`tokensUnreported`). None can be
 // corrected in place, so every cached OpenCode record re-parses.
 // The unreleased v26 migration also records per-turn imported exclusion evidence.
+// A v26 Claude entry written before cost-state support lacks `claudeCostState`;
+// reparse that entry in place rather than bumping the unreleased schema again.
 export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
 
 const DAY_MS = 86_400_000;
@@ -762,6 +764,10 @@ function withWindowLedger(entry, windowConfigDir) {
   return { ...entry, windowConfigDir, windowStat: statClaudeWindowLedger(windowConfigDir, entry.id) };
 }
 
+function compatibleCostStateCache(c, hit) {
+  return c.provider !== 'claude' || Object.hasOwn(hit.session ?? {}, 'claudeCostState');
+}
+
 /** Parse (or reuse the cached parse of) one scan candidate, updating the
  *  common cross-host telemetry diagnostics and codex's extra per-file
  *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
@@ -777,6 +783,7 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
   const cacheHit = !!(hit && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
     && hit.upd === updated.upd
     && ledgerStillValid(hit, c.windowStat)
+    && compatibleCostStateCache(c, hit)
     && (c.provider !== 'codex' || hit.parseStats));
   const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null) };
   let session = cacheHit ? hit.session : null;

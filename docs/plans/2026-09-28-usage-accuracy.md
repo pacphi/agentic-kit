@@ -7,9 +7,10 @@
 
 ## Status
 
-Active. Units 1–9, 20 and 21 are accepted. Unit 10 captures bounded Codex
-effort declarations, host-observed first-token times and completed compactions
-in core usage records. It awaits independent review before Unit 11.
+Active. Units 1–10, 20 and 21 are accepted. Unit 11 captures Claude Code's
+latest valid cumulative `cost-state` checkpoint as a separate reconciliation
+signal. It compares only matching model and token populations, preserves
+message-derived cost totals, and awaits independent review before Unit 12.
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin
@@ -81,7 +82,7 @@ do not cover the reproduced failure.
 | 8 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-codex-attribution.test.mjs`, `usage-codex-large-rollout.test.mjs` |
 | 9 | `src/lib/usage-opencode.mjs`, `usage-aggregate.mjs`; parser row identity already exists | `tests/kit/usage-opencode.test.mjs`, `usage-index-opencode.test.mjs`, `usage-index.test.mjs` |
 | 10 | `src/lib/usage-parsers.mjs`, `usage-insights.mjs` | `tests/kit/usage-codex-attribution.test.mjs`, `usage-context.test.mjs` |
-| 11 | `src/lib/usage-parsers.mjs`, `usage-cost.mjs` | `tests/kit/usage-telemetry.test.mjs`, `usage-claude-window-pairing.test.mjs` |
+| 11 | `src/lib/usage-parsers.mjs`, `usage-cost.mjs`, `usage-aggregate.mjs`, `usage-index.mjs` | `tests/kit/usage-claude-cost-state.test.mjs`, `usage-claude-dedup.test.mjs`, `usage-index.test.mjs` |
 | 12 | `src/lib/usage-parsers.mjs`, `usage-index.mjs` | `tests/kit/usage-claude-dedup.test.mjs`, `usage-index.test.mjs` |
 | 13 | `src/lib/usage-index.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-index.test.mjs`, `usage-claude-window-pairing.test.mjs` |
 | 14 | `src/lib/usage-parsers.mjs`, `usage-aggregate.mjs` | `tests/kit/usage-index.test.mjs`, `usage-telemetry.test.mjs` |
