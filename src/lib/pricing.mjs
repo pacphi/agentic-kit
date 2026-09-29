@@ -6,9 +6,9 @@
 //
 // The cache multipliers are the whole point of this module. On a real corpus
 // ~96% of tokens are cache reads, which bill at 0.1× input for nearly every
-// model (0.025× on Fable 5.1 / Mythos 5.1, 0.05× on Opus 5.5 — per-entry
-// overrides, see below); pricing them as fresh input overstates cost by
-// roughly 10×, or 20–40× on those three. Cache-write premiums apply to Anthropic writes (1.25× for the 5-minute
+// model (0.025× on Fable 5.1 / Mythos 5.1, 0.05× on Opus 5.5 and GPT-6.1 Sol —
+// per-entry overrides, see below); pricing them as fresh input overstates cost by
+// roughly 10×, or 20–40× on those four. Cache-write premiums apply to Anthropic writes (1.25× for the 5-minute
 // tier, 2× for the 1-hour tier) and OpenAI GPT-5.6 and later; older OpenAI
 // models use the ordinary input rate.
 //
@@ -143,6 +143,16 @@ export const PRICES = {
   // field shows the knowledge cutoff instead). Standard rates, cached input 0.1x,
   // writes 1.25x, same >272K surcharge as Astra (unmodelled):
   // https://developers.openai.com/api/docs/models/gpt-6-sol and .../gpt-6-luna.
+  // GPT-6.1 Sol (a successor to GPT-6 Sol, on sale by 2026-09-29; OpenAI's pages
+  // carry no release-date field we could verify) lists the SAME $2/$10 and 1.25x
+  // writes, but reads cache at 0.05x ($0.10), half of GPT-6 Sol's 0.1x
+  // (https://developers.openai.com/api/docs/models/gpt-6.1-sol and
+  // .../api/docs/pricing, verified 2026-09-29). It needs its own key twice over:
+  // its id normalises to `gpt-6-1-sol`, which is not a token-boundary prefix of
+  // `gpt-6-sol`, so it would otherwise price at FALLBACK_PRICE ($3/$15,
+  // matched:false); and it must not inherit any 0.1x multiplier. >272K-token
+  // prompts (2x input/cache, 1.5x output) stay unmodelled, as for Sol and Astra.
+  'gpt-6.1-sol': openai(2, 10, { cacheReadMultiplier: 0.05, cacheWriteMultiplier: 1.25, asOf: '2026-09-29' }),
   'gpt-6-sol': openai(2, 10, { cacheWriteMultiplier: 1.25, asOf: '2026-09-23' }),
   'gpt-6-luna': openai(0.1, 0.5, { cacheWriteMultiplier: 1.25, asOf: '2026-09-23' }),
   'gpt-5.6-sol': openai(4, 20, { cacheWriteMultiplier: 1.25 }),
@@ -263,7 +273,7 @@ function periodOn(periods, day) {
  * never throws.
  *
  * `cacheReadMultiplier` defaults to the module-wide `CACHE_READ_MULTIPLIER`
- * unless the matched entry carries its own (Claude 5.1, Opus 5.5 or OpenAI Pro) —
+ * unless the matched entry carries its own (Claude 5.1, Opus 5.5, GPT-6.1 Sol or OpenAI Pro) —
  * see the `schedule()` comment in the table above.
  *
  * `day` (ISO `YYYY-MM-DD`) selects the rate IN EFFECT ON THAT DAY. Cost

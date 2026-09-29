@@ -303,6 +303,22 @@ test('GPT-6 Sol and Luna carry their published standard rates and write premium'
   assert.equal(priceFor('gpt-5.6-sol').key, 'gpt-5.6-sol', 'the GPT-5.6 namesake keeps its own rate');
 });
 
+// GPT-6.1 Sol shares Sol's $2/$10 but reads cache at 0.05x ($0.10), half of
+// Sol's 0.1x. Its id normalises to `gpt-6-1-sol`, which is NOT a token-boundary
+// prefix match of `gpt-6-sol`, so without its own key it would silently price at
+// FALLBACK_PRICE ($3/$15, matched:false).
+test('GPT-6.1 Sol resolves its own row: $2/$10, 0.05x cache reads, 1.25x writes', () => {
+  const p = priceFor('gpt-6.1-sol');
+  assert.equal(p.matched, true, 'must not fall to FALLBACK_PRICE');
+  assert.deepEqual([p.key, p.in, p.out, p.cacheReadMultiplier, p.asOf], ['gpt-6.1-sol', 2, 10, 0.05, '2026-09-29']);
+  for (const [counter, expected] of Object.entries({ input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 })) {
+    assert.ok(Math.abs(costOf({ model: 'gpt-6.1-sol', [counter]: M }) - expected) < 1e-12, counter);
+  }
+  assert.equal(priceFor('openai/gpt-6.1-sol').key, 'gpt-6.1-sol', 'namespaced id');
+  assert.equal(priceFor('gpt-6-sol').cacheReadMultiplier, 0.1, 'GPT-6 Sol keeps 0.1x');
+  assert.equal(priceFor('gpt-6-sol').key, 'gpt-6-sol');
+});
+
 // OpenCode and custom Codex providers record provider-namespaced ids. Matching
 // is by prefix, so before this the namespace sent them to the fallback rate.
 test('a provider-namespaced id is matched on its model segment', () => {
