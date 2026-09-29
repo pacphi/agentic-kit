@@ -317,8 +317,8 @@ processes — some pointed at `--workspace` directories that no longer exist
 daemon` and nothing ever stopped it, so each onboarded (or throwaway) workspace left
 a daemon running forever — and, more importantly, that daemon kept spawning
 **token-spending AI worker sessions** (see the
-[token-consumption incident](archive/2026-06-token-consumption-incident.md) and
-[recurrence](archive/2026-06-11-token-consumption-recurrence.md)).
+[token-consumption incident](2026-06-token-consumption-incident.md) and
+[recurrence](2026-06-11-token-consumption-recurrence.md)).
 Separately, the statusline footer used to spawn several `sqlite3` subprocesses on
 every render; that volume of captured subprocess output is what fills Claude Code's
 size-limited sandbox `tasks` tmpfs.

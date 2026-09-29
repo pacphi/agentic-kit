@@ -48,9 +48,8 @@ The twelve errors are confined to:
 - `2026-07-14-shell-kit-troubleshooting.md`: two original `archive/…` references;
 - `2026-08-16-artifact-host-extensibility-explainer.html`: two adapter-authoring references.
 
-The [archive index](README.md#original-location-links-retained-in-frozen-files) maps
-these to preserved historical or current destinations. They are consciously retained historical
-link limitations, not a claim that an all-archive link check is green. The normal repository link
+The [archive index](README.md#link-repair-2026-09-28) records the repaired historical or current
+destinations. The normal repository link
 job excludes the archive; the separate audit sweep deliberately included it.
 
 ## Validation and limits
