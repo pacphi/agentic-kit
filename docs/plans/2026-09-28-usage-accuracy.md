@@ -7,8 +7,9 @@
 
 ## Status
 
-Active. Units 1–8, 20 and 21 are accepted. Unit 9 implements OpenCode
-provider totals on this branch and awaits independent review before Unit 10.
+Active. Units 1–9, 20 and 21 are accepted. Unit 10 captures bounded Codex
+effort declarations, host-observed first-token times and completed compactions
+in core usage records. It awaits independent review before Unit 11.
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin

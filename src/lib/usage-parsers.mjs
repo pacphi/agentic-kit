@@ -223,6 +223,9 @@ export function blankSession(id, provider) {
     // rate-limit snapshot the rollout carried. Claude sessions keep the zero
     // and the null — absent, not unknown.
     reasoningOutput: 0, rateLimits: null,
+    // Codex host observations. Missing telemetry remains null; compactions
+    // count completed context replacements, never extra token spend.
+    codexEffort: null, firstTokenMs: null, compactions: 0,
     // v11: cross-host permission posture (usage-modes.normalizeMode), a
     // response-latency histogram, THIS session's own engaged seconds, model
     // context-window detail, and codex's explicit-abort count. Every field
@@ -904,6 +907,11 @@ function handleCodexTurnContext(rec, decoded, payload) {
     : payload.sandbox_policy;
   const m = normalizeMode({ host: 'codex', approvalPolicy: payload.approval_policy, sandboxPolicy: sandbox });
   if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
+  if (['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(payload.effort)) {
+    rec.codexEffort ??= { last: null, counts: {} };
+    rec.codexEffort.last = payload.effort;
+    rec.codexEffort.counts[payload.effort] = (rec.codexEffort.counts[payload.effort] ?? 0) + 1;
+  }
 }
 
 /** Normalize one token_count event's rate-limit windows (primary/secondary),
@@ -995,6 +1003,15 @@ function handleCodexTaskStarted(rec, latState, payload) {
  *  prompt-gap path would have discarded. A non-null `error` counts as an
  *  exception regardless of whether the fallback sample fires. */
 function handleCodexTaskComplete(rec, latState, payload) {
+  const first = payload.time_to_first_token_ms;
+  if (typeof first === 'number' && Number.isFinite(first) && first >= 0
+      && first <= MAX_LATENCY_SAMPLE_SECONDS * 1000) {
+    rec.firstTokenMs ??= { count: 0, total: 0, min: first, max: first, provenance: 'host-observed' };
+    rec.firstTokenMs.count++;
+    rec.firstTokenMs.total += first;
+    rec.firstTokenMs.min = Math.min(rec.firstTokenMs.min, first);
+    rec.firstTokenMs.max = Math.max(rec.firstTokenMs.max, first);
+  }
   const duration = Number(payload.duration_ms);
   if (latState.turnStartedAt !== null && Number.isFinite(duration)
     && duration / 1000 <= MAX_LATENCY_SAMPLE_SECONDS) {
@@ -1104,8 +1121,8 @@ const CODEX_TOOL_ITEM_TYPES = new Set([
 /** `item_completed` item types the host emits that are UNDERSTOOD and are
  *  neither a message nor a tool: model reasoning, sub-agent lifecycle notes,
  *  image views, extension calls, web searches and context compaction. They
- *  carry no usage or turn evidence this parser needs, so they are recognised
- *  and dropped. Without this list every scan raised the `unknown-item-types`
+ *  carry no token usage; a completed compaction is separately counted as
+ *  context evidence. Without this list every scan raised the `unknown-item-types`
  *  warning permanently (six kinds landed in the 32-kind cap), which taught
  *  readers to ignore the one diagnostic meant to flag a genuinely new shape.
  *  Only a type in NEITHER set is unknown. */
@@ -1141,6 +1158,7 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   if (decoded.generation === 'legacy') stats.legacyEvents++;
   else if (decoded.generation === 'item') stats.itemCompletedEvents++;
   if (decoded.unknownItemType) {
+    if (!replay && decoded.unknownItemType === 'ContextCompaction') usageState.itemCompactions++;
     // A type this parser tallies is a type it UNDERSTANDS. Recording it as an
     // unknown kind too made the four tool items simultaneously "tools" in the
     // scorecard and "unknown kinds" in sourceHealth — raising the
@@ -1176,8 +1194,12 @@ function processCodexLine(rec, turns, stats, titleState, usageState, latState, m
   const decoded = decodeCodexRecord(e);
   if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded, rawPayload(e)); return; }
   if (decoded.type === 'turnContext') {
-    handleCodexTurnContext(rec, decoded, rawPayload(e));
+    if (!isCodexReplayLine(usageState.boundary, e)) handleCodexTurnContext(rec, decoded, rawPayload(e));
     noteCodexWalkModel(usageState.walk, decoded.model);
+    return;
+  }
+  if (e.type === 'compacted') {
+    if (!isCodexReplayLine(usageState.boundary, e)) usageState.completedCompactions++;
     return;
   }
   if (e.type !== 'event_msg') return;
@@ -1281,7 +1303,8 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const ownership = newCodexTurnOwnership({ hasImports });
   let firstMeta = null;
   let genuineActivity = false;
-  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary, importOwnership: hasImports };
+  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary, importOwnership: hasImports,
+    completedCompactions: 0, itemCompactions: 0 };
   const titleState = { firstPrompt: '' };
   // Opened by task_started (turn start remembered), closed either by a
   // prompt→agent-message gap sample or by task_complete's own duration_ms
@@ -1335,6 +1358,9 @@ export function parseCodex(raw, { id, withTurns = false }) {
     finalizeMixedCodexOrigin(rec, firstMeta);
   }
   finalizeCodexUsage(rec, usageState.walk);
+  // The host may emit both a top-level `compacted` and an item_completed
+  // ContextCompaction for one replacement. Neither replays token usage.
+  rec.compactions = Math.max(usageState.completedCompactions, usageState.itemCompactions);
   stats.clippedLines = source.stats?.clippedLines ?? 0;
   rec.title = maskSecrets(clip(titleState.firstPrompt)) || '(untitled)';
   return { session: seal(rec), turns, parseStats: stats };

@@ -849,6 +849,28 @@ function v11Projection(rec) {
   };
 }
 
+const CODEX_EFFORT_VALUES = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+
+/** Normalize cached v26 records that predate these optional Codex details. */
+function codexObservationProjection(rec) {
+  if (rec.host !== 'codex') return { codexEffort: null, firstTokenMs: null, compactions: 0 };
+  const rawEffort = rec.codexEffort;
+  const counts = Object.fromEntries(Object.entries(rawEffort?.counts ?? {})
+    .filter(([key, value]) => CODEX_EFFORT_VALUES.has(key) && Number.isSafeInteger(value) && value > 0));
+  const codexEffort = CODEX_EFFORT_VALUES.has(rawEffort?.last) && Object.keys(counts).length
+    ? { last: rawEffort.last, counts } : null;
+  const rawTiming = rec.firstTokenMs;
+  const firstTokenMs = rawTiming?.provenance === 'host-observed'
+    && Number.isSafeInteger(rawTiming.count) && rawTiming.count > 0
+    && Number.isFinite(rawTiming.total) && rawTiming.total >= 0
+    && Number.isFinite(rawTiming.min) && rawTiming.min >= 0
+    && Number.isFinite(rawTiming.max) && rawTiming.max >= rawTiming.min
+    ? { count: rawTiming.count, total: rawTiming.total, min: rawTiming.min,
+      max: rawTiming.max, provenance: 'host-observed' } : null;
+  const compactions = Number.isSafeInteger(rec.compactions) && rec.compactions > 0 ? rec.compactions : 0;
+  return { codexEffort, firstTokenMs, compactions };
+}
+
 /** One aggregate session row from a parsed record, its folded usage sums,
  *  and its classifier verdict. */
 function sessionProviderIdentity(rec) {
@@ -897,6 +919,7 @@ function buildSessionRow(rec, usage, verdict) {
     // records (the schema bump re-derives those).
     reasoningOutput: rec.reasoningOutput ?? 0,
     rateLimits: rec.rateLimits ?? null,
+    ...codexObservationProjection(rec),
     ...v11Projection(rec),
     // v16: what this session's operator actually typed. The underscore-prefixed
     // members are working material for the window fold (per-host lengths and
@@ -981,6 +1004,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
   const totals = {
     sessions: sessions.length, prompts: 0, humanPrompts: 0, responses: 0,
     exceptions: 0, aborts: 0,
+    compactions: 0, firstTokenMs: null,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
     // v16. `humanPrompts` above is main-thread PROMPT COUNTS; these two are the
@@ -1010,6 +1034,15 @@ function foldSessionTotals(sessions, byDay, byModel) {
     // per-prompt denominator with work nobody asked for by hand.
     if (source === 'main') totals.humanPrompts += s.prompts;
     totals.exceptions += s.exceptions; totals.aborts += Number(s.aborts) || 0;
+    totals.compactions += s.compactions;
+    if (s.firstTokenMs) {
+      totals.firstTokenMs ??= { count: 0, total: 0, min: s.firstTokenMs.min,
+        max: s.firstTokenMs.max, provenance: 'host-observed' };
+      totals.firstTokenMs.count += s.firstTokenMs.count;
+      totals.firstTokenMs.total += s.firstTokenMs.total;
+      totals.firstTokenMs.min = Math.min(totals.firstTokenMs.min, s.firstTokenMs.min);
+      totals.firstTokenMs.max = Math.max(totals.firstTokenMs.max, s.firstTokenMs.max);
+    }
     totals.input += s.input; totals.output += s.output;
     totals.cacheRead += s.cacheRead; totals.cacheWrite += s.cacheWrite;
     totals.tokens += s.tokens; totals.cost += s.cost;
