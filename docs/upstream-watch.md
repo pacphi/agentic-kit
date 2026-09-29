@@ -107,8 +107,8 @@ Every command also takes `--concurrency <1-16>` (default 4) and `--registry <fil
   `--since` selects by the event's date; `--recorded-since` by when a run recorded it
   (`recordedAt`).
 
-`report`, `check` and `ledger` exit 0 unless the command line is wrong (2) or, for `ledger`, the
-ledger branch cannot be read (3). `record` exits 3 when blind: `gh` cannot reach GitHub, the
+`report` and `check` exit 0 unless the command line is wrong (2). `ledger` exits 3 when the
+registry is invalid or the ledger branch cannot be read. `record` exits 3 when blind: `gh` cannot reach GitHub, the
 registry is invalid, the ledger branch cannot be read or holds a malformed line, or not one
 upstream thread could be read (our own tracking issues do not count). It also exits 3 when the
 ledger commit could not be built; the routine sessions it already fired are then listed in

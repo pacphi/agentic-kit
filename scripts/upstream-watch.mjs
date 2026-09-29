@@ -335,6 +335,10 @@ export async function main(argv, {
     if (options.command === 'record') {
       return blindRecord(`upstream registry is ${status.status}`, { stdout, stderr, json: options.json }, { registry: status }, { writeError: false });
     }
+    if (options.command === 'ledger') {
+      if (options.json) stdout.write(`${JSON.stringify({ registry: status }, null, 2)}\n`);
+      return BLIND;
+    }
     stdout.write(options.json ? `${JSON.stringify({ registry: status }, null, 2)}\n` : 'No report: the upstream registry is not valid.\n');
     return 0;
   }
