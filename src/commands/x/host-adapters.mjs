@@ -298,8 +298,12 @@ async function trust({ name, cfg, consent, reader, ask, isTTY, yes, expectHash }
   return 0;
 }
 
-function revoke({ name, consent }) {
-  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters revoke <name>'); return 2; }
+function revoke({ name, consent, flags = /** @type {{json?: boolean}} */ ({}) }) {
+  if (typeof name !== 'string' || !name) {
+    const error = 'usage: ak host adapters revoke <name>';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
+    return 2;
+  }
   const existed = consent.revokeConsent(name);
   if (existed) { ok(`revoked consent for '${name}'`); return 0; }
   info(`no recorded consent for '${name}'`);
@@ -437,9 +441,9 @@ async function conformance({
 // standing consent or grant record, or it silently reactivates the next time
 // the flag is turned back on.
 const FAIL_SAFE_HANDLERS = {
-  revoke: (ctx) => revoke({ name: ctx.name, consent: ctx.consent }),
+  revoke: (ctx) => revoke({ name: ctx.name, consent: ctx.consent, flags: ctx.flags }),
   'revoke-grant': (ctx) => revokeGrant({
-    name: ctx.name, capability: ctx.positionals[2], grantsFile: ctx.grantsFile, cfg: ctx.cfg, env: ctx.env, cwd: ctx.cwd,
+    name: ctx.name, capability: ctx.positionals[2], grantsFile: ctx.grantsFile, cfg: ctx.cfg, env: ctx.env, cwd: ctx.cwd, flags: ctx.flags,
     ...(ctx.saveConfig ? { saveConfig: ctx.saveConfig } : {}),
     ...(ctx.bootstrapAdapters ? { bootstrapAdapters: ctx.bootstrapAdapters } : {}),
     ...(ctx.applyRouter ? { applyRouter: ctx.applyRouter } : {}),

@@ -19,7 +19,7 @@ import {
 import { bootstrapHostAdapters } from '../../lib/adapters/admission.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { applyAqeRouter } from '../../lib/providers.mjs';
-import { ok, warn, fail, info, bold } from '../../lib/output.mjs';
+import { ok, warn, fail, info, bold, reportFailure } from '../../lib/output.mjs';
 import {
   findEntry, loadAndHash, stripControl, hookCommandsFor,
 } from './host-adapters.mjs';
@@ -396,12 +396,16 @@ async function reconcileRevokedAqeProvider({
 }
 
 export async function revokeGrant({
-  name, capability, grantsFile, cfg, env, cwd = process.cwd(),
+  name, capability, grantsFile, cfg, env, cwd = process.cwd(), flags = /** @type {{json?: boolean}} */ ({}),
   saveConfig = saveKitConfig,
   bootstrapAdapters = bootstrapHostAdapters,
   applyRouter = applyAqeRouter,
 }) {
-  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters revoke-grant <name> [capability]'); return 2; }
+  if (typeof name !== 'string' || !name) {
+    const error = 'usage: ak host adapters revoke-grant <name> [capability]';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
+    return 2;
+  }
   const safeName = stripControl(name);
 
   if (typeof capability === 'string' && capability) {

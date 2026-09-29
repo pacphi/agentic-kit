@@ -23,9 +23,9 @@ const BIN = path.join(PKG_ROOT, 'bin', 'agentic-kit.mjs');
 const KIT_JSON = path.join(HOME, '.config', 'agentic-kit', 'kit.json');
 
 /** Run `ak …args` in the sandbox. */
-function ak(args) {
+function ak(args, envOverrides = {}) {
   return spawnSync(process.execPath, [BIN, ...args], {
-    cwd: PROJECT, env: spawnEnv(HOME), encoding: 'utf8', timeout: 120_000,
+    cwd: PROJECT, env: { ...spawnEnv(HOME), ...envOverrides }, encoding: 'utf8', timeout: 120_000,
   });
 }
 
@@ -128,6 +128,8 @@ const COMMAND_USAGE_ERRORS = [
   [['usage', 'bogus', '--json'], /usage: ak usage/],
   [['usage', 'score', '--window', '99', '--json'], /--window must be/],
   [['usage', 'prompts', '--window', '99', '--json'], /--window must be/],
+  [['usage', 'score', 'extra', '--json'], /unexpected argument 'extra'/],
+  [['usage', 'prompts', 'extra', '--json'], /unexpected argument 'extra'/],
   [['models', 'bogus', '--json'], /usage: ak models/],
   [['models', 'explain', '--json'], /usage: ak models explain/],
   [['models', 'plan', '--json'], /usage: ak models plan/],
@@ -160,6 +162,20 @@ for (const [args, message] of COMMAND_USAGE_ERRORS) {
     assert.match(out.error, message);
     assert.match(child.stderr, message);
   });
+}
+
+for (const enabled of ['0', '1']) {
+  for (const verb of ['revoke', 'revoke-grant']) {
+    test(`ak host adapters ${verb} --json without a name is JSON with feature flag ${enabled}`, () => {
+      const child = ak(['host', 'adapters', verb, '--json'], { AK_EXPERIMENTAL_HOST_ADAPTERS: enabled });
+      const out = oneJson(child);
+      assert.equal(child.status, 2, child.stderr);
+      assert.deepEqual(Object.keys(out), ['error', 'exitCode']);
+      assert.equal(out.exitCode, 2);
+      assert.match(out.error, new RegExp(`usage: ak host adapters ${verb} <name>`));
+      assert.match(child.stderr, new RegExp(`usage: ak host adapters ${verb} <name>`));
+    });
+  }
 }
 
 test('models rejects an unknown verb even when no snapshot exists', () => {

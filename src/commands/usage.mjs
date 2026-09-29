@@ -1089,6 +1089,12 @@ export async function run({ flags, positionals, deps = {} }) {
   const provider = positionals[1];
   const cacheFile = deps.cacheFile ?? openRouterActivityFile();
 
+  if (['score', 'prompts'].includes(action) && positionals.length > 1) {
+    const message = `unexpected argument '${positionals[1]}'`;
+    reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => warn(message) });
+    return 2;
+  }
+
   if (action === 'status' && provider === undefined) {
     return runOpenRouterStatus({ flags, cacheFile, read: deps.read ?? readOpenRouterActivity });
   }
