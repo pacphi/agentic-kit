@@ -114,3 +114,12 @@ for (const failure of ['stat-ENOENT', 'stat-EACCES', 'read-ENOENT', 'read-EIO', 
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+test('absolute OpenCode authority survives invalid ambient home when legacy root cannot be resolved', () => {
+  const dir = tempDir('ak-oc-absolute');
+  const dbFile = path.join(dir, 'explicit.db');
+  const selected = source.selectOpencodeSource({ env: { HOME: 'relative', OPENCODE_DB: dbFile } });
+  assert.equal(selected.dbFile, dbFile);
+  assert.equal(selected.legacyRoot, null);
+  assert.equal(source.selectOpencodeSource({ env: { HOME: 'relative', OPENCODE_DB: ':memory:' } }).health.reason, 'database-in-memory');
+});

@@ -44,6 +44,7 @@ import { readClaudeWindowLog, statClaudeWindowLedger } from './claude-window-led
 import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
 import { selectOpencodeSource } from './usage-opencode-source.mjs';
+import { opencodeStorageHealth } from './usage-opencode-health.mjs';
 import {
   listSessionsResult as listOpencodeSessionsResult,
   parseSession as parseOpencodeSession, sessionExistsResult as opencodeSessionExistsResult,
@@ -751,19 +752,21 @@ export async function buildIndex(o = {}) {
 function discoverOpencodeSource(rawRoots, cutoff) {
   const selection = selectOpencodeSource({ roots: rawRoots });
   const ocDb = selection.dbFile;
-  if (!ocDb) return { health: selection.health, candidates: [], ocDb };
-  if (!fs.existsSync(ocDb)) return { health: { status: 'absent', reason: null }, candidates: [], ocDb };
+  const storageCoverage = opencodeStorageHealth(selection);
+  const sourceHealth = (health) => ({ ...health, storageCoverage });
+  if (!ocDb) return { health: sourceHealth(selection.health), candidates: [], ocDb };
+  if (!fs.existsSync(ocDb)) return { health: sourceHealth({ status: 'absent', reason: null }), candidates: [], ocDb };
   const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
   if (!listed.ok) {
     const health = listed.error.kind === 'absent'
       ? { status: 'absent', reason: 'absent' } : { status: 'degraded', reason: listed.error.kind };
-    return { health, candidates: [], ocDb };
+    return { health: sourceHealth(health), candidates: [], ocDb };
   }
   const candidates = listed.value.map((e) => ({
     file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb, sourceIdentity: selection.sourceIdentity,
     stat: { mtimeMs: e.mtimeMs, size: e.size, updatedMs: e.updatedMs },
   }));
-  return { health: selection.health, candidates, ocDb };
+  return { health: sourceHealth(selection.health), candidates, ocDb };
 }
 
 /** Codex's own per-file bookkeeping for one scan candidate: file counts, the
@@ -971,7 +974,7 @@ function carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb) {
   if (exists && !exists.ok && exists.error.kind !== 'absent') {
     return {
       entry: { ...e, dbFile },
-      health: { status: 'degraded', reason: exists.error.kind },
+      health: { ...opencodeHealth, status: 'degraded', reason: exists.error.kind },
       pushRecord: compatibleOpencodeCache({ provider: 'opencode', sourceIdentity: selection.sourceIdentity }, e),
     };
   }
@@ -1078,7 +1081,8 @@ async function scan(o = {}) {
   // Completed OpenCode responses whose provider reported no token counts: one
   // informational health warning (the sessions themselves are still counted).
   addTelemetryDiagnostics(commonDiagnostics.opencode, {
-    warnings: usageNotReportedWarnings(records.filter((rec) => rec.host === 'opencode')),
+    warnings: [...opencodeSource.health.storageCoverage.warnings,
+      ...usageNotReportedWarnings(records.filter((rec) => rec.host === 'opencode'))],
   });
   notify(onProgress, { scanned: total, total, phase: 'aggregate' });
 

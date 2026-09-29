@@ -160,3 +160,105 @@ test('ambiguous default stores expose health, drop cache fallback, and agree wit
     _resetForTest(); rm(sb.dir);
   }
 });
+
+// O10: coverage belongs to the source, independent of V1 candidate/cache yield.
+for (const state of ['missing', 'empty', 'present', 'unknown']) {
+  test(`OpenCode unsupported V2 ${state} is observed with zero V1 candidates`, async () => {
+    const sb = sandbox();
+    try {
+      const db = new DatabaseSync(sb.dbFile);
+      if (state === 'unknown') db.exec('CREATE VIEW session_message AS SELECT 1');
+      else if (state !== 'missing') {
+        db.exec('CREATE TABLE session_message (payload text)');
+        if (state === 'present') db.exec("INSERT INTO session_message VALUES ('private content')");
+      }
+      db.close();
+      const result = await buildIndex(opts(sb));
+      const health = result.sourceHealth.opencode;
+      assert.equal(health.status, 'ok');
+      assert.equal(health.storageCoverage.v2.status, state);
+      assert.deepEqual(health.diagnostics.common.warnings, state === 'present'
+        ? ['opencode-v2-session-message-present'] : state === 'unknown'
+          ? ['opencode-v2-observation-incomplete'] : []);
+      assert.equal(result.sessions.length, 0);
+      assert.equal(JSON.stringify(health).includes('private content'), false);
+      assert.equal(JSON.stringify(health).includes(sb.dir), false);
+    } finally { _resetForTest(); rm(sb.dir); }
+  });
+}
+
+test('OpenCode storage warnings refresh on all cache hits and survive an empty window without changing usage', async () => {
+  const sb = sandbox({ sessions: [{ id: 'ses_coverage', directory: '/x', title: 'known' }],
+    messages: [assistantMsg('a1', 'ses_coverage', NOW - DAY, { cost: 0.2 })] });
+  try {
+    const first = await buildIndex(opts(sb));
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    cache.entries['opencode://ses_coverage'].session.title = 'cache witness';
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache)); _resetForTest();
+    const db = new DatabaseSync(sb.dbFile);
+    db.exec('CREATE TABLE session_message (payload text); INSERT INTO session_message VALUES (NULL)'); db.close();
+    fs.mkdirSync(path.join(path.dirname(sb.dbFile), 'storage'));
+    fs.writeFileSync(path.join(path.dirname(sb.dbFile), 'storage', 'legacy.json'), 'not read');
+    const warm = await buildIndex(opts(sb));
+    assert.equal(warm.sessions[0].title, 'cache witness', 'all V1 parses came from cache');
+    assert.deepEqual(warm.totals, first.totals);
+    const expected = ['opencode-v2-session-message-present', 'opencode-legacy-json-present'];
+    assert.deepEqual(warm.sourceHealth.opencode.diagnostics.common.warnings, expected);
+    const empty = await buildIndex(opts(sb, { now: NOW + 100 * DAY }));
+    assert.equal(empty.sessions.length, 0);
+    assert.deepEqual(empty.sourceHealth.opencode.diagnostics.common.warnings, expected);
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
+for (const condition of ['missing', 'corrupt', 'v1-missing', 'legacy-inaccessible']) {
+  test(`OpenCode ${condition} preserves independent legacy coverage and availability`, async () => {
+    const sb = sandbox();
+    try {
+      const legacy = path.join(path.dirname(sb.dbFile), 'storage');
+      if (condition === 'legacy-inaccessible') fs.writeFileSync(legacy, 'not a directory');
+      else { fs.mkdirSync(legacy); fs.writeFileSync(path.join(legacy, 'record.json'), 'private'); }
+      if (condition === 'missing') fs.unlinkSync(sb.dbFile);
+      if (condition === 'corrupt') fs.writeFileSync(sb.dbFile, 'invalid');
+      if (condition === 'v1-missing') {
+        const db = new DatabaseSync(sb.dbFile);
+        db.exec('DROP TABLE message; CREATE TABLE session_message (payload text); INSERT INTO session_message VALUES (NULL)'); db.close();
+      }
+      const health = (await buildIndex(opts(sb))).sourceHealth.opencode;
+      assert.equal(health.status, condition === 'missing' ? 'absent' : condition === 'legacy-inaccessible' ? 'ok' : 'degraded');
+      assert.equal(health.storageCoverage.legacy.status, condition === 'legacy-inaccessible' ? 'unknown' : 'present');
+      assert.ok(health.diagnostics.common.warnings.includes(condition === 'legacy-inaccessible'
+        ? 'opencode-legacy-observation-incomplete' : 'opencode-legacy-json-present'));
+      if (condition === 'corrupt') assert.equal(health.storageCoverage.v2.status, 'unknown');
+      if (condition === 'v1-missing') assert.ok(health.diagnostics.common.warnings.includes('opencode-v2-session-message-present'));
+      assert.equal(fs.existsSync(sb.dbFile), condition !== 'missing', 'missing DB stays missing');
+      const isolated = (await buildIndex(opts(sb, { roots: {} }))).sourceHealth.opencode;
+      assert.equal(isolated.storageCoverage.legacy.status, 'not-observed');
+      assert.deepEqual(isolated.diagnostics.common.warnings, []);
+    } finally { _resetForTest(); rm(sb.dir); }
+  });
+}
+
+test('OpenCode default legacy root stays observable during ambiguous database selection', async () => {
+  const sb = sandbox();
+  const keys = ['XDG_DATA_HOME', 'OPENCODE_DB', 'OPENCODE_DISABLE_CHANNEL_DB'];
+  const before = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  try {
+    process.env.XDG_DATA_HOME = sb.dir;
+    delete process.env.OPENCODE_DB; delete process.env.OPENCODE_DISABLE_CHANNEL_DB;
+    const root = path.join(sb.dir, 'opencode'); fs.mkdirSync(path.join(root, 'storage'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'storage', 'legacy.json'), 'never parsed');
+    fs.copyFileSync(sb.dbFile, path.join(root, 'opencode.db'));
+    fs.copyFileSync(sb.dbFile, path.join(root, 'opencode-preview.db'));
+    const health = (await buildIndex(opts(sb, { roots: undefined }))).sourceHealth.opencode;
+    assert.equal(health.reason, 'database-selection-ambiguous');
+    assert.equal(health.storageCoverage.v2.status, 'not-observed');
+    assert.ok(health.diagnostics.common.warnings.includes('opencode-legacy-json-present'));
+    assert.deepEqual((await buildIndex(opts(sb))).sourceHealth.opencode.diagnostics.common.warnings, [], 'explicit source never observes the global legacy root');
+    process.env.OPENCODE_DB = sb.dbFile;
+    const overridden = (await buildIndex(opts(sb, { roots: undefined }))).sourceHealth.opencode;
+    assert.ok(overridden.diagnostics.common.warnings.includes('opencode-legacy-json-present'), 'DB override does not relocate upstream legacy storage');
+  } finally {
+    for (const key of keys) { if (before[key] === undefined) delete process.env[key]; else process.env[key] = before[key]; }
+    _resetForTest(); rm(sb.dir);
+  }
+});
