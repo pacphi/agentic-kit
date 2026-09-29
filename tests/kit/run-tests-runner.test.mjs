@@ -54,7 +54,19 @@ test('focus reports a leaked temp folder with hygiene exit code', (t) => {
   assert.match(r.stderr, /temp folders left behind.*focus-leak-/s);
 });
 
-test('an unresolved prelaunch hold retains the guarded root and sentinel after test failure', async (t) => {
+async function removeExitedFixture(root) {
+  for (let attempt = 0; ; attempt++) {
+    try { fs.rmSync(root, { recursive: true, force: true }); return; }
+    catch (error) {
+      // Match the fixture helpers' three-retry policy without depending on
+      // Node's JS/C++ rm implementation. Exit has already been established.
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY', 'EEXIST'].includes(error.code) || attempt === 3) throw error;
+      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 100));
+    }
+  }
+}
+
+async function heldRootFixture(t, { check = () => {}, beforeRemove = () => () => {} } = {}) {
   const { home, repo, env } = sandbox(t);
   const pidFile = path.join(home, 'held-child-pid');
   const child = stub(home, 'held-child.cjs', `const fs = require('node:fs');
@@ -80,6 +92,7 @@ test('an unresolved prelaunch hold retains the guarded root and sentinel after t
     process.exit(7);`);
   let root;
   let pid;
+  let failure;
   try {
     const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', script], { env, encoding: 'utf8' });
     const roots = fs.readdirSync(env.TMPDIR).filter((name) => /^ak-suite-[A-Za-z0-9]{6}$/.test(name));
@@ -91,15 +104,63 @@ test('an unresolved prelaunch hold retains the guarded root and sentinel after t
     assert.equal(fs.readFileSync(path.join(root, 'held-sentinel'), 'utf8'), 'keep');
     assert.equal(fs.readFileSync(path.join(root, 'held-child-ready'), 'utf8'), 'ready');
     assert.doesNotThrow(() => process.kill(pid, 0), 'the held child should still own the retained cwd');
-  } finally {
+    check();
+  } catch (error) { failure = error; }
+  try {
     if (root) fs.writeFileSync(path.join(root, 'release-child'), 'release');
     if (Number.isInteger(pid) && pid > 0) {
       if (!root) { try { process.kill(pid); } catch { /* already exited */ } }
       if (!await pidGone(pid)) { try { process.kill(pid); } catch { /* already exited */ } }
       assert.ok(await pidGone(pid), `fixture child ${pid} did not exit`);
     }
-    if (root) fs.rmSync(root, { recursive: true, force: true });
+    if (root) {
+      const restore = beforeRemove(root, pid);
+      // Exit proof above is required; retries only address post-exit filesystem refusal.
+      try { await removeExitedFixture(root); }
+      finally { restore(); }
+    }
+  } catch (error) {
+    failure = failure ? new AggregateError([failure, error], 'fixture assertion and cleanup failed') : error;
   }
+  if (failure) throw failure;
+}
+
+test('an unresolved prelaunch hold retains the guarded root and sentinel after test failure', heldRootFixture);
+
+function injectBusyRemoval(limit) {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    beforeRemove(root, pid) {
+      const original = fs.rmSync;
+      fs.rmSync = (dir, ...args) => {
+        if (String(dir) === root) {
+          assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+          if (++calls <= limit) throw Object.assign(new Error('injected post-exit EBUSY'), { code: 'EBUSY' });
+        }
+        return original(dir, ...args);
+      };
+      return () => { fs.rmSync = original; };
+    },
+  };
+}
+
+test('post-exit fixture removal retries transient EBUSY', async t => {
+  const busy = injectBusyRemoval(2);
+  await heldRootFixture(t, busy);
+  assert.equal(busy.calls(), 3);
+});
+
+test('exhausted post-exit retries preserve both assertion and cleanup failures', async t => {
+  const busy = injectBusyRemoval(Infinity);
+  const original = new assert.AssertionError({ message: 'original fixture assertion' });
+  await assert.rejects(heldRootFixture(t, { ...busy, check: () => { throw original; } }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.errors[0], original);
+    assert.equal(error.errors[1].code, 'EBUSY');
+    return true;
+  });
+  assert.equal(busy.calls(), 4, 'one attempt plus three bounded retries');
 });
 
 test('unresolved holds preserve command, tripwire, then hygiene exit priority', (t) => {
