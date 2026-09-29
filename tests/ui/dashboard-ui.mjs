@@ -2644,6 +2644,148 @@ async function main() {
         'Can apply here', 'Steps available', 'Decisions to make', 'Updates available', 'Recovery to finish',
       ]));
     check('a provider check never starts on its own', maintenanceCheckProvidersReads === 0);
+    // ── Dispositions (MNT-GUD-009/011): explained before confirmation, one
+    // exact guidanceId per write ──
+    await page.waitForSelector('.mnt-dispositions [data-mnt-disposition-open="acknowledged"]');
+    await page.click('.mnt-dispositions [data-mnt-disposition-open="acknowledged"]');
+    const dispositionExplanation = await visibleText(page, '.mnt-disposition-confirm');
+    check('a disposition explains its effect before it can be confirmed',
+      /keeps this outcome visible/i.test(dispositionExplanation) && maintenanceDispositionRequests.length === 0,
+      `disposition explanation read ${JSON.stringify(dispositionExplanation)}`);
+    await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/maintenance/v2/dispositions' && response.request().method() === 'POST'),
+      page.click('.mnt-disposition-confirm [data-mnt-disposition-confirm="acknowledged"]'),
+    ]);
+    check('confirming a disposition posts exactly one guidanceId and kind, with confirm:true',
+      maintenanceDispositionRequests.length === 1
+        && Object.keys(maintenanceDispositionRequests[0]).sort().join(',') === 'confirm,guidanceId,kind'
+        && maintenanceDispositionRequests[0].kind === 'acknowledged' && maintenanceDispositionRequests[0].confirm === true,
+      `disposition requests were ${JSON.stringify(maintenanceDispositionRequests)}`);
+    await page.waitForSelector('[data-mnt-plan-plc]');
+
+    // ── Guidance: Can apply here — reuses the v1 apply/undo confirm dialog,
+    // now driven by placementId + guidanceId against the v2 plan route ──
+    const applyButtonLabel = await page.textContent('[data-mnt-plan-plc]');
+    check('MNT-EVD-006: the Can apply here row uses a specific verb, never generic Fix',
+      /Update plugin/i.test(applyButtonLabel || '') && !/\bFix\b/i.test(applyButtonLabel || ''),
+      `apply button read ${JSON.stringify(applyButtonLabel)}`);
+    await page.click('[data-mnt-plan-plc]');
+    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
+    const firstPreview = await page.evaluate(() => ({
+      title: document.getElementById('sys-maint-confirm-title')?.textContent,
+      body: document.getElementById('sys-maint-confirm-body')?.innerText,
+      xss: globalThis.__maintConfirmXss,
+      secretInDom: document.documentElement.innerHTML.includes('cap-ui-plan-secret'),
+      secretInUrl: location.href.includes('cap-ui-plan-secret'),
+    }));
+    check('the plan preview posts exactly one exact placementId + guidanceId, renders hostile copy as text, and keeps its capability out of DOM/URL',
+      Object.keys(maintenancePlanRequests[0] || {}).sort().join(',') === 'guidanceId,placementId'
+        && !!maintenancePlanRequests[0].placementId && !!maintenancePlanRequests[0].guidanceId
+        && /<img src=x onerror=/.test(String(firstPreview.title))
+        && /<svg onload=/.test(String(firstPreview.body))
+        && firstPreview.xss === undefined && !firstPreview.secretInDom && !firstPreview.secretInUrl,
+      `first preview was ${JSON.stringify(firstPreview)}; plan request was ${JSON.stringify(maintenancePlanRequests[0])}`);
+    await page.fill('#sys-maint-typed', 'UPDATE wrong');
+    check('a partial typed phrase leaves Apply disabled',
+      await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled), 'a partial phrase enabled Apply');
+    await page.fill('#sys-maint-typed', 'UPDATE frontend-design');
+    check('the exact typed phrase enables the named action',
+      !(await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled)), 'the exact phrase did not enable Apply');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
+    check('MNT-UX-012: a successful apply becomes a retained receipt, and the active destination refreshes',
+      /receipt-update-ui/.test(await visibleText(page, '#sys-maint-confirm')),
+      `receipt sheet read ${JSON.stringify(await visibleText(page, '#sys-maint-confirm'))}`);
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+
+    await page.click('[data-mnt-plan-plc]');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Evidence changed');
+    check('a preview-phase drift fails closed with specific recovery copy and no capability echo',
+      /changed while the preview was being prepared/i.test(await visibleText(page, '#sys-maint-confirm'))
+        && !/cap-ui-plan-secret/.test(await visibleText(page, '#sys-maint-confirm')),
+      'drift copy did not read as expected');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+
+    await page.click('[data-mnt-plan-plc]');
+    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
+    await page.fill('#sys-maint-typed', 'UPDATE frontend-design');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Recovery required');
+    check('MNT-UX-012: an apply-phase 409 retains its receipt and never claims the resource is unchanged',
+      /provider may have changed this resource/i.test(await visibleText(page, '#sys-maint-confirm'))
+        && /receipt-recovery-ui/.test(await visibleText(page, '#sys-maint-confirm'))
+        && !/Nothing changed/.test(await visibleText(page, '#sys-maint-confirm')),
+      'recovery copy did not read as expected');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+
+    // ── J5 — interrupted cache cleanup: Audit interruption → disclosure and
+    // result → exactly one Record button → reconcile via the same reused
+    // typed-confirmation dialog ──
+    await page.click('[data-mnt-dest="activity"]');
+    await page.waitForSelector('#mnt-tab-activity[aria-selected="true"]');
+    await page.waitForSelector('[data-mnt-audit-receipt]');
+    const auditTriggerLabel = await page.textContent('[data-mnt-audit-receipt]');
+    check('MNT-RCV-001: an interrupted receipt offers Audit interruption, not generic Verify again',
+      auditTriggerLabel.trim() === 'Audit interruption',
+      `interrupted-receipt action label read ${JSON.stringify(auditTriggerLabel)}`);
+    await page.click('[data-mnt-audit-receipt]');
+    await page.waitForFunction(() => /Result:/.test(document.getElementById('mnt-audit-body')?.innerText || ''));
+    const auditBody = await visibleText(page, '#mnt-audit-body');
+    check('J5: Audit interruption discloses the receipt, phase, provider, checks, and policies, then a conclusive result',
+      JSON.stringify(maintenanceAuditRequests[0]) === JSON.stringify({ receiptIds: [INTERRUPTED_RECEIPT.id] })
+        && new RegExp(INTERRUPTED_RECEIPT.id).test(auditBody)
+        && /applying/.test(auditBody) && /owned-npx-cache/.test(auditBody)
+        // Raw machine check statuses never render verbatim (one, "matched",
+        // could otherwise collide with real evidence text) — the humanized
+        // name+label pairing is what proves the mapping ran.
+        && /Receipt integrity.*Passed/i.test(auditBody) && /Preimage comparison.*Matched/i.test(auditBody)
+        && /read-only-provider-inspector-only/.test(auditBody)
+        && /Matches recorded before state/.test(auditBody),
+      `audit body read ${JSON.stringify(auditBody)}`);
+    const recordButtons = await page.$$('#mnt-audit-actions [data-mnt-reconcile-receipt]');
+    check('J5: the audit offers exactly one enabled Record button',
+      recordButtons.length === 1 && /Record no change/.test(await page.textContent('#mnt-audit-actions')),
+      `record actions read ${await visibleText(page, '#mnt-audit-actions')}`);
+    await page.click('[data-mnt-reconcile-receipt]');
+    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
+    check('J5: reconcile reuses the same typed-confirmation dialog as apply/undo',
+      /Record no change/.test(await visibleText(page, '#sys-maint-confirm')),
+      'reconcile did not present the shared confirmation dialog');
+    await page.fill('#sys-maint-typed', 'RECORD no-change');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
+    check('MNT-UX-012/J5: a confirmed reconciliation records exactly one receipt via the reconcile route',
+      maintenanceReconcileRequests.length === 1 && maintenanceReconcileRequests[0].capability === 'cap-ui-reconcile-secret'
+        && maintenanceReconcileRequests[0].confirm === true,
+      `reconcile requests were ${JSON.stringify(maintenanceReconcileRequests)}`);
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+
+    // ── Export (MNT-RCV-011/012): sanitized default; "Include local paths"
+    // is a fresh, separately warned selection every time ──
+    await page.click('[data-mnt-export-receipt]');
+    await page.waitForSelector('#mnt-export-local-paths');
+    check('export defaults to sanitized, with no warning shown yet',
+      maintenanceExportRequests.length === 1 && maintenanceExportRequests[0].includeLocalPaths === false
+        && await page.isHidden('#mnt-export-warning'),
+      `export requests were ${JSON.stringify(maintenanceExportRequests)}`);
+    await page.check('#mnt-export-local-paths');
+    check('checking Include local paths reveals the warning before any request is sent',
+      await page.isVisible('#mnt-export-warning') && maintenanceExportRequests.length === 1,
+      'the local-paths warning did not appear, or a request fired before confirmation');
+    await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/maintenance/v2/receipts/export' && response.request().method() === 'POST'),
+      page.click('#mnt-export-again'),
+    ]);
+    check('re-exporting with local paths sends acknowledgedWarning:true in the SAME request',
+      maintenanceExportRequests.length === 2 && maintenanceExportRequests[1].includeLocalPaths === true
+        && maintenanceExportRequests[1].acknowledgedWarning === true,
+      `export requests were ${JSON.stringify(maintenanceExportRequests)}`);
+    await page.click('#mnt-receipt-close');
+
     await page.click('[data-mnt-dest="discovery"]');
     await page.waitForSelector('#mnt-tab-discovery[aria-selected="true"]');
     await page.waitForFunction(() => /Claude user configuration/.test(
