@@ -59,6 +59,8 @@ test('both summaries say how many routine sessions a run would start, and which'
     assert.match(step, /would fire \\\(\.wouldFire \| length\)/, name);
     assert.match(step, /jq -r '\(\.wouldFire \/\/ \[\]\)\[\] \| "- would fire \\\(\.id\) \\\(\.version\) \\\(\.branch\)"' watch\.json/, name);
   }
+  assert.match(record, /deferred \\\(\.deferred \| length\)/, 'the summary counts fixes deferred to the next run');
+  assert.match(record, /jq -r '\(\.deferred \/\/ \[\]\)\[\] \| "- deferred \\\(\.id\) \\\(\.version\) \\\(\.branch\)"' watch\.json/);
   assert.match(record, /# 3 = blind: [^\n]*\n\s*# or a ledger commit that could not be built\./);
 });
 

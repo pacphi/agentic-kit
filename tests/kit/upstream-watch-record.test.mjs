@@ -75,6 +75,7 @@ test('a released fix fires the routine with its id, version and branch, and the 
     assert.match(result.notice.body, /\nThe full record: `node scripts\/upstream-watch\.mjs ledger --recorded-since 2026-09-26T23:00:00Z`\n$/);
     assert.deepEqual(result.dispatchErrors, []);
     assert.deepEqual(result.wouldFire, [], 'a real run lists nothing it would fire');
+    assert.deepEqual(result.deferred, [], 'nothing deferred within the per-run cap');
   });
 });
 
@@ -153,7 +154,7 @@ test('a ledger commit that cannot be built after a firing keeps the session link
 test('record is blind (exit 3) when gh, the ledger, the registry or every upstream thread fails', async () => {
   await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
     const offline = await record(file, [], { fetcher: fixtureFetcher({ authenticated: false }) });
-    assert.deepEqual([offline.code, offline.result.blind, offline.ledgerStore.built, offline.result.wouldFire, offline.result.fired], [3, true, [], [], []]);
+    assert.deepEqual([offline.code, offline.result.blind, offline.ledgerStore.built, offline.result.wouldFire, offline.result.deferred, offline.result.fired], [3, true, [], [], [], []]);
     const broken = { read: async () => { throw new Error('events.ndjson line 2 is not JSON'); }, build: async () => { throw new Error('not called'); } };
     const unreadable = await record(file, [], { ledgerStore: broken });
     assert.equal(unreadable.code, 3);
@@ -197,5 +198,57 @@ test('invalid registry takes precedence over a future --since', async () => {
     assert.equal(result.blind, true);
     assert.match(err, /upstream registry is invalid/);
     assert.doesNotMatch(err, /--since is in the future/);
+  });
+});
+
+// Reuse the recorded release fact for distinct synthetic issue ids; all I/O is injected.
+const backlog = () => [1, 2, 3, 4, 5].map((n) => entry(`proffesor-for-testing/agentic-qe#${n}`, { doneWhen: { state: 'closed-completed', release: { channel: 'npm', name: 'agentic-qe', minVersion: '3.13.10' } } }));
+const backlogFetcher = () => {
+  const fetcher = fixtureFetcher();
+  return { ...fetcher, thread: async () => fetcher.thread('proffesor-for-testing/agentic-qe#617') };
+};
+
+test('advanced Checked-At preserves deferred releases for a later run', async () => {
+  await withRegistryFile(backlog(), async (file) => {
+    const first = await record(file, [], { fetcher: backlogFetcher() });
+    assert.equal(first.code, 0);
+    assert.equal(first.dispatcher.fired.length, 3);
+    assert.deepEqual(first.result.deferred.map((item) => item.id), ['proffesor-for-testing/agentic-qe#4', 'proffesor-for-testing/agentic-qe#5']);
+    const second = await record(file, [], { fetcher: backlogFetcher(), ledgerStore: memoryLedger({ commit: first.result.commit, records: first.result.records, checkedAt: first.result.checkedAt }), now: new Date('2026-09-27T23:00:00Z') });
+    assert.equal(second.result.since, '2026-09-26T23:00:00Z');
+    assert.equal(second.dispatcher.fired.length, 2);
+    assert.deepEqual(second.result.records.map((item) => [item.id, item.event]), [['proffesor-for-testing/agentic-qe#4', 'fired'], ['proffesor-for-testing/agentic-qe#5', 'fired']]);
+    assert.deepEqual(second.result.deferred, []);
+  });
+});
+
+test('ledger build failure retains successful firings, dispatch errors and the deferred backlog', async () => {
+  await withRegistryFile(backlog(), async (file) => {
+    const dispatcher = fakeDispatcher();
+    const fire = dispatcher.fire;
+    dispatcher.fire = async (text) => { if (dispatcher.fired.length === 1) throw new Error('HTTP 503'); return fire(text); };
+    const ledgerStore = { read: async () => ({ commit: null, records: [], checkedAt: null }), build: async () => { throw new Error('disk full'); } };
+    const { code, result } = await record(file, [], { fetcher: backlogFetcher(), dispatcher, ledgerStore });
+    assert.equal(code, 3);
+    assert.equal(result.blind, true);
+    assert.equal(result.fired.length, 1);
+    assert.equal(result.fired[0].fields.session, 'https://claude.ai/code/session_new');
+    assert.deepEqual(result.dispatchErrors, [{ id: 'proffesor-for-testing/agentic-qe#2', error: 'HTTP 503' }]);
+    assert.deepEqual(result.deferred.map((item) => item.id), ['proffesor-for-testing/agentic-qe#3', 'proffesor-for-testing/agentic-qe#4', 'proffesor-for-testing/agentic-qe#5']);
+  });
+});
+
+test('record dry run reports its bounded preview and deferred backlog in JSON and console', async () => {
+  await withRegistryFile(backlog(), async (file) => {
+    const preview = await record(file, ['--dry-run'], { fetcher: backlogFetcher() });
+    assert.equal(preview.result.wouldFire.length, 3);
+    assert.equal(preview.result.deferred.length, 2);
+    assert.deepEqual(preview.dispatcher.fired, []);
+    assert.deepEqual(preview.ledgerStore.built, []);
+    const out = capture();
+    const code = await main(['record', '--dry-run', '--registry', file], { fetcher: backlogFetcher(), ledgerStore: memoryLedger(), dispatcher: fakeDispatcher(), sleep: async () => { assert.fail('preview slept'); }, stdout: out.stream, stderr: capture().stream, now: NOW });
+    assert.equal(code, 0);
+    assert.equal(out.text().match(/^Would fire /gm)?.length, 3);
+    assert.equal(out.text().match(/^Deferred /gm)?.length, 2);
   });
 });
