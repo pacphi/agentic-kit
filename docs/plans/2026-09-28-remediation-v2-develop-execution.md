@@ -15,7 +15,8 @@ operations and cleanup remain separately gated. Baseline inspected: `main@94890a
 **2026-09-29 execution update:** Reviewed V1–V6 and main watcher reconciliation
 are integrated through `develop@88ce597f444d487a34d9871a447cf8942f76f760` with all
 13 develop CI checks passing. V7 guard and evidence units are independently accepted;
-shared-file integration, final gates and closeout PR CI remain acceptance conditions.
+V7 shared integration, independent reviews and all nine local gates passed at
+`795a0f7266de0bf6a04358359b75a1ad1b609e1d`; closeout PR CI and integration remain pending.
 The [246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md),
 [integration receipt](../archive/2026-09-29-remediation-v2-integration-evidence.md),
 [ordered rulings](../archive/2026-09-29-remediation-v2-rulings.md),
@@ -224,7 +225,7 @@ Dependencies: V3–V6 merged and develop green. Branch: `chore/v2-close-out`. Si
   dispatch may remain observation-pending until an actual release event; do not fabricate one.
 - [x] Prepare issue updates (#239/#240/#254/#257/#262) with evidence. Distinguish integrated
   on develop from shipped on main; close only when the issue's own completion condition holds.
-- [ ] Run docs alignment and archive completed branch plans with `scripts/docs-relocate.mjs`.
+- [x] Run docs alignment and archive completed branch plans with `scripts/docs-relocate.mjs`.
   Keep this program's plan active while main approval and operational work remain pending.
 - [ ] Open final `develop` → `main` PR with scope/decision matrix, feature PRs and unit commit
   mappings, exact final source, tests, Windows evidence, release notes and known limitations.

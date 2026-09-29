@@ -13,7 +13,8 @@ the approved execution section governs wherever their authority or timing differ
 At the 2026-09-29 closeout checkpoint, reviewed V1–V6 and main watcher reconciliation
 are integrated through `develop@88ce597f444d487a34d9871a447cf8942f76f760` with all
 13 develop CI checks passing. V7 guard and evidence units are independently accepted;
-shared-file integration, final gates and closeout PR CI remain acceptance conditions.
+V7 shared integration, independent reviews and all nine local gates passed at
+`795a0f7266de0bf6a04358359b75a1ad1b609e1d`; closeout PR CI and integration remain pending.
 The [246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md),
 [integration receipt](../archive/2026-09-29-remediation-v2-integration-evidence.md),
 [ordered rulings](../archive/2026-09-29-remediation-v2-rulings.md),
