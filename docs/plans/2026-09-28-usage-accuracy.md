@@ -15,8 +15,8 @@ provider attestation, so equal counters remain unverified. Unit 12 now retains
 bounded, hashed Claude API message identities per cached file and reconciles
 copied charges after discovery. Aggregate responses/tokens/cost count a shared
 message once; each session's `responses` still counts what its transcript
-recorded, with `accountedResponses` showing its aggregate share. Unit 12 awaits
-independent review before Unit 13. The Claude identity pool always covers the
+recorded, with `accountedResponses` showing its aggregate share. Unit 12 is
+accepted, including its bounded global-message-owner policy. The Claude identity pool always covers the
 displayed window and its equal-length predecessor, regardless of the
 `previous` or `lookbackDays` options. One owner is elected per identity across
 that pool before either window is projected; a copied message therefore
@@ -28,6 +28,24 @@ steal or enlarge it. Distinct historical messages remain visible under that
 explicit request, with out-of-pool coverage reported in source health. Claude
 reads may reach twice the displayed window (capped at 730 days for the
 dashboard's 365-day maximum), with the cap reported for wider callers.
+Unit 13 records an entry-level local calendar context: the resolved full timezone
+identity plus Node's tzdata and ICU versions. A mismatch or missing/invalid context
+reparses available source records; no timestamp is inferred from a cached day.
+Process memo and single-flight keys include that context. Degraded OpenCode entries
+retain their original marker but cannot contribute incompatible day/punchcard rows;
+source health reports `timezoneCacheEntriesExcluded`. Unset `TZ` uses the runtime's
+resolved machine zone; an unresolved zone declines cache and aggregate-memo reuse.
+Schema remains 26, preserving Unit 15's independent OpenCode cost marker. Unit 13
+awaits independent review before Unit 14.
+
+Pricing retains its existing local `row.day` contract (`usage-parsers.localDay`,
+`pricing.costOf`, and the cache-saving probes documented in usage metrics). Cold
+and warm reads within a zone must agree, including dated rates. A timezone change
+can move a row across a dated rate boundary and therefore change its API-equivalent
+estimate; this unit neither establishes a provider billing timezone nor freezes a
+price from the old local day. Reported OpenCode cost stays observed, and token,
+provider, model, Claude cost-state, Codex fields and duration semantics stay intact.
+
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin

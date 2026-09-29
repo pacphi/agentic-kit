@@ -5,9 +5,10 @@
 //   ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl
 //
 // The corpus is large (1.3 GB on the reference machine) and a finished
-// transcript never changes again, so every file is parsed AT MOST ONCE: the
+// transcript never changes again, so parsing is reused within its local calendar
+// context: the
 // derived per-session record is cached in ~/.config/agentic-kit/usage-index.json
-// keyed by (path, mtime, size). A warm refresh stats source files and validates
+// keyed by (path, mtime, size, localTimeContext). A warm refresh stats source files and validates
 // cached Claude message claims before using them for cross-file accounting.
 //
 // Three rules this module exists to enforce:
@@ -196,6 +197,20 @@ export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields;
 const OPENCODE_PARSE_SEMANTICS = 'cost-trust-v2';
 const compatibleOpencodeCache = (candidate, entry) => candidate.provider !== 'opencode'
   || entry?.parseSemantics === OPENCODE_PARSE_SEMANTICS;
+
+/** Local buckets depend on the full zone's historical rules, not today's offset.
+ * Include the runtime rule-data version; an upgrade can change past buckets.
+ * Unknown zones are deliberately non-reusable, including legacy v26 entries. */
+function localTimeContext() {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!zone) return null;
+    return JSON.stringify([zone, process.versions.tz ?? null, process.versions.icu ?? null]);
+  } catch { return null; }
+}
+function compatibleLocalTime(entry, context) {
+  return context !== null && entry?.localTimeContext === context;
+}
 
 const DAY_MS = 86_400_000;
 // Dashboard windows stop at 365 days. One displayed window plus its equal
@@ -613,6 +628,7 @@ function scanKey(o = {}) {
   return JSON.stringify([
     Number(o.days) || 14, Number(o.lookbackDays) || 0,
     !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '', o.claudeWindowConfigDir || '',
+    localTimeContext(),
   ]);
 }
 
@@ -814,19 +830,19 @@ function withClaudeIdentityEligibility(session, candidate, cutoff) {
  *  bookkeeping — which is genuinely provider-specific (codex tracks file
  *  counts and yield diagnostics no other source has) — is not inlined into
  *  the generic scan loop's own complexity. */
-function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}) {
+function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}, timeContext = localTimeContext()) {
   const hit = cache?.entries?.[c.file];
   // `updatedMs` exists only on OpenCode candidates (its rows are rewritten in
   // place, so created-time and count cannot see a finished turn); file-backed
-  // sources key on mtime/size alone.
+  // sources key on mtime/size plus the local calendar context.
   const updated = c.stat.updatedMs === undefined ? {} : { upd: c.stat.updatedMs };
-  const cacheHit = !!(hit && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
+  const cacheHit = !!(compatibleLocalTime(hit, timeContext) && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
     && hit.upd === updated.upd
     && ledgerStillValid(hit, c.windowStat)
     && compatibleCostStateCache(c, hit)
     && compatibleOpencodeCache(c, hit)
     && (c.provider !== 'codex' || hit.parseStats));
-  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null),
+  const key = { localTimeContext: timeContext, mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null),
     ...(c.provider === 'opencode' ? { parseSemantics: OPENCODE_PARSE_SEMANTICS } : {}) };
   let session = cacheHit ? hit.session : null;
   let parseStats = cacheHit ? hit.parseStats : null;
@@ -866,9 +882,10 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
  *  Mutates `entries` and `records` in place; returns the possibly-updated
  *  opencode health (a degraded existence check discovered mid-loop must
  *  still be visible to the NEXT entry's check and to the final report). */
-function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth, attemptedFiles }) {
+function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth, attemptedFiles, timeContext }) {
   if (!cache?.entries) return opencodeHealth;
   let legacyCacheEntriesExcluded = 0;
+  let timezoneCacheEntriesExcluded = 0;
   for (const [file, e] of Object.entries(cache.entries)) {
     // A candidate that failed reparsing must not be revived just because its
     // path still stats (it may now be unreadable or no longer be a file).
@@ -885,9 +902,14 @@ function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb,
     entries[file] = result.entry;
     opencodeHealth = result.health;
     if (!result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) legacyCacheEntriesExcluded++;
-    if (result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) records.push(e.session);
+    if (result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) {
+      // Retain the original marker so a degraded source cannot launder
+      // old buckets into the new timezone on the following refresh.
+      if (compatibleLocalTime(e, timeContext)) records.push(e.session);
+      else timezoneCacheEntriesExcluded++;
+    }
   }
-  return { ...opencodeHealth, legacyCacheEntriesExcluded };
+  return { ...opencodeHealth, legacyCacheEntriesExcluded, timezoneCacheEntriesExcluded };
 }
 
 /** The opencode half of carryForwardCachedEntries — split out to keep both
@@ -978,6 +1000,7 @@ async function scan(o = {}) {
   const ocDb = opencodeSource.ocDb;
   candidates.push(...opencodeSource.candidates);
 
+  const timeContext = localTimeContext();
   const cache = force ? null : readCache(cacheFile);
   const entries = {};
   const records = [];
@@ -992,7 +1015,7 @@ async function scan(o = {}) {
 
   notify(onProgress, { scanned: 0, total, phase: 'scan' });
   for (const c of candidates) {
-    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits);
+    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits, timeContext);
     if (session) {
       entries[c.file] = {
         ...key, session,
@@ -1006,7 +1029,7 @@ async function scan(o = {}) {
   }
 
   opencodeHealth = carryForwardCachedEntries(cache, entries, records, {
-    now, cutoff, ocDb, opencodeHealth, attemptedFiles: new Set(candidates.map((candidate) => candidate.file)),
+    now, cutoff, ocDb, opencodeHealth, timeContext, attemptedFiles: new Set(candidates.map((candidate) => candidate.file)),
   });
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
   // Completed OpenCode responses whose provider reported no token counts: one
@@ -1089,7 +1112,7 @@ export async function readIndex(o = {}) {
   // `cachePath` per test so their keys already differ. Ruled parked with that
   // reason rather than left implied.
   const key = scanKey({ ...o, days });
-  if (_memo && _memo.key === key && now - _memo.at < maxAgeMs) return _memo.agg;
+  if (localTimeContext() !== null && _memo && _memo.key === key && now - _memo.at < maxAgeMs) return _memo.agg;
   const agg = await buildIndex({ ...o, days });
   _memo = { key, at: now, agg };
   return agg;
