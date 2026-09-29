@@ -1,6 +1,6 @@
 # Test temp folder cleanup design
 
-## Status and decision
+## Status
 
 Research snapshot: 2026-09-28, `e2f9dcae0554ff63921df618a819fd5e6afe80d2`, macOS Darwin 27.0.0, Node 26.4.0; Node 22.22.3 used for CLI checks. Proposed behavior is **list-only for abandoned sibling roots on macOS, Linux and Windows**. No candidate establishes complete descendant liveness. This uses B9-R5's explicit fallback, preserves B9-R1–R8, and introduces no native sweeper or deletion authority.
 
@@ -137,7 +137,7 @@ This is a source lifecycle classification, not a guarantee that cleanup runs aft
 | R | 168 | Local test/file hook registration; cleanup line shown. No preceding direct assert/assertSandboxed call in the allocating scope was found. |
 | M | 87 | Module allocation with file hook; early imports/assertions can precede registration. |
 | F | 113 | Removal in finally; setup before entering try remains exposed. |
-| S | 68 | Direct cleanup reached only on normal execution, often after assertions. |
+| S | 67 | Direct cleanup reached only on normal execution, often after assertions. |
 | CF | 20 | Factory returns root; callers remove in finally; pre-return setup remains exposed. |
 | CH | 1 | Factory returns root; caller registers a hook; pre-registration setup remains exposed. |
 | CM | 5 | Factory callers have mixed success-only/finally/hook lifecycles; exact examples in JSON. |
@@ -147,7 +147,7 @@ This is a source lifecycle classification, not a guarantee that cleanup runs aft
 | XS | 1 | Executable child template uses success-path cleanup. |
 | XL | 1 | Executable child template deliberately leaks to exercise runner detection. |
 | PE | 10 | Allocation covered transitively by enclosing private temp exit handler. |
-| P | 15 | Allocation covered transitively by parent folder cleanup hook. |
+| P | 16 | Allocation covered transitively by parent folder cleanup hook. |
 | G | 2 | Root added to collection consumed by already registered/file cleanup hook. |
 | C | 3 | Returns a cleanup method; construction failure handling and caller obligations described in JSON. |
 
@@ -330,7 +330,7 @@ Source index below uses `allocation line:code→cleanup/caller evidence line` wi
 | `tests/kit/project-sources-imports.test.mjs` | 21:R→22 |
 | `tests/kit/prompts-mainline-boundary.test.mjs` | 14:F→22 |
 | `tests/kit/provider-cli.test.mjs` | 51:CS→86,103,109; 62:CS→86,103,109; 193:CF→297,335,336; 215:CF→297,335,336 |
-| `tests/kit/provider-credentials.test.mjs` | 24:M→25; 33:P→24,25,33; 40:S→42 |
+| `tests/kit/provider-credentials.test.mjs` | 24:M→25; 33:P→24,25,33; 40:P→24,25,42 (local S→42) |
 | `tests/kit/provider-refresh-cli.test.mjs` | 28:CS→48,84,89; 43:CS→48,84,89 |
 | `tests/kit/provider-teardown-preservation.test.mjs` | 9:R→11 |
 | `tests/kit/providers-drift-parity.test.mjs` | 22:M→113; 62:R→63; 96:R→97 |
