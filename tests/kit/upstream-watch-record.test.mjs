@@ -189,3 +189,13 @@ test('future --since is a usage error', async () => {
     assert.match(err, /--since is in the future/);
   });
 });
+
+test('invalid registry takes precedence over a future --since', async () => {
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { status: 'done' })], async (file) => {
+    const { code, result, err } = await record(file, ['--since', '2026-10-01T00:00:00Z']);
+    assert.equal(code, 3);
+    assert.equal(result.blind, true);
+    assert.match(err, /upstream registry is invalid/);
+    assert.doesNotMatch(err, /--since is in the future/);
+  });
+});
