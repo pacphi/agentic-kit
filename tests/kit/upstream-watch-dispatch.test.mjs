@@ -316,3 +316,27 @@ test('non-string error metadata is ignored without coercing objects', async () =
   });
   await assert.rejects(dispatcher.fire('x'), { message: 'the routine trigger answered HTTP 401 without a session' });
 });
+
+test('a dry run previews three eligible fixes, defers the rest and never sleeps', async () => {
+  const dispatcher = fakeDispatcher();
+  const result = await dispatch({ released: [1, 2, 3, 4, 5].map(fix), records: [], dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT, dryRun: true, pause: async () => { assert.fail('dry run slept'); } });
+  assert.deepEqual(result.wouldFire.map((item) => item.id), [1, 2, 3].map((n) => `proffesor-for-testing/agentic-qe#${n}`));
+  assert.deepEqual(result.deferred.map((item) => item.id), [4, 5].map((n) => `proffesor-for-testing/agentic-qe#${n}`));
+  assert.deepEqual(dispatcher.calls.fire, []);
+  assert.deepEqual(result.records, []);
+});
+
+for (const fail of [false, true]) {
+  test(`PR observation remains bounded after ${fail ? 'a fire failure' : 'the fire cap'}`, async () => {
+    const dispatcher = fakeDispatcher({ pr: 261, fireError: fail ? 'unavailable' : null });
+    const waits = [];
+    const observed = (n, at) => ({ ...fired(at), id: `proffesor-for-testing/agentic-qe#${n}`, fields: { branch: fix(n).fields.branch, session: `https://claude.ai/code/session_${n}` } });
+    const records = [observed(10, '2026-10-01T14:17:00Z'), observed(11, '2026-09-25T14:17:00Z'), observed(12, '2026-10-01T14:17:00Z'), observed(13, '2026-10-01T14:17:00Z'), { ...observed(13, '2026-10-01T14:17:00Z'), event: 'dispatch-pr' }];
+    const result = await dispatch({ released: [10, 1, 2, 3, 4, 5].map(fix), records, dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT, eligibleIds: new Set([10, 11, 13].map((n) => `proffesor-for-testing/agentic-qe#${n}`)), pause: async (ms) => { waits.push(ms); } });
+    assert.equal(dispatcher.calls.fire.length, fail ? 1 : 3);
+    assert.deepEqual(waits, fail ? [] : [15000, 15000]);
+    assert.equal(result.deferred.length, fail ? 4 : 2);
+    assert.deepEqual(dispatcher.calls.pr, [['pacphi/agentic-kit', 'upstream/proffesor-for-testing-agentic-qe-10']]);
+    assert.deepEqual(result.records.filter((item) => item.event === 'dispatch-pr').map((item) => item.id), ['proffesor-for-testing/agentic-qe#10']);
+  });
+}

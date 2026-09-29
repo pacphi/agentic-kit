@@ -298,10 +298,10 @@ async function record(registry, fetcher, options, { stdout, stderr, now, ledgerS
         sentences: records.map((item) => commitSafe(sentence(item))),
       });
     } catch (error) {
-      // The routine already ran for these; without the commit the next run fires again.
+      // These sessions were observed; without the commit, later runs may fire again.
       const sessions = fired.records.filter((item) => item.event === 'fired');
       for (const item of sessions) stderr.write(`Fired ${item.id} before the ledger commit failed: session ${item.fields.session}\n`);
-      return blindRecord(`Could not build the ledger commit: ${error.message}`, io, { fetchErrors, dispatchErrors: fired.errors, fired: sessions });
+      return blindRecord(`Could not build the ledger commit: ${error.message}`, io, { fetchErrors, dispatchErrors: fired.errors, fired: sessions, deferred: fired.deferred });
     }
   }
   const body = renderNotice({ records, mention, date: runAt.slice(0, 10), recordedAt: runAt });
@@ -312,7 +312,7 @@ async function record(registry, fetcher, options, { stdout, stderr, now, ledgerS
   for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
   for (const item of fired.errors) stderr.write(`Dispatch ${item.id}: ${item.error}\n`);
   const lines = [...records.map((item) => item.line), ...fired.wouldFire.map((item) => `Would fire ${item.id} ${item.version} ${item.branch}`),
-    ...fired.deferred.map((item) => `Deferred to the next run: ${item.id} ${item.version} ${item.branch}`)];
+    ...fired.deferred.map((item) => `Deferred for a later check: ${item.id} ${item.version} ${item.branch}`)];
   stdout.write(options.json ? `${JSON.stringify(result, null, 2)}\n` : lines.length ? `${lines.join('\n')}\n` : 'No new records.\n');
   return 0;
 }

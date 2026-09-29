@@ -3,7 +3,7 @@
 // at most MAX_FIRES times and not again within REFIRE_AFTER_DAYS, and record
 // the draft pull request once the branch has one. A run fires at most
 // MAX_FIRES_PER_RUN fixes, spaced apart, and stops at the first failed call;
-// the rest are deferred to the next run. A dry run lists what would fire
+// the rest stay eligible for later checks. A dry run lists what would fire
 // instead of firing. Injectable exec, fetch and pause.
 import { eventLine } from './classify.mjs';
 import { run } from './fetch.mjs';
@@ -15,7 +15,7 @@ export const REFIRE_AFTER_DAYS = 3;
 export const PR_OBSERVE_DAYS = 7;
 export const MAX_FIRES = 2;
 export const FIRE_TIMEOUT_MS = 30_000;
-// Sessions start gradually: a few per run, spaced apart; the rest wait for the next run.
+// Sessions start gradually: a few per run, spaced apart; later checks revisit the rest.
 export const MAX_FIRES_PER_RUN = 3;
 export const FIRE_SPACING_MS = 15_000;
 // The endpoint documents retries for HTTP 500/503, but has no idempotency key.
@@ -104,12 +104,13 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
       }
       const newest = Math.max(...firings.map((item) => Date.parse(item.recordedAt)), 0);
       if (newest && now.getTime() - newest < REFIRE_AFTER_DAYS * DAY) continue;
-      if (dryRun) {
-        wouldFire.push({ id: event.id, version, branch });
-        continue;
-      }
       if (triggerFailed || attempted >= MAX_FIRES_PER_RUN) {
         deferred.push({ id: event.id, version, branch });
+        continue;
+      }
+      if (dryRun) {
+        attempted++;
+        wouldFire.push({ id: event.id, version, branch });
         continue;
       }
       if (attempted++) await pause(FIRE_SPACING_MS);
