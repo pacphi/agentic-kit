@@ -28,7 +28,8 @@ export const SUITES = {
     ['--test', 'tests/ui/dashboard-project-context.mjs', 'tests/ui/maintenance-projects.mjs',
       'tests/ui/maintenance-host-alignment.mjs', 'tests/ui/intelligence-picker.mjs',
       'tests/ui/usage-project-groups.mjs', 'tests/ui/context-coverage.mjs', 'tests/ui/host-readiness.mjs',
-      'tests/ui/maintenance-focus.mjs', 'tests/ui/maintenance-guidance.mjs'],
+      'tests/ui/maintenance-focus.mjs', 'tests/ui/maintenance-guidance.mjs',
+      'tests/ui/session-surfaces.mjs'],
   ],
 };
 

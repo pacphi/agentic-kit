@@ -245,7 +245,7 @@ test('a clean command passes; concurrent-writer churn does not fail a developer 
   assert.match(r.stderr, /concurrent writers \(not failing\)/);
 });
 
-test('SUITES keeps the exact commands package.json ran before', async () => {
+test('SUITES preserves package scripts and includes the session-surfaces regression', async () => {
   const { SUITES } = await import('../../scripts/run-tests.mjs');
   assert.deepEqual(SUITES.unit[0], ['--test', '--experimental-test-coverage', '--test-coverage-lines=70',
     '--test-coverage-branches=70', '--test-coverage-functions=70', 'tests/kit/*.test.mjs']);
@@ -255,7 +255,7 @@ test('SUITES keeps the exact commands package.json ran before', async () => {
   assert.deepEqual(SUITES.ui[1], ['--test', 'tests/ui/dashboard-project-context.mjs', 'tests/ui/maintenance-projects.mjs',
     'tests/ui/maintenance-host-alignment.mjs', 'tests/ui/intelligence-picker.mjs', 'tests/ui/usage-project-groups.mjs',
     'tests/ui/context-coverage.mjs', 'tests/ui/host-readiness.mjs', 'tests/ui/maintenance-focus.mjs',
-    'tests/ui/maintenance-guidance.mjs']);
+    'tests/ui/maintenance-guidance.mjs', 'tests/ui/session-surfaces.mjs']);
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.test, 'node scripts/run-tests.mjs unit');
   assert.equal(pkg.scripts['test:ui'], 'node scripts/run-tests.mjs ui');
