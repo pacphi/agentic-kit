@@ -151,7 +151,7 @@ up to six minutes each:
 ak status --refresh=live --only learning        # trains a cycle in an isolated dir; asserts patterns persist to disk
 ak status --refresh=live --only aqe             # agentic-qe genuinely on ruvector (no FsyncFailed)
 ak status --refresh=live --only harvest         # Ruflo's learning-write path (post-task + distill) in an isolated store
-ak status --refresh=live --only memory-routes   # CLI/MCP routing observation, remembered as the memory check
+ak status --refresh=live --only memory-routes   # CLI round trip remembered as memory; routing observation remembered separately
 ak status --refresh=live --only learning,harvest,aqe,memory-routes,security,deja-vu,providers,mcp,aqe-embedding
 ```
 

@@ -89,7 +89,7 @@ Slow proofs run only when named with --only, up to six minutes each:
   aqe            storage, embedding configuration and provenance, and the
                  browser payload
   memory-routes  the memory round trip, plus whether CLI and MCP see each
-                 other's writes (remembered as the memory check)
+                 other's writes (CLI result remembered as memory; routing separately)
 A named check runs even when it would not apply; its result is remembered only
 when it applies. learning and harvest are never remembered.
 

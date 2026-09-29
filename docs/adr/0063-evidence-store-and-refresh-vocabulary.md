@@ -428,9 +428,9 @@ this branch" section, and "Ahead: the dashboard half" below.
   `learning`, `harvest`, `aqe`, `memory-routes` — slow, `--only`-only) now live in
   `src/lib/live-checks.mjs` and run as `--refresh=live`'s `live` stage. `memory` is the quick
   store/retrieve/purge round trip; `memory-routes` additionally observes whether the CLI and MCP
-  see each other's writes, and its result is remembered under the `memory` evidence id, not its
-  own. A live-check evidence row now carries the source id `status-refresh-live`, labelled "ak
-  status --refresh=live"; a row recorded before this branch under the retired `verify` or
+  see each other's writes. Its CLI result is remembered under `memory` and its routing result
+  under `memory-routes`. A live-check evidence row carries the source id
+  `status-refresh-live`, labelled "ak status --refresh=live"; a row recorded before this branch under the retired `verify` or
   `status-live` source ids still reads back, labelled "an earlier live check" — the label never
   names a retired command (`live-check-evidence.mjs`'s `SOURCE_LABEL`).
 - **The Codex quota presence gate.** `/api/limits` asks `codex app-server` for its

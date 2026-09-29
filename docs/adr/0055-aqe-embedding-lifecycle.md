@@ -21,9 +21,9 @@
   full `aqe` proof runs with `--only aqe`. A live-check evidence row now carries the source id
   `status-refresh-live`, labelled "ak status --refresh=live"; a row recorded before this rename
   under the retired `verify`/`status-live` source ids still reads back, labelled "an earlier live
-  check" — the label never names a retired command. Evidence ids are unchanged: `memory-routes`
-  still records under the `memory` id, and the full `aqe` proof still records only its embedding
-  request under `aqe-embedding` (remediation program, branch 6b; see
+  check" — the label never names a retired command. `memory-routes` records its CLI round trip
+  under `memory` and its routing observation under `memory-routes`; the full `aqe` proof still
+  records only its embedding request under `aqe-embedding` (remediation program, branch 6b; see
   [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-09-audit-aqe-integration-repair.md)

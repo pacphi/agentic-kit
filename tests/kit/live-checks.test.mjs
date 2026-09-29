@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
@@ -22,13 +23,15 @@ const HOME = sandboxHome('ak-live-checks');
 const paths = await import('../../src/lib/paths.mjs');
 const live = await import('../../src/lib/live-checks.mjs');
 const evidence = await import('../../src/lib/live-check-evidence.mjs');
+const projectMemorySection = (await import('../../src/commands/status/sections/project-memory.mjs')).default;
 const { refreshRequestFromFlags, cliRefreshStages } = await import('../../src/lib/refresh.mjs');
 const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
 
 const PROJECT = sandboxProject('ak-live-checks');
-paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9' }));
+const GLOBAL_ROOT = fakeGlobalRoot(HOME, { ruflo: '9.9.9' });
+paths._setGlobalRootForTest(GLOBAL_ROOT);
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const seedHome = (cfg = offlineKitConfig()) => {
@@ -592,8 +595,8 @@ test('the memory-routes proof is remembered separately; learning and harvest are
   const got = evidence.readLiveCheck('memory-routes', {});
   assert.equal(got.status, 'failed');
   assert.equal(got.source, 'status-refresh-live');
-  assert.equal(evidence.readLiveCheck('memory', {}), null);
-  assert.deepEqual(fs.readdirSync(evidence.liveCheckDir()), ['memory-routes.json']);
+  assert.equal(evidence.readLiveCheck('memory', {}).status, 'failed');
+  assert.deepEqual(fs.readdirSync(evidence.liveCheckDir()), ['memory-routes.json', 'memory.json']);
 });
 
 test('a failed or timed-out routing run replaces a previous pass; a later generic memory pass cannot revive it', async () => {
@@ -613,6 +616,61 @@ test('a failed or timed-out routing run replaces a previous pass; a later generi
   await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [generic] });
   assert.equal(evidence.readLiveCheck('memory').status, 'passed');
   assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
+});
+
+test('a route timeout after the CLI proof keeps the generic memory pass', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const check = { id: 'memory-routes', evidenceId: 'memory-routes', timeoutMs: 10, applies: () => true,
+    run: ({ onCliOutcome }) => {
+      onCliOutcome({ status: 'passed', reason: null });
+      return new Promise(() => {});
+    } };
+  const [result] = await live.runLiveChecks({ cfg: offlineKitConfig(), cwd: PROJECT, checks: [check], graceMs: 1 });
+  assert.equal(result.status, 'inconclusive');
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed');
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
+});
+
+test('a CLI upgrade during the route check cannot attribute the old observation to the new version', async (t) => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const root = fs.mkdtempSync(path.join(HOME, 'routing-upgrade-'));
+  const cli = path.join(root, 'ruflo', 'node_modules', '@claude-flow', 'cli');
+  fs.mkdirSync(cli, { recursive: true });
+  const setVersion = (version) => fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ version }));
+  t.after(() => { paths._setGlobalRootForTest(GLOBAL_ROOT); rmrf(root); });
+  paths._setGlobalRootForTest(root);
+  setVersion('3.45.0');
+  const oldKey = evidence.liveCheckInputsKey('memory-routes');
+  const check = { id: 'memory-routes', evidenceId: 'memory-routes', timeoutMs: 50, applies: () => true,
+    run: async ({ onCliOutcome }) => {
+      onCliOutcome({ status: 'passed', reason: null });
+      setVersion('3.45.1');
+      return { status: 'passed', reason: null };
+    } };
+  const [result] = await live.runLiveChecks({ cfg: offlineKitConfig(), cwd: PROJECT, checks: [check] });
+  const currentKey = evidence.liveCheckInputsKey('memory-routes');
+  assert.notEqual(currentKey, oldKey);
+  assert.equal(result.status, 'inconclusive');
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: oldKey }).status, 'inconclusive');
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: oldKey }).invalidated, false);
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: currentKey }).invalidated, true);
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed');
+
+  const project = sandboxProject('ak-route-upgrade-row');
+  t.after(() => rmrf(project));
+  const swarm = path.join(project, '.swarm');
+  fs.mkdirSync(swarm);
+  for (const name of ['memory.db', 'agentdb-memory.db']) {
+    const db = new DatabaseSync(path.join(swarm, name));
+    db.exec('CREATE TABLE memory_entries (status TEXT); INSERT INTO memory_entries VALUES (NULL)');
+    db.close();
+  }
+  const row = async (version) => (await projectMemorySection.collect({ cwd: project,
+    rufloVersion: version })).find((item) => /two project memory stores/.test(item.message));
+  assert.equal((await row('3.45.0')).level, 'warn');
+  assert.equal((await row('3.45.1')).level, 'warn');
 });
 
 test('a skipped deja-vu proof is not remembered as a pass', async () => {

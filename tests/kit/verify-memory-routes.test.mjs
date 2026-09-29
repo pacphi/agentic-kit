@@ -244,7 +244,8 @@ test('the quick live memory check proves the CLI round trip without starting an 
 test('--only memory-routes runs the memory proof with the route observation and remembers it separately', posix, async () => {
   const cfg = offlineKitConfig();
   const evidence = await import('../../src/lib/live-check-evidence.mjs');
-  const beforeMemory = evidence.readLiveCheck('memory');
+  evidence.recordLiveCheck({ id: 'memory', status: 'failed', source: 'status-refresh-live',
+    inputsKey: evidence.liveCheckInputsKey('memory') });
   const { results, calls } = await withFakeRuflo('aligned', async () => ({
     results: await verify.runLiveChecks({ cfg, cwd: PROJECT, only: ['memory-routes'] }),
   }));
@@ -253,16 +254,20 @@ test('--only memory-routes runs the memory proof with the route observation and 
   assert.ok(calls.includes('mcp start'), 'the named proof observes CLI↔MCP routing');
   assert.ok(results[0].entries.some((e) => /see each other's writes/.test(e.text)), JSON.stringify(results[0].entries));
   assert.equal(evidence.readLiveCheck('memory-routes').status, 'passed');
-  assert.equal(evidence.readLiveCheck('memory')?.checkedAt, beforeMemory?.checkedAt,
-    'the route proof does not overwrite generic memory evidence');
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed',
+    'the successful CLI round trip refreshes the generic memory row');
 });
 
 test('an unavailable route observation is inconclusive even after a successful CLI round trip', posix, async () => {
   const cfg = offlineKitConfig();
+  const evidence = await import('../../src/lib/live-check-evidence.mjs');
+  evidence.recordLiveCheck({ id: 'memory', status: 'failed', source: 'status-refresh-live',
+    inputsKey: evidence.liveCheckInputsKey('memory') });
   const { results } = await withFakeRuflo('mcp-down', async () => ({
     results: await verify.runLiveChecks({ cfg, cwd: PROJECT, only: ['memory-routes'] }),
   }));
   assert.equal(results[0].status, 'inconclusive');
-  const evidence = await import('../../src/lib/live-check-evidence.mjs');
   assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed',
+    'MCP unavailability does not undo the successful CLI proof');
 });

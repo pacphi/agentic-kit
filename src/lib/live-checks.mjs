@@ -31,7 +31,7 @@ import { runHarvest } from './harvest.mjs';
 import { runLifecycle } from './adapters/lifecycle.mjs';
 import { companionLifecycleFor } from './adapters/companion-lifecycle-registry.mjs';
 import { ok, warn, fail, info, heading, captureOutput } from './output.mjs';
-import { rememberLiveCheck, embeddingProbeOutcome } from './live-check-evidence.mjs';
+import { rememberLiveCheck, liveCheckInputsKey, embeddingProbeOutcome } from './live-check-evidence.mjs';
 import { LIVE_CHECK_IDS, SLOW_PROOF_IDS } from './refresh.mjs';
 
 export { LIVE_CHECK_IDS, SLOW_PROOF_IDS };
@@ -134,11 +134,12 @@ async function purgeProofNamespace(tmp, env, namespace, key, runner = runCmd) {
 /** The memory round trip in an isolated folder under `tmpRoot`, removed
  *  whatever happens. `observeRoutes: false` keeps the quick `memory` check to
  *  the CLI round trip: the route observation (the `memory-routes` proof)
- *  starts a real MCP server and can only add warnings, which a live-check
- *  record does not carry.
- *  @param {{ observeRoutes?: boolean, routeVerdict?: boolean, tmpRoot?: string, runner?: typeof runCmd, haveCmd?: typeof have }} [options] */
+ *  starts a real MCP server. Its observation has separate evidence, while
+ *  the CLI round-trip evidence remains under `memory`.
+ *  @param {{ observeRoutes?: boolean, routeVerdict?: boolean, onCliOutcome?: (outcome:{status:string,reason:null})=>void,
+ *    tmpRoot?: string, runner?: typeof runCmd, haveCmd?: typeof have }} [options] */
 export async function verifyMemory({
-  observeRoutes = true, routeVerdict = false, tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have,
+  observeRoutes = true, routeVerdict = false, onCliOutcome, tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have,
 } = {}) {
   heading('memory — store, retrieve, locate the on-disk row, purge, and observe CLI/MCP routing in an isolated dir');
   if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove project memory'); return false; }
@@ -184,6 +185,7 @@ export async function verifyMemory({
     purged = await purgeProofNamespace(tmp, env, namespace, key, runner);
     if (!purged) { fail('isolated namespace purge did not remove the proof row'); return false; }
     ok('isolated proof namespace purged');
+    onCliOutcome?.({ status: 'passed', reason: null });
     if (observeRoutes) {
       const route = /** @type {{status?:string,cliToMcp?:string,mcpToCli?:string}|null} */
         (await observeProjectMemoryRoutes(tmp, env, namespace));
@@ -649,7 +651,8 @@ const CHECKS = Object.freeze([
   { ...slow('aqe'), run: ({ cfg, cwd, onEvidence }) => verifyAqe({ cfg, cwd, onEvidence }) },
   // The memory round trip plus the CLI/MCP route observation has distinct
   // evidence; a CLI-only pass cannot establish routing.
-  { ...slow('memory-routes', 'memory-routes'), run: () => verifyMemory({ observeRoutes: true, routeVerdict: true }) },
+  { ...slow('memory-routes', 'memory-routes'), run: ({ onCliOutcome }) =>
+    verifyMemory({ observeRoutes: true, routeVerdict: true, onCliOutcome }) },
 ].map((check) => Object.freeze(check)));
 
 /**
@@ -683,7 +686,9 @@ const duration = (ms) => (ms < 1000 ? `${ms} ms` : `${Math.round(ms / 1000)} s`)
 async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
   const controller = new AbortController();
   const started = Date.now();
-  const work = captureOutput(() => withAbortSignal(controller.signal, () => check.run(ctx)))
+  let cliOutcome = null;
+  const work = captureOutput(() => withAbortSignal(controller.signal,
+    () => check.run({ ...ctx, onCliOutcome: (outcome) => { cliOutcome = outcome; } })))
     .then(({ result, entries }) => ({ outcome: checkOutcome(result, entries, check.id), entries }),
       () => ({ outcome: { status: 'inconclusive', reason: 'the check could not run' }, entries: [] }));
   const deadline = sleep(timeoutMs);
@@ -697,7 +702,8 @@ async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
     settled = { outcome: { status: 'inconclusive', reason: `no result within ${duration(timeoutMs)}` }, entries: late?.entries ?? [] };
   }
   const { outcome, entries } = settled;
-  return { id: check.id, status: outcome.status, reason: outcome.reason ?? null, elapsedMs: Date.now() - started, entries };
+  return { id: check.id, status: outcome.status, reason: outcome.reason ?? null,
+    elapsedMs: Date.now() - started, entries, cliOutcome };
 }
 
 /**
@@ -716,15 +722,28 @@ export async function runLiveChecks({
   cfg = loadKitConfig(), cwd = process.cwd(), only = [], checks = liveChecksFor(cfg, only),
   timeoutMs, graceMs = LIVE_CHECK_GRACE_MS, source = 'status-refresh-live',
 } = {}) {
-  const remember = (id, outcome) => rememberLiveCheck(id, outcome, { source, cfg, cwd });
+  const remember = (id, outcome, inputsKey) => rememberLiveCheck(id, outcome, { source, cfg, cwd, inputsKey });
   const ctx = { cfg, cwd, onEvidence: remember };
+  // Capture the installed implementation before any proof starts. A package
+  // upgrade while the slow check runs cannot turn an old observation into a
+  // pass for the newly installed CLI.
+  const routeKeys = checks.map((check) => check.id === 'memory-routes'
+    ? liveCheckInputsKey('memory-routes', { cfg, cwd }) : null);
   const results = await Promise.all(checks.map(async (check) => ({
     ...(await runOneLiveCheck(check, ctx, { timeoutMs: timeoutMs ?? check.timeoutMs ?? QUICK_TIMEOUT_MS, graceMs })),
     applies: check.applies?.(cfg ?? {}) ?? true,
   })));
   checks.forEach((check, i) => {
     const evidenceId = check.evidenceId === undefined ? check.id : check.evidenceId;
-    if (evidenceId && results[i].applies) remember(evidenceId, results[i]);
+    if (!results[i].applies) return;
+    if (check.id === 'memory-routes') {
+      remember('memory', results[i].cliOutcome ?? results[i]);
+      if (routeKeys[i] !== liveCheckInputsKey('memory-routes', { cfg, cwd })) {
+        results[i].status = 'inconclusive';
+        results[i].reason = 'installed routing implementation changed during the check';
+      }
+      remember('memory-routes', results[i], routeKeys[i]);
+    } else if (evidenceId) remember(evidenceId, results[i]);
   });
-  return results;
+  return results.map(({ cliOutcome: _cliOutcome, ...result }) => result);
 }

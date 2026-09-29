@@ -187,12 +187,12 @@ export function embeddingProbeOutcome(live) {
  * when it could not be remembered. Returns whether it was recorded.
  * @param {string} id
  * @param {{status:string,reason?:string|null}|null} outcome
- * @param {{source:string,cfg?:any,env?:NodeJS.ProcessEnv,cwd?:string,now?:number}} context
+ * @param {{source:string,cfg?:any,env?:NodeJS.ProcessEnv,cwd?:string,now?:number,inputsKey?:string}} context
  */
-export function rememberLiveCheck(id, outcome, { source, cfg, env, cwd, now } = /** @type {any} */ ({})) {
+export function rememberLiveCheck(id, outcome, { source, cfg, env, cwd, now, inputsKey } = /** @type {any} */ ({})) {
   if (!outcome) return false;
   const recorded = recordLiveCheck({ id, status: outcome.status, reason: outcome.reason ?? null, source,
-    inputsKey: liveCheckInputsKey(id, { cfg, env, cwd }) }, { now });
+    inputsKey: inputsKey ?? liveCheckInputsKey(id, { cfg, env, cwd }) }, { now });
   if (!recorded) warn(`${id}: could not remember this live check result; ak status will not show it`);
   return recorded;
 }
