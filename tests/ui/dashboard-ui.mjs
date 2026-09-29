@@ -5552,6 +5552,15 @@ async function main() {
     await page.click('[data-system-view="maintenance"]');
     await page.click('[data-mnt-dest="guidance"]');
     await page.waitForSelector('[data-mnt-plan-plc]');
+    // The audit and undo actions are conditional on retained receipts. Keep
+    // their actual selectors in the fixture while this run has no such receipt.
+    await page.evaluate(() => {
+      const fixture = globalThis.document.createElement('div');
+      fixture.id = 'refresh-write-fixture';
+      fixture.hidden = true;
+      fixture.innerHTML = '<button data-mnt-undo-receipt="fixture">Undo</button><button data-mnt-reconcile-receipt="fixture">Record</button>';
+      globalThis.document.body.appendChild(fixture);
+    });
     const stageRelease = new Map();
     for (const id of ['maintenance', 'inventory', 'local']) {
       refreshStageGates.set(id, new Promise((resolve) => stageRelease.set(id, resolve)));
@@ -5559,20 +5568,40 @@ async function main() {
     const statusReadsBefore = statusRequests.length;
     await page.click('#refresh-run');
     await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent.includes('Refreshing Maintenance evidence'));
+    check('Refresh status names the server stage and elapsed time',
+      /Refreshing Maintenance evidence · \d+s/.test(await page.locator('#refresh-status').innerText()));
     check('Refresh starts exactly one local POST', refreshRequests.filter((r) => r.method === 'POST').length === 1
       && JSON.stringify(refreshRequests.find((r) => r.method === 'POST')?.body) === JSON.stringify({ strength: 'local' }));
     await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === true);
-    check('Maintenance Apply is disabled during Refresh', await page.locator('[data-mnt-plan-plc]').first().isDisabled());
+    check('Maintenance Apply, Undo and Record are disabled during Refresh',
+      await page.locator('[data-mnt-plan-plc]').first().isDisabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-undo-receipt]').isDisabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-reconcile-receipt]').isDisabled());
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForSelector('#mnt-tab-inventory[aria-selected="true"]');
+    const activeMaintenanceReadsBefore = maintenanceInventoryRequests.length;
     for (const [id, label] of [['maintenance', 'Rebuilding the inventory'], ['inventory', 'Re-checking local evidence and versions']]) {
       stageRelease.get(id)();
       await page.waitForFunction((text) => document.getElementById('refresh-status')?.textContent.includes(text), label);
     }
     stageRelease.get('local')();
     await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.');
+    for (let attempt = 0; attempt < 30 && maintenanceInventoryRequests.length <= activeMaintenanceReadsBefore; attempt++) {
+      await page.waitForTimeout(100);
+    }
+    await page.click('[data-mnt-dest="guidance"]');
     await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
-    check('Maintenance Apply is restored after Refresh', await page.locator('[data-mnt-plan-plc]').first().isEnabled());
+    check('Maintenance write controls are restored after Refresh',
+      await page.locator('[data-mnt-plan-plc]').first().isEnabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-undo-receipt]').isEnabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-reconcile-receipt]').isEnabled());
+    await page.locator('#refresh-write-fixture').evaluate(element => element.remove());
     await page.waitForTimeout(200);
-    check('Refresh re-reads the view and host readiness after completion', statusRequests.length > statusReadsBefore);
+    check('Refresh re-reads the active Maintenance view and host readiness after completion',
+      statusRequests.length > statusReadsBefore && maintenanceInventoryRequests.length > activeMaintenanceReadsBefore);
+    const localRefreshReads = refreshRequests.filter(request => request.method === 'GET').length;
+    await page.waitForTimeout(1700);
+    check('completed Refresh stops status polling', refreshRequests.filter(request => request.method === 'GET').length === localRefreshReads);
     await page.selectOption('#refresh-strength', 'machine');
     await page.check('#refresh-project-trees');
     await page.click('#refresh-run');
@@ -5580,9 +5609,19 @@ async function main() {
     check('machine Refresh carries the project tree scope', refreshRequests.filter((r) => r.method === 'POST').length === 2
       && JSON.stringify(refreshRequests.filter((r) => r.method === 'POST')[1].body) === JSON.stringify({ strength: 'machine', projectTrees: true }));
     const postCount = refreshRequests.filter((r) => r.method === 'POST').length;
+    const reloadRequests = [];
+    const captureReload = request => reloadRequests.push(request.method());
+    await page.click('#poll-play');
+    page.on('request', captureReload);
+    await page.waitForTimeout(3100);
+    const reloadResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/status');
     await page.click('#poll-now');
-    await page.waitForTimeout(150);
-    check('Reload starts no checks', refreshRequests.filter((r) => r.method === 'POST').length === postCount);
+    await reloadResponse;
+    page.off('request', captureReload);
+    check('Reload issues only GETs and starts no checks', reloadRequests.length > 0
+      && reloadRequests.every(method => method === 'GET')
+      && refreshRequests.filter((r) => r.method === 'POST').length === postCount);
+    console.log(`refresh requests: idle 0; local POST 1, GET ${localRefreshReads}; machine POST 1, total GET ${refreshRequests.filter(request => request.method === 'GET').length}; Reload ${reloadRequests.length} GET`);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
     await page.screenshot({ path: path.join(SHOTS, 'refresh-header-light-390.png'), animations: 'disabled' });

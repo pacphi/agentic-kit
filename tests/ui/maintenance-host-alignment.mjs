@@ -50,6 +50,7 @@ test('Host alignment view filters User and Project rows and offers exact registr
     function authHeaders(){return {};}
     function esc(value){return String(value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
     function ago(){return '';}
+    function refreshRunning(){return false;}
     function beginMaintPreview(button, request){window.selectedPreview=request;}
     ${['maintenance-workspace','maintenance-operation','maintenance-cards','maintenance-filters','maintenance-guidance','maintenance-relationships','maintenance-inspector','maintenance-language-logos','maintenance-focus','maintenance-inventory'].map(clientSource).join('\n')}
     MNT.scope='user';MNT.view='host-alignment';wireMntInventory();wireMntInspector();wireMntGuidance();loadMntInventory();
