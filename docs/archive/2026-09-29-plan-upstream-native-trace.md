@@ -1,5 +1,9 @@
 # Upstream native trace plan
 
+## Status
+
+**Implemented; final integration pending** — Captured 2026-09-29. The hook and nightly workflow passed independent review and all eight local gates. Hosted macOS run 36567908852 captured package resolutions and the learning failure. The Windows preload fixture was corrected to use a file URL and independently reviewed. Final documentation/PR CI and the exact upstream comment approval remain separate gates.
+
 ## Scope
 
 Add a passive Node resolution hook for the nightly macOS learning probe. The hook records each resolved `@huggingface/transformers`, `@xenova/transformers`, and `onnxruntime-node` package root once per process, including its on-disk version when readable. It records no command arguments, environment values, or prompt content. The nightly workflow edit and native CI run belong to the integration owner.
@@ -12,4 +16,4 @@ Add a passive Node resolution hook for the nightly macOS learning probe. The hoo
 
 ## Acceptance and limits
 
-The synthetic tests must prove observed resolution behavior without downloads or native ORT. A trace from the hosted macOS learning step remains pending. An empty trace is not proof that no relevant package loaded; a start receipt distinguishes an active hook from a missing artifact, but resolution hooks do not prove native addon teardown or capture packages loaded before registration.
+The synthetic tests must prove observed resolution behavior without downloads or native ORT. The hosted macOS learning trace is captured in the accompanying dated evidence record. An empty trace is not proof that no relevant package loaded; a start receipt proves that preload reached the registration attempt, not that registration succeeded. Resolution hooks do not prove native addon teardown or capture packages loaded before registration. The receipt records the outer kit command exit, not necessarily Ruflo's raw exit.
