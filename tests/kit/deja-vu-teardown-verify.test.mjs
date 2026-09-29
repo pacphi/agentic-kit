@@ -80,7 +80,7 @@ test('deja-vu verify cleanly skips disabled, unowned integration without probing
   const { result, out } = await captureLog(() => verify.verifyDejaVu({
     cfg: cfg({ enabled: false }), adapter,
   }));
-  assert.equal(result, true);
+  assert.deepEqual(result, { status: 'skipped', reason: 'disabled and unowned' });
   assert.deepEqual(calls, []);
   assert.match(out, /disabled and unowned — skipped/);
 });

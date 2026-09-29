@@ -200,11 +200,14 @@ export async function verifyMemory({
     fail(`memory proof error: ${e.message}`);
     return false;
   } finally {
-    if (stored && !purged) {
-      await runner('ruflo', ['memory', 'purge', '--namespace', namespace, '--force'],
-        { cwd: tmp, env, timeout: 120_000 });
+    try {
+      if (stored && !purged) {
+        await runner('ruflo', ['memory', 'purge', '--namespace', namespace, '--force'],
+          { cwd: tmp, env, timeout: 120_000 });
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
@@ -463,10 +466,10 @@ async function verifyProjectProviders(root, cfg, { runner, haveCmd }) {
  *  bridge derives agentdb-memory.db from (CLAUDE_FLOW_MEMORY_PATH), and
  *  AGENTDB_PATH. An inherited value of any of them would otherwise receive the
  *  proof rows. Nothing is seeded: the proof is Ruflo's own verbs succeeding. */
-export async function verifyHarvest({ runner = runCmd, haveCmd = have } = {}) {
+export async function verifyHarvest({ tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have } = {}) {
   heading('harvest — record an outcome and distill, in an isolated store');
   if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove the harvest write path'); return false; }
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-')));
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(tmpRoot, 'agentic-kit-harvest-')));
   const swarm = path.join(tmp, '.swarm');
   // Pinned explicitly: a temporary folder inside a Git checkout would make the
   // derived project root the enclosing repository.
@@ -589,7 +592,7 @@ export async function verifyDejaVu({
   const enabled = cfg?.integrations?.tools?.dejaVu?.enabled === true;
   if (!dejaVuProofApplies(cfg)) {
     warn('deja-vu disabled and unowned — skipped');
-    return true;
+    return { status: 'skipped', reason: 'disabled and unowned' };
   }
   if (!adapter) {
     fail('deja-vu lifecycle adapter unavailable');
@@ -735,7 +738,7 @@ export async function runLiveChecks({
   })));
   checks.forEach((check, i) => {
     const evidenceId = check.evidenceId === undefined ? check.id : check.evidenceId;
-    if (!results[i].applies) return;
+    if (!results[i].applies || results[i].status === 'skipped') return;
     if (check.id === 'memory-routes') {
       remember('memory', results[i].cliOutcome ?? results[i]);
       if (routeKeys[i] !== liveCheckInputsKey('memory-routes', { cfg, cwd })) {
