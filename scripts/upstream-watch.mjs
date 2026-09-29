@@ -248,8 +248,8 @@ async function ledgerQuery(registry, options, { stdout, stderr, now, ledgerStore
 
 const WEEK = 7 * 86_400_000;
 
-function blindRecord(error, { stdout, stderr, json }, extra = {}) {
-  stderr.write(`${error}\n`);
+function blindRecord(error, { stdout, stderr, json }, extra = {}, { writeError = true } = {}) {
+  if (writeError) stderr.write(`${error}\n`);
   const result = {
     blind: true, error, records: [], fetchErrors: [], dispatchErrors: [], wouldFire: [], fired: [], parent: null, commit: null, notice: { post: false, body: '' }, ...extra,
   };
@@ -334,7 +334,7 @@ export async function main(argv, {
     stderr.write(`upstream registry is ${registry.registryStatus ?? registry.status}:\n${registry.errors.map((error) => `  ${error}`).join('\n')}\n`);
     const status = { status: registry.registryStatus ?? registry.status, errors: registry.errors };
     if (options.command === 'record') {
-      return blindRecord(`upstream registry is ${status.status}`, { stdout, stderr, json: options.json }, { registry: status });
+      return blindRecord(`upstream registry is ${status.status}`, { stdout, stderr, json: options.json }, { registry: status }, { writeError: false });
     }
     stdout.write(options.json ? `${JSON.stringify({ registry: status }, null, 2)}\n` : 'No report: the upstream registry is not valid.\n');
     return 0;

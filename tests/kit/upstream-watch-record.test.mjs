@@ -166,6 +166,7 @@ test('record is blind (exit 3) when gh, the ledger, the registry or every upstre
     assert.equal(invalid.code, 3);
     assert.deepEqual([invalid.result.blind, invalid.result.records, invalid.result.commit], [true, [], null]);
     assert.match(invalid.result.error, /registry/);
+    assert.equal(invalid.err.match(/upstream registry is/g)?.length, 1);
   });
 });
 
