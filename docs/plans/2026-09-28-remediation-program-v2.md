@@ -10,6 +10,11 @@ Windows timing evidence. #251 is done, and the alpha.60 release commit is on `ma
 Publication and global installation were not verified in the execution-plan baseline.
 The historical decision batch and schedule below remain as scope/evidence references;
 the approved execution section governs wherever their authority or timing differs.
+At the 2026-09-29 checkpoint, V3 #276, V5 #274, V4 B1 #273, V4 C3 #277, and
+V4 C4 #278 had merged to `develop@989c5e56`. Remaining V4 implementation
+units were accepted on an isolated branch; its final gates, whole-branch
+review, PR CI and integration remained open. V6 and V7 still have work. The
+final `develop` → `main` PR has not been opened.
 
 ### Approved execution and precedence
 

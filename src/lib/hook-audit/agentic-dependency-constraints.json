@@ -1129,7 +1129,8 @@
         { "date": "2026-09-26", "event": "commented", "note": "tested the single-threaded ONNX Runtime mitigation on Apple Silicon: inconclusive, the abort does not reproduce locally (issuecomment-5850382245)" },
         { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" },
         { "date": "2026-09-27", "event": "commented", "note": "3.47.0 status, transformers 3.x / ONNX Runtime 1.21 lead, fix approaches; 11/11 nightly aborts in the continue-on-error step (issuecomment-5863246672)" },
-        { "date": "2026-09-28", "event": "commented", "note": "thanked vidaunited for the trace hook; 12 of 12 macOS nightly aborts on 3.47.0, with a new WASM backend line before the abort (issuecomment-5878044230)" }
+        { "date": "2026-09-28", "event": "commented", "note": "thanked vidaunited for the trace hook; 12 of 12 macOS nightly aborts on 3.47.0, with a new WASM backend line before the abort (issuecomment-5878044230)" },
+        { "date": "2026-09-29", "event": "commented", "note": "posted the approved source-bound native trace on #2885 (issuecomment-5891510508); the failure occurred after heal, the outer command exited 1, and its learning step remained nonblocking for the job; the trace does not establish a cause or released fix" }
       ]
     },
     {
@@ -1525,7 +1526,8 @@
       "history": [
         { "date": "2026-09-24", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "commented", "note": "answered from the Codex CLI source (issuecomment-5863289657)" }
+        { "date": "2026-09-27", "event": "commented", "note": "answered from the Codex CLI source (issuecomment-5863289657)" },
+        { "date": "2026-09-29", "event": "reviewed", "note": "still open with only ak's source-analysis comment; no maintainer-supported guidance or live hook proof, so the conditional Codex fix line remains deferred" }
       ]
     },
     {

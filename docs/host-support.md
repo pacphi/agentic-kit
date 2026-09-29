@@ -26,6 +26,24 @@ Claude Code `2.1.222`, Codex CLI `0.146.0`, and OpenCode `1.18.x`. Host and
 upstream behavior changes quickly; open issues below are a risk snapshot, not a
 promise that an issue remains open forever.
 
+**2026-09-29 support-window addendum.** Registry metadata at 13:42 UTC listed
+Ruflo 3.48.0, Agentic QE 3.14.5, and Codex CLI 0.159.0. In a network-denied,
+disposable scan, the installed Ruflo 3.48.0 `security secrets --action scan
+--path <target>` reported one synthetic file scanned and exited 0 without
+changing the target. The npm-integrity-verified native Codex 0.159.0 binary
+accepted `-s read-only -a never app-server`; an `initialize` request answered
+successfully without a provider turn. These are narrow command checks, not
+end-to-end host conformance.
+
+Released AQE 3.14.4 passed disposable live-owner lock checks on macOS and Linux:
+the status command and shipped adapter reported `LockHeld` without
+`FsyncFailed`, while the holder and storage bytes remained intact. The same
+check passed on AQE 3.14.5 on macOS and Linux. Native Windows AQE was not run.
+Ruflo 3.48.0 showed CLI-to-MCP and MCP-to-CLI memory visibility on native
+Windows with one `memory.db`; the reported backend was sql.js + HNSW with its
+native bridge disabled. The earlier Linux result was asymmetric, so these
+observations do not establish one cross-platform native-backend guarantee.
+
 The stock OpenCode gateway acceptance test currently covers the stable compatibility
 window **`>=1.18.18 <1.19.0`**. This is a tested release-line window, not a claim
 that every future OpenCode release is compatible and not a target for `ak sync` to
@@ -144,6 +162,12 @@ The dated upstream risk inventory includes:
 - hierarchical AgentDB writes can report success without durable persistence
   ([#2887](https://github.com/ruvnet/ruflo/issues/2887)).
 
+The additional Codex hook-environment fix line remains conditional. At the
+2026-09-29 check, [Ruflo #3419](https://github.com/ruvnet/ruflo/issues/3419)
+was open with only agentic-kit's Codex source-analysis comment, not a
+maintainer-supported answer or a live hook observation. Version tags alone do
+not close that evidence gap.
+
 ## Agentic QE support
 
 | AQE capability | Claude Code | Codex | OpenCode |
@@ -185,6 +209,9 @@ and [exclusive platform initialization](https://github.com/proffesor-for-testing
 (the 3.14.4 recheck did not exercise `goap_execute`),
 [RVF recovery loop](https://github.com/proffesor-for-testing/agentic-qe/issues/574),
 and [local-embedding audit findings](https://github.com/proffesor-for-testing/agentic-qe/issues/615).
+The newer 3.14.5 registry version does not establish that the repeated-init
+settings rewrite reported in [AQE #778](https://github.com/proffesor-for-testing/agentic-qe/issues/778)
+has been fixed; the disposable reproduction used 3.14.4.
 
 The Codex QE-Court investigation in
 [agentic-kit #108](https://github.com/pacphi/agentic-kit/issues/108) is a
