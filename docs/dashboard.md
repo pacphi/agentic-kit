@@ -557,6 +557,8 @@ updates.
 
 See [Observability](https://github.com/pacphi/agentic-kit/blob/main/docs/observability.md) for the map legend, workspace facts, host capability coverage,
 History/Review semantics, privacy limits, and troubleshooting.
+The optional `--live-source` structured input is experimental: its Ruflo and
+agentic-qe examples have fixture coverage, with no verified real producer.
 
 ## System
 
