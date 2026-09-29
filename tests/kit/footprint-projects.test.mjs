@@ -55,7 +55,7 @@ function write(file, content) {
 /** One Claude transcript: flat `cwd` on its own records. */
 const claudeTranscript = (root, dirName, file, cwd) => write(
   path.join(root, dirName, file),
-  `${JSON.stringify({ type: 'user', cwd })}\n${JSON.stringify({ type: 'assistant' })}\n`,
+  `${JSON.stringify({ type: 'user', cwd, sessionId: `${dirName}/${file}` })}\n${JSON.stringify({ type: 'assistant' })}\n`,
 );
 
 /** One Codex rollout: `payload.cwd` on the record that opens it. */

@@ -54,6 +54,11 @@ export const HEAD_MAX_LINES = 40;
  *  `sessions/YYYY/MM/DD/<file>.jsonl`, 4 deep. 8 leaves room for either root
  *  gaining a level without letting an unexpected tree run away. */
 const TRANSCRIPT_MAX_DEPTH = 8;
+const CLAUDE_NON_CONVERSATION_TYPES = new Set([
+  'bridge-session', 'cost-state', 'file-history-snapshot', 'queue-operation',
+  'ai-title', 'atis-latch', 'last-prompt', 'attachment', 'mode',
+  'permission-mode', 'agent-name', 'agent-setting', 'system', 'progress', 'summary',
+]);
 
 /** lstat budget for one encoded-directory decode. The decode is a bounded
  *  search (below), so it needs a ceiling of its own; 512 covers a deep path
@@ -63,8 +68,8 @@ const DECODE_STAT_BUDGET = 512;
 /** The one-line statement of what was counted and how, so no surface can render
  *  these numbers without being able to say where they came from. */
 export const PROJECT_SOURCE_METHOD =
-  'every cwd named by a Claude or Codex transcript head, plus every OpenCode session '
-  + 'directory, de-duplicated by resolved real path — not only projects with ruflo state';
+  'eligible Claude and Codex transcript head cwd evidence, plus every OpenCode session '
+  + 'directory, de-duplicated by resolved real path; Claude sessions use declared sessionId';
 
 // ── transcript heads ──────────────────────────────────────────────────────────
 
@@ -122,7 +127,7 @@ function firstClaudeSessionMetadata(lines) {
   let startedAt = null;
   for (const record of parsedHeadRecords(lines)) {
     if (!cwd && typeof record.cwd === 'string' && record.cwd) cwd = record.cwd;
-    if (!nativeId && typeof record.sessionId === 'string' && record.sessionId) nativeId = record.sessionId;
+    if (!nativeId && typeof record.sessionId === 'string' && /^\S+$/.test(record.sessionId)) nativeId = record.sessionId;
     if (!startedAt) startedAt = normalizedInstant(record.timestamp);
     if (cwd && nativeId && startedAt) break;
   }
@@ -269,6 +274,12 @@ export function scanTranscriptCwds(root, host, {
     unresolved: 0,
     recoveredFromDirName: 0,
     importedExcluded: 0,
+    sessions: 0,
+    duplicateSessionFiles: 0,
+    subagentExcluded: 0,
+    nonConversationExcluded: 0,
+    unknownSessionFiles: 0,
+    sessionCountComplete: true,
     sightings: [],
     truncated: Boolean(result.truncated),
     truncatedBy: result.truncatedBy ?? null,
@@ -287,16 +298,20 @@ export function scanTranscriptCwds(root, host, {
   let empty = 0;
   let unreadable = 0;
   let importedExcluded = 0;
+  let duplicateSessionFiles = 0;
+  let subagentExcluded = 0;
+  let nonConversationExcluded = 0;
+  let unknownSessionFiles = 0;
+  const seenClaudeIds = new Set();
+  // The walk's order is an implementation detail. File path order makes the
+  // first declaration the stable owner when an id appears in multiple files.
+  files.sort((a, b) => a.file.localeCompare(b.file));
 
   for (const { file, mtimeMs } of files) {
-    let group = null;
-    if (decodeDir) {
-      const key = path.relative(root, file).split(path.sep)[0];
-      group = groups.get(key);
-      if (!group) { group = { key, withCwd: false, newestMtimeMs: null }; groups.set(key, group); }
-      if (Number.isFinite(mtimeMs) && (group.newestMtimeMs === null || mtimeMs > group.newestMtimeMs)) {
-        group.newestMtimeMs = mtimeMs;
-      }
+    const relativeParts = path.relative(root, file).split(path.sep);
+    if (host === 'claude' && relativeParts.includes('subagents')) {
+      subagentExcluded += 1;
+      continue;
     }
     const lines = readHead(file, { fsImpl, headBytes, maxLines });
     if (lines === null) { unreadable += 1; continue; }
@@ -306,10 +321,47 @@ export function scanTranscriptCwds(root, host, {
     // desktop app as originator. It gives no project, host or origin and is
     // counted, never dropped silently (ADR-0052 §3, ADR-0060 §3).
     if (host === 'codex' && isImportedCodexRollout(lines)) { importedExcluded += 1; continue; }
+    let weight = 1;
+    if (host === 'claude') {
+      const records = [...parsedHeadRecords(lines)];
+      const hasConversation = records.some((record) => record.type === 'user' || record.type === 'assistant');
+      const hasBridge = records.some((record) => record.type === 'bridge-session');
+      // A bridge marker is definitive only when the bounded head contains no
+      // conversation. Other head-only observations remain unknown if the file
+      // extends past the read budget.
+      let fullyRead = false;
+      try { fullyRead = fsImpl.statSync(file).size <= headBytes && lines.length < maxLines; }
+      catch { /* the head alone does not establish an end-of-file */ }
+      if (!hasConversation && (hasBridge || (fullyRead && records.length > 0
+        && records.every((record) => CLAUDE_NON_CONVERSATION_TYPES.has(record.type))))) {
+        nonConversationExcluded += 1;
+        continue;
+      }
+      const { nativeId } = firstClaudeSessionMetadata(lines);
+      if (!nativeId || !hasConversation) {
+        unknownSessionFiles += 1;
+        weight = 0;
+      } else if (seenClaudeIds.has(nativeId)) {
+        duplicateSessionFiles += 1;
+        continue;
+      } else {
+        seenClaudeIds.add(nativeId);
+      }
+    }
+    let group = null;
+    if (decodeDir) {
+      const key = relativeParts[0];
+      group = groups.get(key);
+      if (!group) { group = { key, withCwd: false, newestMtimeMs: null }; groups.set(key, group); }
+      if (Number.isFinite(mtimeMs) && (group.newestMtimeMs === null || mtimeMs > group.newestMtimeMs)) {
+        group.newestMtimeMs = mtimeMs;
+      }
+    }
     const cwd = firstCwd(lines, host);
     if (!cwd) { withoutCwd += 1; continue; }
     withCwd += 1;
-    sightings.push({ cwd, mtimeMs, origin: 'cwd', sessionOrigin: transcriptSessionOrigin(lines, host) });
+    sightings.push({ cwd, mtimeMs, origin: 'cwd', weight,
+      sessionOrigin: transcriptSessionOrigin(lines, host) });
     if (group) group.withCwd = true;
   }
 
@@ -336,6 +388,13 @@ export function scanTranscriptCwds(root, host, {
     unresolved,
     recoveredFromDirName,
     importedExcluded,
+    sessions: host === 'claude' ? seenClaudeIds.size : undefined,
+    duplicateSessionFiles,
+    subagentExcluded,
+    nonConversationExcluded,
+    unknownSessionFiles,
+    sessionCountComplete: unreadable === 0 && unknownSessionFiles === 0
+      && result.complete !== false,
     sightings,
     // Transcripts we could not read, and project directories whose path could
     // not be recovered, both mean the project list is a floor.
@@ -486,7 +545,7 @@ export function discoverProjectSources({
       }
       membership.sessions += weight;
       membership.countBases.add(sighting.origin === 'encoded-dir' ? 'recovered-project-sighting'
-        : host === 'opencode' ? 'database-sessions' : 'transcript-files');
+        : host === 'opencode' ? 'database-sessions' : host === 'claude' ? 'declared-session-ids' : 'transcript-files');
       membership.evidence.add(origin === 'unknown' ? 'desktop-origin-not-declared' : declared.evidence);
       const at = sighting.mtimeMs;
       if (Number.isFinite(at) && (row.lastSeenMs === null || at > row.lastSeenMs)) row.lastSeenMs = at;
