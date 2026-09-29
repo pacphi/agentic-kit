@@ -771,13 +771,14 @@ See the [dated top-50 coverage list](https://github.com/pacphi/agentic-kit/blob/
 
 Activity presents scan history as a table grouped by the browser’s local calendar date,
 newest first. Each date has a chevron toggle to expand or collapse its source rows; groups
-start collapsed and retain their state while the dashboard stays open. Source rows show completion time and timezone, source, status, and entry count.
+start collapsed and retain their state while the dashboard stays open. Source rows show a completion time when available, plus source, status, and entry count.
 Discovery focuses on source configuration and current coverage; historical scans appear only
 in Activity. Groups represent dates, not inferred shared scan runs. Missing dates remain explicitly unknown.
 Version measurements, update checks, and snooze deadlines also use local date/time formatting.
 
-Scan history retains the latest 10 completed records per source and environment, within the
-90-day retention limit. Each new record replaces the oldest retained record for that source.
+Scan history retains the latest 10 records per source and environment, within the
+90-day retention limit. A pause records a continuation boundary with a recorded time,
+not a scan completion time. Each new record replaces the oldest retained record for that source.
 
 Activity places recovery, work in progress, receipts, dispositions, and recipe changes in a
 responsive card grid above the full-width scan history. Narrow screens use a single column.
