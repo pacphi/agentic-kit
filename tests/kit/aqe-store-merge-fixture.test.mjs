@@ -5,6 +5,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './helpers/temp-dir.mjs';
 import { buildStore } from './helpers/aqe-store-merge-fixture.mjs';
+import { fakeAqe } from './helpers/aqe-store-merge-harness.mjs';
 
 const schema = fs.readFileSync(new URL('../fixtures/aqe-store/schema-3.14.4.sql', import.meta.url), 'utf8');
 const statements = schema.split(/;\s*\n(?=CREATE)/).map((s) => s.trim().replace(/;$/, ''))
@@ -44,17 +45,26 @@ for (const experiences of [[], null]) {
   });
 }
 
-test('fresh store gains captured_experiences on the first import', (t) => {
-  const dir = path.join(tempDir('ak-aqe-schema-import', t), '.agentic-qe');
+test('fake AQE import creates captured_experiences in a fresh store', async (t) => {
+  const root = tempDir('ak-aqe-schema-import', t);
+  const dir = path.join(root, '.agentic-qe');
   buildStore(dir, { experiences: null });
-  const db = new DatabaseSync(path.join(dir, 'memory.db'));
+  const file = path.join(dir, 'memory.db');
+  const input = path.join(root, 'export');
+  fs.mkdirSync(input);
+  fs.writeFileSync(path.join(input, 'captured-experiences.jsonl'),
+    `${JSON.stringify({ id: 'e1', task: 'task', agent: 'agent' })}\n`);
+  const before = new DatabaseSync(file, { readOnly: true });
   try {
-    assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'captured_experiences'").get().n, 0);
-    for (const sql of statements.filter((s) => /captured_experiences/.test(s))) db.exec(sql);
-    db.prepare('INSERT INTO captured_experiences (id, task, agent) VALUES (?, ?, ?)').run('e1', 'task', 'agent');
-    assert.equal(db.prepare('SELECT count(*) AS n FROM captured_experiences').get().n, 1);
-    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
-  } finally { db.close(); }
+    assert.equal(before.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'captured_experiences'").get().n, 0);
+  } finally { before.close(); }
+  const result = await fakeAqe().runner('aqe', ['brain', 'import', '--db', file, '-i', input], { cwd: root, env: {} });
+  assert.equal(result.code, 0);
+  const after = new DatabaseSync(file, { readOnly: true });
+  try {
+    assert.equal(after.prepare('SELECT count(*) AS n FROM captured_experiences').get().n, 1);
+    assert.deepEqual(after.prepare('PRAGMA foreign_key_check').all(), []);
+  } finally { after.close(); }
 });
 
 test('template copies keep FTS insert and delete triggers live', (t) => {
