@@ -304,16 +304,61 @@ test('a reaped owner does not authorize sibling deletion after a completed run',
   assert.ok(fs.existsSync(sibling));
 });
 
-test('a signalled command retains its run root and performs no sibling collection', (t) => {
-  const { repo, env } = sandbox(t);
+test('native self-termination reports the platform-specific child result', (t) => {
+  const { env } = sandbox(t);
+  const result = spawnSync(process.execPath, ['-e', "process.kill(process.pid, 'SIGTERM')"], { env });
+  assert.equal(result.error, undefined);
+  // Windows uv_kill uses TerminateProcess(1); only uv_process_kill records
+  // exit_signal on the parent's owned handle. A child's self-kill cannot do so.
+  const expected = process.platform === 'win32'
+    ? { status: 1, signal: null } : { status: null, signal: 'SIGTERM' };
+  assert.deepEqual({ status: result.status, signal: result.signal }, expected);
+  assert.throws(() => process.kill(result.pid, 0), { code: 'ESRCH' });
+  t.diagnostic(`native self-termination: ${JSON.stringify(expected)}`);
+});
+
+test('a native timeout signal retains its run root and performs no sibling collection', (t) => {
+  const { home, repo, env } = sandbox(t);
   const sibling = fs.mkdtempSync(path.join(env.TMPDIR, 'ak-suite-'));
-  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', '-e',
-    "process.kill(process.pid, 'SIGTERM')"], { env, encoding: 'utf8' });
-  assert.notEqual(r.status, 0);
+  fs.writeFileSync(path.join(sibling, 'sentinel'), 'preserve');
+  const evidence = path.join(home, 'signal-result.json');
+  const command = stub(home, 'wait-for-signal.mjs', `
+    import fs from 'node:fs'; import path from 'node:path';
+    fs.writeFileSync(path.join(process.env.AK_SUITE_ROOT, 'sentinel'), 'preserve');
+    setTimeout(() => {}, 10000);
+  `);
+  // Alter only the native spawn options in this isolated driver. The actual
+  // OS result is passed through unchanged; no signal/result is fabricated.
+  const driver = stub(home, 'owned-timeout.mjs', `
+    import cp from 'node:child_process'; import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { runGuarded } from ${JSON.stringify(new URL('../../scripts/run-tests.mjs', import.meta.url).href)};
+    const nativeSpawn = cp.spawnSync;
+    cp.spawnSync = (file, args, options) => {
+      const result = nativeSpawn(file, args, { ...options, timeout: 1000, killSignal: 'SIGTERM' });
+      fs.writeFileSync(${JSON.stringify(evidence)}, JSON.stringify({
+        pid: result.pid, status: result.status, signal: result.signal, error: result.error?.code,
+      }));
+      return result;
+    };
+    syncBuiltinESMExports();
+    try { process.exitCode = runGuarded([[${JSON.stringify(command)}]], { repoRoot: ${JSON.stringify(repo)} }); }
+    finally { cp.spawnSync = nativeSpawn; syncBuiltinESMExports(); }
+  `);
+  const r = spawnSync(process.execPath, [driver], { env, encoding: 'utf8' });
+  assert.equal(r.error, undefined);
+  assert.equal(r.status, 1, r.stderr);
+  const native = JSON.parse(fs.readFileSync(evidence, 'utf8'));
+  assert.deepEqual({ status: native.status, signal: native.signal, error: native.error },
+    { status: null, signal: 'SIGTERM', error: 'ETIMEDOUT' });
+  assert.throws(() => process.kill(native.pid, 0), { code: 'ESRCH' });
   assert.match(r.stderr, /interrupted run/);
   assert.doesNotMatch(r.stderr, /^kept run root/m);
   assert.equal(fs.readdirSync(env.TMPDIR).length, 2);
-  assert.ok(fs.existsSync(sibling));
+  const own = fs.readdirSync(env.TMPDIR).map(name => path.join(env.TMPDIR, name)).find(root => root !== sibling);
+  assert.equal(fs.readFileSync(path.join(own, 'sentinel'), 'utf8'), 'preserve');
+  assert.equal(fs.readFileSync(path.join(sibling, 'sentinel'), 'utf8'), 'preserve');
+  t.diagnostic(`native timeout: ${JSON.stringify(native)}`);
 });
 
 // Inject failures only at this subprocess's disposable temp boundary.
