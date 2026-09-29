@@ -39,14 +39,13 @@ import { createHostReadinessReader } from './host-readiness.mjs';
 //   GET /api/system   → the machine-footprint payload (ADR-0025): the cheap
 //                      tier (runtime census + known-file stats, TTL-cached
 //                      ~60s) merged with the last persisted deep snapshot,
-//                      carried forward with ITS asOf. `?refresh=deep` starts
-//                      or attaches to the single-flight deep scan and returns
-//                      immediately with progress state; `&trees=1|0` sets
-//                      whether that scan walks project working trees.
-//   GET /api/system/summary → the same read (same `?refresh=deep&trees=`)
+//                      carried forward with ITS asOf. This GET is read-only.
+//   GET /api/system/summary → the same read
 //                      with the catalog projected to what the System page
 //                      draws (dashboard/system-summary.mjs). The page and its
 //                      Runtime poll read this; /api/system stays complete.
+//   POST /api/refresh → starts one explicit staged refresh operation.
+//   GET /api/refresh → reads progress for that operation.
 //
 // The status rows are gathered by calling status.mjs's own collect() IN
 // PROCESS — safe only because the evidence store (ADR-0063) made a warm-cache

@@ -193,7 +193,8 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
         v
 Delivery
   GET /api/system            → cheap tier + persisted snapshot (token auth, loopback, no egress)
-  GET /api/system?refresh=deep → start-or-attach the single-flight deep scan
+  POST /api/refresh          → start the single-flight staged refresh
+  GET /api/refresh           → read that operation's progress
   GET /api/system/summary    → the same read, catalog/storage/install/projects/consumers each
                                 projected to what the System page draws
   ak system [--refresh[=live|machine]] [--project-trees] [--json]  → the same collector, CLI-rendered
@@ -521,7 +522,7 @@ That identity also governs acquisition cost inside one Catalog collection. Compa
 keyed by normalized physical path and reader contract, so Claude and OpenCode bindings to the same
 skill surface share one bounded observation while retaining two ConsumerBindings. Markdown and
 file-stem entrypoints likewise compute one digest per file. The observation map is created and
-discarded inside the collection; a later Full scan always observes the filesystem again. A path
+discarded inside the collection; a later Refresh machine always observes the filesystem again. A path
 match under a different reader contract is not reusable evidence.
 
 Every occurrence retains host, surface, source scope (`user`, `project`, or `plugin`), project
@@ -704,38 +705,28 @@ The link is user-initiated browser navigation; the kit itself never fetches the 
 token auth ([ADR-0014](../adr/0014-dashboard-auth-and-remediation.md)), `no-store`, zero egress.
 The response is the cheap tier computed fresh (TTL ~60s, shared-cache pattern like the
 project-snapshot cache) merged with the persisted deep snapshot and its `asOf`.
-`?refresh=deep` starts the dashboard's **Full scan** or attaches to the one in flight
-(single-flight, like the usage index's coalesced builds). In production, `index.mjs` retains the
-single-flight promise and public activity state while `deep-scan-worker.mjs` runs the synchronous
-runner in one worker thread. Phase and Projects progress messages return to the main thread, so
-ordinary reads remain responsive while the worker is busy. Injected collectors and filesystem
-implementations run the same `deep-scan-runner.mjs` inline rather than attempting to serialize test
-functions. This containment is not evidence that total scan duration decreased.
+The header's **Refresh** control starts an operation through `POST /api/refresh`.
+Choosing Machine runs the deep collector first; `GET /api/refresh` reads the operation's
+stage progress. In production, `index.mjs` retains the single-flight promise and public
+activity state while `deep-scan-worker.mjs` runs the synchronous runner in one worker thread.
+Phase and Projects progress messages return to the main thread so ordinary reads remain
+responsive. Injected collectors run the same `deep-scan-runner.mjs` inline in tests.
+Worker containment does not show that total scan duration decreased.
 
-The System measurement routes stay GET-only: a Full scan re-measures local state and writes only this domain's own
-snapshot file — it mutates no user data.
+The System measurement routes are read-only GETs. `GET /api/system` returns the complete
+read model, the same shape as `ak system --json`. `GET /api/system/summary` projects
+`catalog`, `storage`, `install`, `projects`, and `consumers` to the allow-listed keys
+drawn by the page. The catalog omits repeated presence details, consumer bindings and
+artifacts; Projects omits native-addon and stack details. This projection reduces the
+payload downloaded by the page and its Runtime poll while the collector output stays
+unchanged.
 
-`GET /api/system` is the complete read model, the same shape as `ak system --json`.
-`GET /api/system/summary` is the page's read: the same payload (and the same `?refresh=deep` and
-`&trees=` parameters) with `catalog`, `storage`, `install`, `projects` and `consumers` each
-projected by `dashboard/system-summary.mjs` to an allow-list of keys — the catalog's items cut to
-key, kind, name, hosts, source scopes, digest coverage, and distinct plugin providers
-(`presence[].provider` with `ref` and `version`); storage's category/host/project/session tree cut
-to key, label, bytes and children; a measured project row's per-tool native-addon lists and
-per-project framework/dependency stack detection dropped entirely (never rendered). The catalog's
-repeated presence copies (`item.presence` details, `consumerBindings`, `artifacts`) grow with
-items × projects × hosts and are not drawn, so the page and its 30-second Runtime poll never
-download them; the other four sections carried the same shape of excess and were the majority of
-the endpoint's real-machine bytes once the catalog alone was slimmed. The projection is a
-Dashboard-delivery view; this domain's collector output is unchanged.
-
-**A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system/summary`;
-only **Full scan** adds `?refresh=deep`. A deep scan can cost minutes of I/O on a large corpus, and
-making the act of *looking* cost that is a worse trade than a stale figure that states
-how stale it is. Staleness is therefore surfaced rather than pre-empted: every deep-tier figure
-renders with its snapshot's `asOf`, and past `SNAPSHOT_STALE_AFTER_MS` (7 days) the freshness
-label turns amber and reads "stale, scan again". The client polls only while a user-started scan is
-running, and stops when it finishes.
+Opening System reads the saved snapshot and starts no measurement. A deep scan can cost
+minutes of I/O, so the user explicitly chooses Machine and presses Refresh. Every deep-tier
+figure renders with its snapshot's `asOf`; after `SNAPSHOT_STALE_AFTER_MS` (7 days),
+the freshness label turns amber. The client reads progress for the user-started operation
+and stops polling when it finishes. **Reload** re-reads the active view without starting
+machine or provider checks.
 
 One deliberate divergence from Observability's delivery: absolute paths are **part of this
 payload**. `publicLivePayload`'s leaf-only rule exists to keep incidental provenance out of
@@ -746,7 +737,7 @@ nothing to leak.
 
 The CLI twin (`ak system`) renders the same collector output, `--json` emitting the collector's
 payload verbatim, following the one-collector-two-surfaces precedent of the usage scorecard.
-`ak system --refresh=machine` is the terminal spelling of **Full scan** and writes the same snapshot.
+`ak system --refresh=machine` is the terminal spelling of **Refresh machine** and writes the same snapshot.
 
 ## Invariants
 
@@ -856,7 +847,7 @@ normative and this table restates it for readers of this document.
 | Definition digest | SHA-256 over one complete bounded observed capability definition; equality proves those files match, not host selection, ownership, usage, or removal safety |
 | ProjectCapabilityPressure | Project/user/plugin contributions and exact overlap per project and host; context inclusion remains unknown |
 | ProjectFootprint | One eligible hosted repository's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and a proven HTTPS web link |
-| Deep scan | The explicit, user-triggered, single-flight measurement pass called **Full scan** in the dashboard; it produces a FootprintSnapshot over the stated bounded populations |
+| Deep scan | The explicit, user-triggered, single-flight measurement pass selected by **Refresh machine** in the dashboard; it produces a FootprintSnapshot over the stated bounded populations |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |
 
 ## References

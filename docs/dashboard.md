@@ -53,7 +53,7 @@ permanent.
 | System | Sessions | `#system/sessions` | Sessions | The largest retained sessions, with a localized two-line native identity, working context, and share of that host's retained bytes |
 | System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category and host — learning stores counted separately because they dwarf everything else — plus per-series growth |
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
-| System | Catalog | `#system/catalog` | (redirect) | Retired as a visible destination. The link redirects to Maintenance › Inventory. Full scan still collects the catalog measurement, and its cards now sit in Summary |
+| System | Catalog | `#system/catalog` | (redirect) | Retired as a visible destination. The link redirects to Maintenance › Inventory. Refresh machine still collects the catalog measurement, and its cards now sit in Summary |
 | System | Projects | `#system/projects` | Projects | Every repository with a remote that a host has recorded a session in — its approximate lines of code, language mix, total disk size and last activity. Worktrees, sub-folders and remote-less repositories are counted below the table, not listed |
 | System | Maintenance | `#system/maintenance` | Maintenance | Four destinations: **Inventory** (`#system/maintenance/inventory`, Focus navigation from scope through resource family to exact installation details), **Guidance** (`/guidance`, only outcomes the kit can ground, in five lanes), **Discovery** (`/discovery`, automatic sources, exact projects, collection roots, exclusions, scan coverage), and **Activity** (`/activity`, receipts, undo, interruption audits, dispositions, recipe changes, scan records). Inventory links carry scope, view, sort, `facet.<name>` values, and the selected placement as opaque state |
 
@@ -573,13 +573,11 @@ Opening System costs almost nothing. The cheap tier — the live process census,
 file sizes, and the figures carried forward from the last full scan — is served on every read and
 cached briefly.
 
-Everything else comes from the **Full scan**—the dashboard name for the deep tier—which walks
-install trees, retained-data roots, host catalog surfaces, and the eligible hosted-repository
-population. That is real I/O and can take minutes on a large machine, so it runs **only when you
-press Full scan** (or run `ak system --refresh=machine`). Opening the tab never triggers it. Production runs
-the synchronous collectors in one worker thread so the page can report phases and remain usable
-while they run. Its status names the current phase, bounded count when available, and elapsed time.
-Worker containment does not claim that the filesystem work itself completes faster.
+Everything else comes from choosing **Refresh machine** in the header and pressing **Refresh**.
+It walks install trees, retained-data roots, host catalog surfaces, and eligible hosted
+repositories. That is real I/O and can take minutes, so opening System never starts it.
+Production runs the synchronous collectors in one worker thread so the page can report phases
+and remain usable. Worker containment does not make the filesystem work itself faster.
 
 One scan may reuse a complete physical observation when another section asks the same bounded
 question. Catalog reads one physical surface once per compatible reader contract even when several
@@ -591,17 +589,17 @@ the same scan. Reuse is confined to that scan.
 Incomplete, older, differently rooted, or differently scoped evidence falls back to a fresh bounded
 walk rather than being treated as equivalent.
 
-Measurement views fetch once, then again only while a scan you started is running (Runtime also
-refreshes on the header's poll clock). They read `GET /api/system/summary`, which carries only what
-the page draws; `GET /api/system` and `ak system --json` keep the complete payload. Maintenance
-loads when you open it, and also reloads on the shared status poll while it stays the open view
-(and no measurement or provider check is already running), reading the last complete inventory each
-time; opening it checks no host provider and executes nothing. **Refresh evidence** on the
-Maintenance workspace is the explicit control that runs provider probes, and it rebuilds the
-Inventory afterwards; **Re-measure machine** beside it runs the System Full scan, walks every
-discovery source to completion, then refreshes evidence. Full scan from the System rail chains the
-same provider check after the snapshot is persisted. `ak maintain --refresh` and
-`ak maintain --refresh=machine` are the CLI equivalents.
+Measurement views read `GET /api/system/summary`, which carries only what the page draws;
+`GET /api/system` and `ak system --json` keep the complete payload. Opening Maintenance reads
+the last complete inventory and starts no provider or machine check. The header has one
+**Refresh** control with Local, Live, and Machine choices. Local refreshes Maintenance evidence,
+rebuilds the inventory, and re-checks local evidence and versions. Live adds bounded live checks.
+Machine first measures the machine, then refreshes Maintenance evidence and rebuilds the inventory
+from that measurement. A failed machine measurement skips those two dependent stages.
+The control starts an operation with `POST /api/refresh` and reads its progress with
+`GET /api/refresh`. The System and Maintenance GET routes remain read-only.
+`ak maintain --refresh` and `ak maintain --refresh=machine` offer the CLI equivalents.
+**Reload** re-reads the active view; it starts no machine or provider check.
 
 ### Session identity and local time
 
@@ -632,7 +630,7 @@ while provider-backed actions live only in Maintenance.
 
 ### Catalog cards in Summary
 
-The cross-host capability catalog is still measured by Full scan, and its three cards now live at
+The cross-host capability catalog is still measured by Refresh machine, and its three cards now live at
 the bottom of Summary: **Host inventory profile**, **Unique across hosts** (the presence matrix,
 filtered by what to show, which host carries it, and which source scope), and **Project skill
 pressure** (a project-by-host table with per-project host disclosure). Project, user, and
@@ -669,15 +667,15 @@ Guidance and Activity tabs carry a count only when something is admitted or need
 
 A fresh installation shows an empty Inventory and every installed automatic source as **Not
 scanned yet**; a host that is not installed reads **Not installed**.
-Two actions sit side by side above the tabs, each with its helper text: **Refresh evidence** runs
-provider probes on the saved measurement and rebuilds the inventory in seconds, and **Re-measure
-machine** walks the filesystem, then every discovery source, then refreshes evidence, which takes
-minutes. Choose Refresh evidence to build the inventory; `ak maintain --refresh`
-does the same from a terminal, together with the local status checks. While either runs, both
-buttons are disabled, the status line names what is running ("Refreshing evidence…"; during
-Re-measure machine, each phase in turn, from "Preparing measurement…" through "Machine measured ·
-refreshing evidence…"), and apply, undo, and record are refused; if the work does not finish, the
-previous evidence is kept.
+The header's **Refresh** control builds the inventory when Local is selected. Live adds
+bounded live checks; Machine measures the machine and walks every discovery source first.
+`ak maintain --refresh` runs the Local stages from a terminal. The ordered progress labels are
+**Measuring the machine** (Machine only), **Refreshing Maintenance evidence**,
+**Rebuilding the inventory**, **Running live checks** (Live only), and
+**Re-checking local evidence and versions**. While an operation runs, another cannot start,
+and Maintenance apply, undo, and record are refused. If work does not finish, the previous
+complete evidence is kept.
+
 After the probes settle the inventory builds in the background: the empty state reads **Building
 the inventory…** until rows appear, or names the reason if the build did not complete.
 
@@ -743,8 +741,8 @@ A saved root starts scanning at once. Scan progress reads as visited work, never
 added offer **Pause** and **Stop** while running, **Resume** and **Stop** while paused, **Retry
 scan** after a failure, and **Scan this root** if never run; stopping shows what would be affected
 and asks **Stop this source?**. Automatic sources carry no per-source control: each reads Not
-scanned yet with "measured by Re-measure machine", or Complete with "covered by the last
-measurement". A host source whose folder is not on this machine reads **Not installed** and is
+scanned yet, or Complete after the last measurement. A host source whose folder is not on this
+machine reads **Not installed** and is
 not counted in the progress sentence or the Inventory banner. A started
 source keeps running until it completes, pauses, stops, or fails. Host configuration sources skip
 transcript, session, log, and cache trees by name so they can complete.
@@ -783,12 +781,11 @@ the totals. Every parent with breakdowns also gets an "everything else" row, so 
 adds up to its parent. Roots that do not exist on this machine are listed as absent rather than
 ranked at 0 B, and roots that could not be read say so with their reason.
 
-**Project trees** are excluded by default, and the chip that includes them is a *scan* control,
-not a filter. One large repository can outweigh every shared cache combined, and a chart
-containing it is a chart of one repository — so the ranking says, in the panel, that they were
-left out. Turning the chip on starts a new Full scan that walks them (and turning it off starts
-one that does not); it is disabled while a scan is running. `ak system --refresh=machine` scans
-without project trees; add `--project-trees` to include them.
+**Project trees** are excluded by default. The **Include project trees** option is
+available only when Machine is selected in Refresh; it changes the measurement scope.
+One large repository can outweigh every shared cache combined, so the panel says when
+project trees were left out. Select that option and press Refresh to measure them.
+`ak system --refresh=machine` omits them unless `--project-trees` is added.
 
 ### Two reclaimable tiers, never one total
 
@@ -810,7 +807,7 @@ removes anything; where a CLI already owns the cleanup, the row names it.
 
 ### Reading the numbers honestly
 
-- **A section that has never been scanned says so.** It reads "not measured yet — run Full scan",
+- **A section that has never been scanned says so.** It reports an unmeasured state,
   never `0`. A zero here means a real, measured zero.
 - **A total whose inputs were incomplete renders as `≥ N`.** If one subtree could not be read or a
   walk hit its cap, the sum is a floor, not a total, and is labeled that way.
@@ -954,7 +951,8 @@ provider, model/default agent, and applicable credentials or local endpoint.
 Automatic checks do not invoke its config-debug command, which can install
 dependencies. Unresolved remote configuration and native overrides stay Unknown.
 
-**Check again** refreshes the local evidence for any host. **Check connection**
+The header's **Refresh** control with Local selected re-checks local evidence for any host.
+**Check connection**
 runs only for hosts managed by ak, and requires
 checking a confirmation box first: it sends one small provider request, using
 normal billing and native context. Native startup may initialize dependencies

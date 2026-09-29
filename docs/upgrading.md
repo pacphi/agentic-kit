@@ -150,7 +150,7 @@ When the ChatGPT desktop app imports a Claude Code transcript, it saves a copy a
 Project discovery no longer counts these copies: they give a folder no Codex host and no Desktop
 origin, and System says how many it set aside. A snapshot taken before this change still holds the
 old hosts and origins, so the Footprint snapshot schema advances to v8. This build reports a v7
-snapshot as unreadable until you run **Full scan** in System or `ak system --refresh=machine`. It
+snapshot as unreadable until you run **Refresh machine** in System or `ak system --refresh=machine`. It
 is never shown under the new rule. See [ADR-0060](adr/0060-session-surface-initiator-and-product-names.md) §3.
 
 ## 2026-09-27: Ruflo support window
@@ -389,7 +389,7 @@ working context for the already-ranked top-N rows; it does not read prompts, tit
 System > Sessions renders the identity as one two-line transcript link: localized date/time first,
 then a shortened opaque native ID. Focus or hover discloses the original filename, full native ID,
 and detailed localized time with timezone. If an older snapshot or host has no declared opening
-instant, the measured mtime is explicitly labeled **Last active**. Run **Full scan** or
+instant, the measured mtime is explicitly labeled **Last active**. Run **Refresh machine** or
 `ak system --refresh=machine` to populate native identity for an existing snapshot; no
 configuration or payload migration is required.
 
@@ -403,7 +403,7 @@ such as the user home from triggering several hundred thousand unrelated filesys
 
 Because that population is narrower than the v6 measurement contract, the Footprint snapshot
 schema advances to v7. A v6 snapshot is reported as unreadable by this build until the next explicit
-**Full scan** or `ak system --refresh=machine`; it is never silently reinterpreted.
+**Refresh machine** or `ak system --refresh=machine`; it is never silently reinterpreted.
 
 ## 2026-09-03: System Catalog snapshot v6
 
@@ -452,9 +452,9 @@ user's agentic-kit state directory. Existing System snapshot files remain read-o
 Catalog schema v4 is still refreshed with `ak system --refresh=machine`. `ak sync` neither selects
 nor executes Maintenance findings.
 
-Browser refresh now reads the saved Maintenance report without polling providers. Use **Refresh
-evidence** or `ak maintain --refresh` for current provider/version evidence. A successful System
-deep rescan also chains one Maintenance scan after the snapshot is persisted.
+Browser **Reload** reads the saved Maintenance report without polling providers. Use the header's
+**Refresh** control with its Local choice, or `ak maintain --refresh`, for current provider/version
+evidence. A successful Machine refresh persists a new System snapshot before updating Maintenance.
 
 The first provider set is intentionally narrower than the inventory. Claude plugin disable,
 update, and remove; exact Codex plugin/MCP removal; exact receipt-owned skill archive; one bounded
