@@ -17,7 +17,7 @@
 // `refresh: true` (always probes again, even warm).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,7 +37,7 @@ function readLedger(file) {
 
 /** Runs `fn` inside a disposable sandboxed HOME/project, with `extraEnv`
  *  merged into the child's environment. Cleans up unconditionally. */
-function inSandbox(prefix, extraEnv, fn) {
+async function inSandbox(prefix, extraEnv, fn) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-home-`));
   fs.mkdirSync(path.join(home, '.config'), { recursive: true });
   const project = sandboxProject(prefix);
@@ -48,16 +48,20 @@ function inSandbox(prefix, extraEnv, fn) {
     PATH: path.join(home, 'no-such-bin'),
     ...extraEnv,
   });
-  try {
-    return fn({ home, project, env });
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true });
-    fs.rmSync(project, { recursive: true, force: true });
+  let result;
+  let failure;
+  try { result = await fn({ home, project, env }); }
+  catch (error) { failure = error; }
+  for (const root of [home, project]) {
+    try { fs.rmSync(root, { recursive: true, force: true }); }
+    catch (error) { failure = failure ? new AggregateError([failure, error], 'sandbox assertion and cleanup failed') : error; }
   }
+  if (failure) throw failure;
+  return result;
 }
 
-test('spawn-guard is a no-op when AK_SPAWN_LEDGER_FILE is unset', () => {
-  inSandbox('ak-spawn-guard-noop', {}, ({ project, env }) => {
+test('spawn-guard is a no-op when AK_SPAWN_LEDGER_FILE is unset', async () => {
+  await inSandbox('ak-spawn-guard-noop', {}, ({ project, env }) => {
     // A vacuous "no ledger file exists" check would pass even if the guard
     // patched child_process regardless of the env var — assert the function
     // ITSELF is untouched (native name `spawn`, not our wrapper's `patched`).
@@ -68,25 +72,89 @@ test('spawn-guard is a no-op when AK_SPAWN_LEDGER_FILE is unset', () => {
   });
 });
 
-test('spawn-guard records a spawn made inside the guarded child, by every wrapped form', () => {
-  inSandbox('ak-spawn-guard-smoke', {}, ({ project, env: baseEnv }) => {
-    const ledgerFile = path.join(os.tmpdir(), `ak-spawn-guard-smoke-${process.pid}.ndjson`);
+test('spawn-guard records every wrapped form and waits for its owned fork', async () => {
+  await inSandbox('ak-spawn-guard-smoke', {}, async ({ project, env: baseEnv }) => {
+    const ledgerFile = path.join(project, 'spawn-ledger.ndjson');
+    const readyFile = path.join(project, 'fork-ready');
+    const releaseFile = path.join(project, 'fork-release');
+    const doneFile = path.join(project, 'fork-done');
+    const pidFile = path.join(project, 'fork-pid');
     const env = { ...baseEnv, AK_SPAWN_LEDGER_FILE: ledgerFile };
-    const forkTarget = path.join(project, 'fork-target.mjs');
-    fs.writeFileSync(forkTarget, 'process.exit(0);\n');
+    const forkTarget = path.join(project, 'fork-target.cjs');
+    fs.writeFileSync(forkTarget, [
+      "const fs = require('node:fs');",
+      `fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');`,
+      `const release = ${JSON.stringify(releaseFile)};`,
+      'const timer = setInterval(() => {',
+      '  if (!fs.existsSync(release)) return;',
+      `  fs.writeFileSync(${JSON.stringify(doneFile)}, 'done');`,
+      '  clearInterval(timer);',
+      '  process.exit(0);',
+      '}, 10);',
+    ].join('\n'));
     const script = [
+      'async function main() {',
       "const { spawnSync, execFileSync: ef, execSync: es, fork } = require('node:child_process');",
       "spawnSync(process.execPath, ['-e', '0']);",
       "ef(process.execPath, ['-e', '0']);",
       'try { es(\'true\'); } catch {}', // shell builtin: exercised even with PATH broken
-      `fork(${JSON.stringify(forkTarget)}, [], { stdio: 'ignore' });`,
-      'process.exit(0);', // do not wait on the forked grandchild's IPC channel
+      `const child = fork(${JSON.stringify(forkTarget)}, [], { stdio: 'ignore' });`,
+      `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+      'await new Promise((resolve, reject) => {',
+      '  child.once("error", reject);',
+      '  child.once("close", (code, signal) => code === 0 && !signal',
+      '    ? resolve() : reject(new Error(`fork failed: code=${code}, signal=${signal}`)));',
+      '});',
+      '}',
+      'main().catch((error) => { console.error(error); process.exitCode = 1; });',
     ].join(' ');
-    execFileSync(process.execPath, [
+    const guarded = spawn(process.execPath, [
       `--import=${SPAWN_GUARD_URL}`, '-e', script,
-    ], { cwd: project, env, encoding: 'utf8' });
+    ], { cwd: project, env, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    guarded.stderr.on('data', (chunk) => { stderr += chunk; });
+    let closed = false;
+    const parentClose = new Promise((resolve) => guarded.once('close', (code, signal) => {
+      closed = true;
+      resolve({ code, signal });
+    }));
+    let failure;
+    try {
+      const deadline = Date.now() + 5_000;
+      while (!fs.existsSync(readyFile) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.ok(fs.existsSync(readyFile), `fork did not become ready: ${stderr}`);
+      assert.strictEqual(closed, false, 'guarded parent exited while its owned fork was still running');
+    } catch (error) { failure = error; }
+    try {
+      fs.writeFileSync(releaseFile, 'release');
+      const deadline = Date.now() + 5_000;
+      while (!fs.existsSync(doneFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+      if (!fs.existsSync(doneFile) && fs.existsSync(pidFile)) {
+        const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+        if (Number.isInteger(pid) && pid > 0) { try { process.kill(pid); } catch { /* already exited */ } }
+      }
+      if (!fs.existsSync(doneFile) && !closed) guarded.kill();
+      let timeout;
+      try {
+        await Promise.race([parentClose, new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('guarded parent did not close')), 5_000);
+        })]);
+      } finally { clearTimeout(timeout); }
+    } catch (error) {
+      if (fs.existsSync(pidFile)) {
+        const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+        if (Number.isInteger(pid) && pid > 0) { try { process.kill(pid); } catch { /* already exited */ } }
+      }
+      if (!closed) guarded.kill();
+      failure = failure ? new AggregateError([failure, error], 'fork assertion and cleanup failed') : error;
+    }
+    if (failure) throw failure;
+    assert.ok(fs.existsSync(doneFile), 'owned fork completed before sandbox cleanup');
+    const { code, signal } = await parentClose;
+    assert.strictEqual(code, 0, `guarded parent failed (${signal}): ${stderr}`);
     const lines = readLedger(ledgerFile);
-    fs.rmSync(ledgerFile, { force: true });
     // Each wrapped form by name, not an exact total: execSync goes through a
     // platform shell, and only its own record is what this test is about.
     const got = JSON.stringify(lines);
@@ -130,15 +198,14 @@ function sliceByCallBoundary(lines, labels) {
   return slices;
 }
 
-test('plain ak status spawns nothing on a warm cache; --refresh always re-probes', () => {
-  inSandbox('ak-status-zero-spawn', {}, ({ project, env: baseEnv }) => {
-    const ledgerFile = path.join(os.tmpdir(), `ak-status-zero-spawn-${process.pid}.ndjson`);
+test('plain ak status spawns nothing on a warm cache; --refresh always re-probes', async () => {
+  await inSandbox('ak-status-zero-spawn', {}, ({ project, env: baseEnv }) => {
+    const ledgerFile = path.join(project, 'status-ledger.ndjson');
     const env = { ...baseEnv, AK_SPAWN_LEDGER_FILE: ledgerFile };
     execFileSync(process.execPath, [
       `--import=${SPAWN_GUARD_URL}`, FIXTURE, PKG_ROOT, project,
     ], { cwd: project, env, encoding: 'utf8', timeout: 30_000 });
     const lines = readLedger(ledgerFile);
-    fs.rmSync(ledgerFile, { force: true });
 
     const { first, second, third } = sliceByCallBoundary(lines, ['first', 'second', 'third']);
 

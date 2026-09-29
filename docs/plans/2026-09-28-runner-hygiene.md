@@ -6,6 +6,8 @@ Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe8
 
 LQ1 source inspection refutes the claimed missing selector propagation: the runner copies its input environment and removes only `FORCE_COLOR`. A guarded-child sentinel regression is green on the original implementation and fails when that copy is removed. LQ4 now uses an explicit Chrome launch environment with a private home and temp root; the local macOS system Chrome passed the full guarded UI suite (495 dashboard checks, 15 Node UI tests). Guarded unit, TypeScript and targeted ESLint gates passed. Native Windows and Linux Chrome behavior remains unmeasured.
 
+The Windows smoke lifetime follow-up has a deterministic handshake regression: the previous guarded parent exited while its forked child waited in the project directory. The smoke now waits for that exact child's `close` or `error`, checks its status, and releases it before sandbox removal. The guarded focused suite, typecheck and targeted ESLint pass on macOS. This establishes the lifecycle gap locally; native Windows CI remains the required platform proof for the reported `EPERM`.
+
 ## Contract and dependencies
 
 The [v2 scope](2026-09-28-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.
