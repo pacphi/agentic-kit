@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tempDir } from './helpers/temp-dir.mjs';
 import { ownerRecord, writeOwner, readOwner, unsafeTempBase, removableRunRoot,
-  proveAbandoned, collectAbandonedRoots, defaultProbes, OWNER_FILE } from '../../scripts/run-roots.mjs';
+  proveAbandoned, collectAbandonedRoots, defaultProbes, OWNER_FILE,
+  prepareRunRootHolds, acquireRunRootHold, releaseRunRootHold, inspectRunRootHolds } from '../../scripts/run-roots.mjs';
 
 const uid = process.getuid?.() ?? null;
 const complete = { alive: () => false, startedAfter: () => false, completeExit: () => true };
@@ -29,6 +30,36 @@ test('private atomic owner metadata round trips and does not leave staging data'
   assert.equal(record.proofMode, 'list-only');
   assert.deepEqual(fs.readdirSync(f.root), [OWNER_FILE]);
   if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(f.root, OWNER_FILE)).mode & 0o777, 0o600);
+});
+
+test('parallel prelaunch holds release only their own marker; uncertain inspection retains', (t) => {
+  const f = fixture(t);
+  const owner = readOwner(f.root);
+  prepareRunRootHolds(f.root, owner.runId);
+  const env = { AK_SUITE_ROOT: f.root, AK_SUITE_RUN_ID: owner.runId };
+  const first = acquireRunRootHold({ env });
+  const second = acquireRunRootHold({ env });
+  assert.equal(inspectRunRootHolds(f.root, owner.runId).unresolved, true);
+  assert.throws(() => releaseRunRootHold({ ...first, pid: 0 }));
+  const dir = path.join(f.root, '.ak-suite-holds');
+  const saved = path.join(f.root, 'saved-holds');
+  fs.renameSync(dir, saved);
+  try {
+    fs.symlinkSync(saved, dir, 'junction');
+    assert.throws(() => releaseRunRootHold(first));
+  } finally {
+    if (fs.existsSync(dir)) fs.unlinkSync(dir);
+    fs.renameSync(saved, dir);
+  }
+  releaseRunRootHold(first);
+  assert.equal(inspectRunRootHolds(f.root, owner.runId).unresolved, true);
+  releaseRunRootHold(second);
+  assert.equal(inspectRunRootHolds(f.root, owner.runId).unresolved, false);
+  assert.throws(() => acquireRunRootHold({ env: { ...env, AK_SUITE_RUN_ID: 'foreign' } }));
+  assert.equal(acquireRunRootHold({ env: {} }), null);
+  fs.rmSync(path.join(f.root, '.ak-suite-holds'), { recursive: true });
+  assert.equal(inspectRunRootHolds(f.root, owner.runId).unresolved, true);
+  assert.throws(() => acquireRunRootHold({ env }));
 });
 
 test('native defaults never prove abandonment, including dead owners and reused PIDs', (t) => {

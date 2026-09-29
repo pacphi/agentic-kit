@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ownerRecord, writeOwner, unsafeTempBase, removableRunRoot, collectAbandonedRoots, IGNORED_IN_ROOT } from './run-roots.mjs';
+import { ownerRecord, writeOwner, prepareRunRootHolds, inspectRunRootHolds,
+  unsafeTempBase, removableRunRoot, collectAbandonedRoots, IGNORED_IN_ROOT } from './run-roots.mjs';
 import { realStateRoots, snapshotRoots, compareSnapshots, isStrict, formatReport } from './real-state-tripwire.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -59,7 +60,8 @@ export function runGuarded(commands, {
   const unsafe = unsafeTempBase(tmpdir, fs.realpathSync(homedir));
   if (unsafe) { log(`unsafe temp base ${tmpdir}: ${unsafe}`); return 2; }
   const tempRoot = fs.mkdtempSync(path.join(tmpdir, 'ak-suite-'));
-  try { writeOwner(tempRoot, ownerRecord()); }
+  const owner = ownerRecord();
+  try { writeOwner(tempRoot, owner); }
   catch (error) { log(`could not record run owner; kept run root ${tempRoot}: ${error.message}`); return 2; }
   const identity = fs.lstatSync(tempRoot);
   const removeOwnRoot = () => {
@@ -86,8 +88,11 @@ export function runGuarded(commands, {
       + 'git repository" would write into it. Point TMPDIR outside any repository.');
     return 2;
   }
+  try { prepareRunRootHolds(tempRoot, owner.runId); }
+  catch (error) { log(`could not prepare run-root holds; kept ${tempRoot}: ${error.message}`); return 2; }
   /** @type {NodeJS.ProcessEnv} */
-  const childEnv = { ...env, TMPDIR: tempRoot, TEMP: tempRoot, TMP: tempRoot };
+  const childEnv = { ...env, TMPDIR: tempRoot, TEMP: tempRoot, TMP: tempRoot,
+    AK_SUITE_ROOT: tempRoot, AK_SUITE_RUN_ID: owner.runId };
   // Tests assert on plain text; a shell's FORCE_COLOR (Claude Code sets 3)
   // colours console.log into pipes and, beside NO_COLOR, adds a Node warning.
   delete childEnv.FORCE_COLOR;
@@ -109,8 +114,15 @@ export function runGuarded(commands, {
     log(`could not list own run root; kept ${tempRoot}: ${error.message}`);
     ownHygieneFailed = true;
   }
-  // Unknown contents must remain available for inspection, never count as clean.
-  if (!ownHygieneFailed && !removeOwnRoot()) ownHygieneFailed = true;
+  // A child may have explicitly declared unresolved ownership before launch.
+  // Ordinary test failures still remove their own roots when all holds clear.
+  if (!ownHygieneFailed) {
+    const holds = inspectRunRootHolds(tempRoot, owner.runId);
+    if (holds.unresolved) {
+      log(`kept own run root ${tempRoot}: ${holds.reason}`);
+      ownHygieneFailed = true;
+    } else if (!removeOwnRoot()) ownHygieneFailed = true;
+  }
   try { collectAbandonedRoots({ tmpdir, selfRoot: tempRoot, homedir, log }); }
   catch (error) { log(`could not list sibling run roots: ${error.message}`); }
   if (leftovers.length) log(`temp folders left behind by the run (${leftovers.length}):\n  ${leftovers.join('\n  ')}`);

@@ -24,6 +24,15 @@ function sandbox(t) {
 
 const stub = (dir, name, body) => { const f = path.join(dir, name); fs.writeFileSync(f, body); return f; };
 
+async function pidGone(pid, timeoutMs = 5_000) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return true; }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return false;
+}
+
 test('focus runs a literal clean test file through the guarded root', (t) => {
   const { home, env } = sandbox(t);
   const file = stub(home, 'clean.test.mjs', "import { test } from 'node:test'; test('clean', () => {});");
@@ -43,6 +52,79 @@ test('focus reports a leaked temp folder with hygiene exit code', (t) => {
   const r = spawnSync(process.execPath, [RUNNER, 'focus', file], { env, encoding: 'utf8' });
   assert.equal(r.status, 4, r.stdout + r.stderr);
   assert.match(r.stderr, /temp folders left behind.*focus-leak-/s);
+});
+
+test('an unresolved prelaunch hold retains the guarded root and sentinel after test failure', async (t) => {
+  const { home, repo, env } = sandbox(t);
+  const pidFile = path.join(home, 'held-child-pid');
+  const child = stub(home, 'held-child.cjs', `const fs = require('node:fs');
+    const release = process.argv[2];
+    fs.writeFileSync(require('node:path').join(process.cwd(), 'held-child-ready'), 'ready');
+    const timer = setInterval(() => { if (fs.existsSync(release)) { clearInterval(timer); process.exit(0); } }, 20);
+    setTimeout(() => process.exit(2), 10000);`);
+  const script = stub(home, 'unresolved-hold.mjs', `import fs from 'node:fs';
+    import path from 'node:path'; import { spawn } from 'node:child_process';
+    import { acquireRunRootHold } from ${JSON.stringify(new URL('../../scripts/run-roots.mjs', import.meta.url).href)};
+    acquireRunRootHold();
+    const root = process.env.AK_SUITE_ROOT;
+    fs.writeFileSync(path.join(root, 'held-sentinel'), 'keep');
+    const child = spawn(process.execPath, [${JSON.stringify(child)}, path.join(root, 'release-child')],
+      { cwd: root, stdio: 'ignore', detached: true });
+    child.once('error', (error) => { throw error; });
+    fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+    child.unref();
+    const ready = path.join(root, 'held-child-ready');
+    const deadline = Date.now() + 2000;
+    while (!fs.existsSync(ready) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    if (!fs.existsSync(ready)) throw Error('fixture child did not become ready');
+    process.exit(7);`);
+  let root;
+  let pid;
+  try {
+    const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', script], { env, encoding: 'utf8' });
+    const roots = fs.readdirSync(env.TMPDIR).filter((name) => /^ak-suite-[A-Za-z0-9]{6}$/.test(name));
+    if (roots.length === 1) root = path.join(env.TMPDIR, roots[0]);
+    if (fs.existsSync(pidFile)) pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    assert.equal(r.status, 7, r.stdout + r.stderr);
+    assert.match(r.stderr, /kept own run root .*unresolved child hold/);
+    assert.equal(roots.length, 1, r.stderr);
+    assert.equal(fs.readFileSync(path.join(root, 'held-sentinel'), 'utf8'), 'keep');
+    assert.equal(fs.readFileSync(path.join(root, 'held-child-ready'), 'utf8'), 'ready');
+    assert.doesNotThrow(() => process.kill(pid, 0), 'the held child should still own the retained cwd');
+  } finally {
+    if (root) fs.writeFileSync(path.join(root, 'release-child'), 'release');
+    if (Number.isInteger(pid) && pid > 0) {
+      if (!root) { try { process.kill(pid); } catch { /* already exited */ } }
+      if (!await pidGone(pid)) { try { process.kill(pid); } catch { /* already exited */ } }
+      assert.ok(await pidGone(pid), `fixture child ${pid} did not exit`);
+    }
+    if (root) fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('unresolved holds preserve command, tripwire, then hygiene exit priority', (t) => {
+  for (const [mode, expected] of [['command', 7], ['tripwire', 3], ['hygiene', 4]]) {
+    const { home, repo, env } = sandbox(t);
+    const script = stub(home, `${mode}-hold.mjs`, `import fs from 'node:fs'; import path from 'node:path';
+      import { acquireRunRootHold } from ${JSON.stringify(new URL('../../scripts/run-roots.mjs', import.meta.url).href)};
+      acquireRunRootHold();
+      if (process.env.HOLD_MODE === 'tripwire') {
+        const file = path.join(process.env.XDG_CONFIG_HOME, 'agentic-kit', 'kit.json');
+        fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, '{}');
+      }
+      if (process.env.HOLD_MODE === 'command') process.exit(7);`);
+    let root;
+    try {
+      const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', script], {
+        env: { ...env, HOLD_MODE: mode }, encoding: 'utf8',
+      });
+      const roots = fs.readdirSync(env.TMPDIR).filter((name) => /^ak-suite-[A-Za-z0-9]{6}$/.test(name));
+      if (roots.length === 1) root = path.join(env.TMPDIR, roots[0]);
+      assert.equal(r.status, expected, r.stdout + r.stderr);
+      assert.match(r.stderr, /kept own run root .*unresolved child hold/);
+      assert.equal(roots.length, 1);
+    } finally { if (root) fs.rmSync(root, { recursive: true, force: true }); }
+  }
 });
 
 test('focus rejects missing files and option-shaped filenames before creating roots', (t) => {

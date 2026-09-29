@@ -23,6 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnEnv, sandboxProject } from './helpers/home-sandbox.mjs';
+import { acquireRunRootHold, releaseRunRootHold } from '../../scripts/run-roots.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
@@ -97,6 +98,9 @@ test('spawn-guard is a no-op when AK_SPAWN_LEDGER_FILE is unset', async () => {
 
 async function runGuardedSmoke({ childExitCode = 0, childStallsOnRelease = false,
   closeTimeoutMs = 5_000, launchFailure = false } = {}) {
+  // The guarded runner must know about uncertainty before any process uses
+  // its temp root. Standalone node --test has no runner hold to acquire.
+  const hold = acquireRunRootHold();
   await inSandbox('ak-spawn-guard-smoke', {}, async ({ project, env: baseEnv, retain }) => {
     const ledgerFile = path.join(project, 'spawn-ledger.ndjson');
     const readyFile = path.join(project, 'fork-ready');
@@ -195,6 +199,9 @@ async function runGuardedSmoke({ childExitCode = 0, childStallsOnRelease = false
     if (!forkExited) cleanupErrors.push(new Error(`cannot establish owned fork exit: pid=${pid}`));
     if (!parentExited) cleanupErrors.push(new Error('cannot establish guarded parent exit'));
     if (!parentExited || !forkExited) retain();
+    else {
+      try { releaseRunRootHold(hold); } catch (error) { cleanupErrors.push(error); }
+    }
     if (cleanupErrors.length) failure = failure
       ? new AggregateError([failure, ...cleanupErrors], 'fork assertion and cleanup failed')
       : new AggregateError(cleanupErrors, 'fork cleanup failed');

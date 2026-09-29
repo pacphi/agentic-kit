@@ -334,10 +334,13 @@ them, and `sandboxHome()` and `redirectToolState()` do the same for in-process c
 Code's own `~/.claude.json`) are listed as "concurrent writers" and do not fail a local run; CI
 (or `AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with
 `TMPDIR`/`TEMP`/`TMP` pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is
-listed (excluding its private atomic `.ak-suite-owner.json` and Node compile cache). The runner
+listed (excluding its private atomic `.ak-suite-owner.json`, child-hold directory and Node compile cache). The runner
 refuses home/filesystem-root temp bases before allocation and refuses roots inside a git
 repository (point `TMPDIR` elsewhere). A completed run removes only its own validated direct,
-canonical, nonsymlink, current-owner root. It then lists sibling suite roots: missing, invalid,
+canonical, nonsymlink, current-owner root. Tests with known child lifetime uncertainty acquire
+`acquireRunRootHold()` before launching those children and release only after proving their exits.
+An unresolved or unreadable hold retains the own root; it is not a general descendant-exit proof.
+The runner then lists sibling suite roots: missing, invalid,
 foreign or uncertain owner metadata means keep. Sibling handling is list-only on macOS, Linux
 and Windows because no installed probe proves all descendants have exited; even a dead owner
 is insufficient. Interrupted runs remove and collect nothing. Sibling listing/collection errors

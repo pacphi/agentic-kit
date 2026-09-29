@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 
 export const RUN_ROOT_NAME = /^ak-suite-[A-Za-z0-9]{6}$/;
 export const OWNER_FILE = '.ak-suite-owner.json';
-export const IGNORED_IN_ROOT = new Set(['node-compile-cache', OWNER_FILE]);
+export const HOLD_DIR = '.ak-suite-holds';
+export const IGNORED_IN_ROOT = new Set(['node-compile-cache', OWNER_FILE, HOLD_DIR]);
 const MAX_OWNER_BYTES = 8192;
 const currentUid = () => process.getuid?.() ?? null;
 
@@ -64,6 +65,63 @@ export function readOwner(root) {
   } catch { /* Unknown metadata never grants ownership. */ }
   finally { if (fd !== undefined) fs.closeSync(fd); }
   return record;
+}
+
+/** Create the private hold directory before launching any suite command. */
+export function prepareRunRootHolds(root, runId) {
+  if (readOwner(root)?.runId !== runId || fs.realpathSync(root) !== root) throw Error('run root owner mismatch');
+  fs.mkdirSync(path.join(root, HOLD_DIR), { mode: 0o700 });
+}
+
+/** A command acquires this hold before launching children that use its run root.
+ * Outside a guarded run it returns null; local sandbox retention still applies.
+ * @param {{env?:NodeJS.ProcessEnv}} [options]
+ */
+export function acquireRunRootHold({ env = process.env } = {}) {
+  const root = env.AK_SUITE_ROOT;
+  const runId = env.AK_SUITE_RUN_ID;
+  if (root === undefined && runId === undefined) return null;
+  if (!root || !runId || readOwner(root)?.runId !== runId || fs.realpathSync(root) !== root) {
+    throw Error('cannot establish run-root hold: owner mismatch');
+  }
+  const dir = path.join(root, HOLD_DIR);
+  const stat = fs.lstatSync(dir);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(dir) !== dir) {
+    throw Error('cannot establish run-root hold: unsafe hold directory');
+  }
+  const id = randomUUID();
+  const token = randomUUID();
+  const file = path.join(dir, id);
+  fs.writeFileSync(file, token, { flag: 'wx', mode: 0o600 });
+  return { root, runId, file, token, pid: process.pid };
+}
+
+/** Remove only the marker returned to this process by acquireRunRootHold. */
+export function releaseRunRootHold(hold) {
+  if (hold === null) return;
+  if (!hold || hold.pid !== process.pid || readOwner(hold.root)?.runId !== hold.runId
+    || fs.realpathSync(hold.root) !== hold.root
+    || path.dirname(hold.file) !== path.join(hold.root, HOLD_DIR)) throw Error('run-root hold owner mismatch');
+  const dir = path.join(hold.root, HOLD_DIR);
+  const parent = fs.lstatSync(dir);
+  if (!parent.isDirectory() || parent.isSymbolicLink() || fs.realpathSync(dir) !== dir) {
+    throw Error('run-root hold directory changed');
+  }
+  const stat = fs.lstatSync(hold.file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1
+    || fs.readFileSync(hold.file, 'utf8') !== hold.token) throw Error('run-root hold changed');
+  fs.unlinkSync(hold.file);
+}
+
+/** Missing or unreadable hold state is uncertainty, never permission to remove. */
+export function inspectRunRootHolds(root, runId) {
+  try {
+    if (readOwner(root)?.runId !== runId) throw Error('owner changed');
+    const dir = path.join(root, HOLD_DIR);
+    const stat = fs.lstatSync(dir);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(dir) !== dir) throw Error('unsafe hold directory');
+    return { unresolved: fs.readdirSync(dir).length > 0, reason: 'unresolved child hold' };
+  } catch { return { unresolved: true, reason: 'hold inspection uncertain' }; }
 }
 
 /** Pure path check also accepts Windows paths in cross-platform unit fixtures. */

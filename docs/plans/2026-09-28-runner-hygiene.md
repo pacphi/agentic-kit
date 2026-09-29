@@ -8,6 +8,8 @@ LQ1 source inspection refutes the claimed missing selector propagation: the runn
 
 The Windows smoke lifetime follow-up uses a held fork and parent close acknowledgment. The smoke waits for the fork's `close` or `error`, checks its exit status, and establishes both exits before sandbox removal; uncertain exits retain the sandbox. A bounded pre-release observation detects early parent exit, and a local removed-wait mutation fails the focused test. The guarded suite also covers fork failure, stalled-fork cleanup, and launch failure. This establishes the lifecycle gap locally; native Windows CI remains the required platform proof for the reported `EPERM`.
 
+Round 2 review found that local sandbox retention alone did not stop the guarded runner from removing its own root after a failing test. The runner now prepares a private hold directory before running commands. The smoke acquires a run-bound hold before launching its owned processes and releases it only after both exits are established. An unresolved or unreadable hold retains the own root, while clean runs and ordinary failures still remove it. Guarded tests prove retention with a live bounded child, parallel holds, and exit precedence. Native Windows CI is still pending.
+
 ## Contract and dependencies
 
 The [v2 scope](2026-09-28-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.
