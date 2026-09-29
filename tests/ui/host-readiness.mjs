@@ -19,6 +19,12 @@ const report = () => ({ checkedAt: '2026-09-20T10:00:00Z', scope: 'Dashboard lau
     host, status: 'ok', level: 'local', checks, evidenceKey: 'a'.repeat(64), canCheckConnection: true,
     checkedAt: '2026-09-20T10:00:00Z', connection: { state: 'not-run' }, target: { nativeDefault: true },
   }])) });
+const luminance = color => {
+  const rgb = color.match(/[\d.]+/g).slice(0,3).map(Number).map(value => value/255)
+    .map(value => value <= .04045 ? value/12.92 : ((value+.055)/1.055)**2.4);
+  return rgb[0]*.2126 + rgb[1]*.7152 + rgb[2]*.0722;
+};
+const contrast = (a,b) => { const values=[luminance(a),luminance(b)].sort((x,y)=>y-x);return (values[0]+.05)/(values[1]+.05); };
 test('all hosts have qualified OK, accessible details and explicitly confirmed connection checks', async t => {
   const browser = await launchChrome();
   t.after(() => browser.close());
@@ -86,6 +92,16 @@ test('all hosts have qualified OK, accessible details and explicitly confirmed c
   unassessed.hosts.claude={...unassessed.hosts.claude,checks:{...checks,configuration:{state:'unknown',reason:'Configuration was not assessed.'}}};
   await page.evaluate(data=>globalThis.renderHostReadiness(data),unassessed);
   assert.equal(await page.locator('[data-health-host="claude"] .sp-status').innerText(),'Unknown');
+  const iconColors=await page.evaluate(() => ['light','dark'].map(theme=>{
+    globalThis.document.documentElement.setAttribute('data-theme',theme);
+    const chip=globalThis.document.querySelector('[data-health-host="codex"] .live-host');
+    return {theme,fill:globalThis.getComputedStyle(chip.querySelector('path')).fill,background:globalThis.getComputedStyle(chip).backgroundColor};
+  }));
+  for(const row of iconColors) {
+    console.log(`Codex icon ${row.theme}: ${row.fill} on ${row.background}, ${contrast(row.fill,row.background).toFixed(2)}:1`);
+    assert.ok(contrast(row.fill,row.background)>=3,
+      `Codex icon ${row.theme}: ${row.fill} on ${row.background}, ratio ${contrast(row.fill,row.background).toFixed(2)}:1`);
+  }
   await page.evaluate(()=>globalThis.renderHostReadiness(null));
   assert.equal(await page.locator('[data-health-host="codex"] .sp-status').innerText(),'Unknown');
   assert.equal(errors.length,0,errors.join('\n'));
