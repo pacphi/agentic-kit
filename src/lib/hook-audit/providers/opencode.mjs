@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { xdgBase } from '../../paths.mjs';
 
 import {
   normalizedOccurrence, publicSource, readBoundedFile, readJsonSource,
@@ -90,7 +91,7 @@ function moduleRecords(source) {
 }
 
 export function auditOpenCodeHooks({
-  opencodeRoot = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'opencode'),
+  opencodeRoot = path.join(xdgBase('XDG_CONFIG_HOME', path.join(os.homedir(), '.config')), 'opencode'),
   projectRoots = [process.cwd()],
   opencodeVersion = 'unknown',
   ownership = null,

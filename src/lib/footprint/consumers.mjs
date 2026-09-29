@@ -55,7 +55,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  claudeDir, codexDir, configDir, globalRoot, home, isWindows, npxCacheDir,
+  claudeDir, codexDir, configDir, globalRoot, home, isWindows, npxCacheDir, xdgBase,
 } from '../paths.mjs';
 import {
   hasValue, measured, rootMeasurements, sumMeasurements, unknown, walkTree,
@@ -167,8 +167,8 @@ export const CONSUMER_WALK_LIMITS = Object.freeze({
 // to audit for the sake of a read-only ranking. Kit and host paths still come
 // from paths.mjs — nothing home-relative that the kit itself owns is spelled out
 // below.
-const xdgCache = (env) => env.XDG_CACHE_HOME || path.join(home, '.cache');
-const xdgData = (env) => env.XDG_DATA_HOME || path.join(home, '.local', 'share');
+const xdgCache = (env) => xdgBase('XDG_CACHE_HOME', path.join(home, '.cache'), { env });
+const xdgData = (env) => xdgBase('XDG_DATA_HOME', path.join(home, '.local', 'share'), { env });
 const macCache = () => path.join(home, 'Library', 'Caches');
 const winLocalAppData = (env) => env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
 

@@ -52,7 +52,7 @@
 // `detectWorktrees` is false.
 import fs from 'node:fs';
 import path from 'node:path';
-import { home, claudeDir, codexDir, configDir } from '../paths.mjs';
+import { home, claudeDir, codexDir, configDir, stateBase } from '../paths.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
 import { decodeClaudeProjectDir, transcriptMetadata } from './project-sources.mjs';
 import { classifyWorkingContext } from './working-context.mjs';
@@ -118,8 +118,9 @@ const flatDir = () => true;
  *
  * @returns {StorageRoot[]}
  */
-export function defaultStorageRoots({ env = process.env, projects = null } = {}) {
-  const stateRoot = env.XDG_STATE_HOME || path.join(home, '.local', 'state');
+export function defaultStorageRoots({ env = process.env, projects = null,
+  home: h = home, platform = process.platform, p = path } = {}) {
+  const stateRoot = stateBase({ env, home: h, platform, p });
   const opencodeData = path.dirname(defaultOpencodeDbPath());
   const claude = (name) => path.join(claudeDir(), name);
   const codex = (name) => path.join(codexDir(), name);
@@ -183,7 +184,7 @@ export function defaultStorageRoots({ env = process.env, projects = null } = {})
     {
       id: 'ak-runtime-debug', category: 'ledgers-and-logs', host: 'agentic-kit',
       label: 'runtime-debug.log',
-      path: path.join(stateRoot, 'agentic-kit', 'runtime-debug.log'), layout: 'tree',
+      path: p.join(stateRoot, 'agentic-kit', 'runtime-debug.log'), layout: 'tree',
     },
     {
       id: 'ak-config', category: 'kit-caches', host: 'agentic-kit',

@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { inspectGitWorkspace } from './git-workspace.mjs';
+import { stateBase } from '../paths.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +31,7 @@ const WIN32_SURVEY_SCRIPT = fileURLToPath(
 function runtimeDebug(stage, fields = {}) {
   if (!process?.env || process.env.AK_RUNTIME_DEBUG !== '1') return;
   try {
-    const root = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
+    const root = stateBase();
     const file = process.env.AK_RUNTIME_DEBUG_FILE || path.join(root, 'agentic-kit', 'runtime-debug.log');
     const safeStage = String(stage || 'unknown').replace(/[^a-z0-9._-]/gi, '_').slice(0, 64);
     const kv = Object.entries(fields)
