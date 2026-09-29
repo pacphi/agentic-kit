@@ -107,9 +107,11 @@ export async function observeProjectMemoryRoutes(tmp, env, namespace, deps) {
   try {
     const observation = await probeProjectMemoryRoutes(tmp, env, namespace, deps);
     for (const { level, message } of describeMemoryRoutes(observation)) (level === 'ok' ? ok : warn)(message);
+    return observation;
   } catch (e) {
     // An observation problem must never turn a working CLI proof into a failure.
     warn(`cross-interface routing not observed: ${e.message}`);
+    return null;
   }
 }
 
@@ -134,9 +136,9 @@ async function purgeProofNamespace(tmp, env, namespace, key, runner = runCmd) {
  *  the CLI round trip: the route observation (the `memory-routes` proof)
  *  starts a real MCP server and can only add warnings, which a live-check
  *  record does not carry.
- *  @param {{ observeRoutes?: boolean, tmpRoot?: string, runner?: typeof runCmd, haveCmd?: typeof have }} [options] */
+ *  @param {{ observeRoutes?: boolean, routeVerdict?: boolean, tmpRoot?: string, runner?: typeof runCmd, haveCmd?: typeof have }} [options] */
 export async function verifyMemory({
-  observeRoutes = true, tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have,
+  observeRoutes = true, routeVerdict = false, tmpRoot = os.tmpdir(), runner = runCmd, haveCmd = have,
 } = {}) {
   heading('memory — store, retrieve, locate the on-disk row, purge, and observe CLI/MCP routing in an isolated dir');
   if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove project memory'); return false; }
@@ -182,7 +184,15 @@ export async function verifyMemory({
     purged = await purgeProofNamespace(tmp, env, namespace, key, runner);
     if (!purged) { fail('isolated namespace purge did not remove the proof row'); return false; }
     ok('isolated proof namespace purged');
-    if (observeRoutes) await observeProjectMemoryRoutes(tmp, env, namespace);
+    if (observeRoutes) {
+      const route = /** @type {{status?:string,cliToMcp?:string,mcpToCli?:string}|null} */
+        (await observeProjectMemoryRoutes(tmp, env, namespace));
+      if (routeVerdict) return route?.status === 'observed' &&
+        ['visible', 'not-visible'].includes(route.cliToMcp) &&
+        ['visible', 'not-visible'].includes(route.mcpToCli)
+        ? { status: 'passed', reason: null }
+        : { status: 'inconclusive', reason: 'cross-interface routing not observed completely' };
+    }
     return true;
   } catch (e) {
     fail(`memory proof error: ${e.message}`);
@@ -637,9 +647,9 @@ const CHECKS = Object.freeze([
   // The full AQE proof remembers only its live embedding request, itself, and
   // only for a backend the kit manages.
   { ...slow('aqe'), run: ({ cfg, cwd, onEvidence }) => verifyAqe({ cfg, cwd, onEvidence }) },
-  // The memory round trip plus the CLI/MCP route observation; its verdict is
-  // the memory check's.
-  { ...slow('memory-routes', 'memory'), run: () => verifyMemory({ observeRoutes: true }) },
+  // The memory round trip plus the CLI/MCP route observation has distinct
+  // evidence; a CLI-only pass cannot establish routing.
+  { ...slow('memory-routes', 'memory-routes'), run: () => verifyMemory({ observeRoutes: true, routeVerdict: true }) },
 ].map((check) => Object.freeze(check)));
 
 /**

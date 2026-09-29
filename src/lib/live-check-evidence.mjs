@@ -30,8 +30,10 @@ import { warn } from './output.mjs';
 // The checks whose results are remembered: the quick, free live checks. One
 // list, owned by the refresh vocabulary (a constants-only import).
 import { LIVE_CHECK_IDS } from './refresh.mjs';
+import { installedRoutingVersion } from './ruflo-memory-contract.mjs';
 
 export { LIVE_CHECK_IDS };
+export const RECORDED_CHECK_IDS = Object.freeze([...LIVE_CHECK_IDS, 'memory-routes']);
 const STATUSES = new Set(['passed', 'failed', 'inconclusive']);
 /** The sources a record is written with, and the ones it may still be read with. */
 const WRITE_SOURCES = new Set(['sync', 'status-refresh-live']);
@@ -45,7 +47,7 @@ const REASON_MAX = 200;
 export const liveCheckDir = () => path.join(paths.evidenceDir(), 'live-check');
 
 function assertKnownId(id) {
-  if (!LIVE_CHECK_IDS.includes(id)) throw new TypeError(`unknown live check id: ${String(id).slice(0, 40)}`);
+  if (!RECORDED_CHECK_IDS.includes(id)) throw new TypeError(`unknown live check id: ${String(id).slice(0, 40)}`);
 }
 
 /** Printable, single-line, bounded. Stored reasons come from the kit's own
@@ -141,18 +143,22 @@ const INPUTS = {
   security: () => ({ ruflo: rufloVersion() }),
   'deja-vu': ({ cfg }) => ({ dejaVu: cfg.integrations?.tools?.dejaVu ?? null }),
   memory: () => ({ ruflo: rufloVersion() }),
+  'memory-routes': ({ routingVersion, platform }) => ({
+    routingVersion: routingVersion === undefined ? installedRoutingVersion() : routingVersion,
+    platform: platform ?? process.platform,
+  }),
 };
 
 /**
  * The inputs key a check ran against. Writers and readers MUST both call this
  * so the same configuration yields the same key. Never throws.
  * @param {string} id
- * @param {{cfg?:any,env?:NodeJS.ProcessEnv,cwd?:string}} [facts]
+ * @param {{cfg?:any,env?:NodeJS.ProcessEnv,cwd?:string,routingVersion?:string|null,platform?:string}} [facts]
  */
-export function liveCheckInputsKey(id, { cfg = {}, env = process.env, cwd = process.cwd() } = {}) {
+export function liveCheckInputsKey(id, { cfg = {}, env = process.env, cwd = process.cwd(), routingVersion, platform } = {}) {
   assertKnownId(id);
   let parts;
-  try { parts = INPUTS[id]({ cfg: cfg ?? {}, env, cwd }); } catch { parts = { unavailable: true }; }
+  try { parts = INPUTS[id]({ cfg: cfg ?? {}, env, cwd, routingVersion, platform }); } catch { parts = { unavailable: true }; }
   return digest({ id, ...parts });
 }
 

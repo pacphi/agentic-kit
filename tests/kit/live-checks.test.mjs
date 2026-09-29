@@ -93,7 +93,7 @@ test('each check carries its timeout and the evidence id its result is remembere
   assert.equal(entry('learning').evidenceId, null);
   assert.equal(entry('harvest').evidenceId, null);
   assert.equal(entry('aqe').evidenceId, null, 'the aqe proof remembers only its embedding request, itself');
-  assert.equal(entry('memory-routes').evidenceId, 'memory');
+  assert.equal(entry('memory-routes').evidenceId, 'memory-routes');
 });
 
 test('without --only the quick checks that apply run; mcp runs whenever Codex is enabled', async () => {
@@ -585,14 +585,34 @@ test('a failed check is remembered for status with its first failure as the reas
   assert.equal(got.reason, '@claude-flow/security missing');
 });
 
-test('the memory-routes proof is remembered as the memory check; learning and harvest are not remembered', async () => {
+test('the memory-routes proof is remembered separately; learning and harvest are not remembered', async () => {
   seedHome();
   rmrf(evidence.liveCheckDir());
   await runOnly(['memory-routes', 'learning', 'harvest']);
-  const got = evidence.readLiveCheck('memory', {});
+  const got = evidence.readLiveCheck('memory-routes', {});
   assert.equal(got.status, 'failed');
   assert.equal(got.source, 'status-refresh-live');
-  assert.deepEqual(fs.readdirSync(evidence.liveCheckDir()), ['memory.json']);
+  assert.equal(evidence.readLiveCheck('memory', {}), null);
+  assert.deepEqual(fs.readdirSync(evidence.liveCheckDir()), ['memory-routes.json']);
+});
+
+test('a failed or timed-out routing run replaces a previous pass; a later generic memory pass cannot revive it', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const cfg = offlineKitConfig();
+  const route = (run, timeoutMs = 50) => ({ id: 'memory-routes', evidenceId: 'memory-routes',
+    timeoutMs, applies: () => true, run });
+  const generic = { id: 'memory', evidenceId: 'memory', timeoutMs: 50, applies: () => true,
+    run: async () => true };
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [route(async () => ({ status: 'passed' }))] });
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'passed');
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [route(async () => false)] });
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'failed');
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [route(() => new Promise(() => {}), 10)], graceMs: 1 });
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [generic] });
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed');
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
 });
 
 test('a skipped deja-vu proof is not remembered as a pass', async () => {
