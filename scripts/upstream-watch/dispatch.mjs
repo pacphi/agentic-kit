@@ -1,8 +1,10 @@
 // Dispatch of released upstream fixes (spec 2026-09-28): fire the claude.ai
 // routine's API trigger for each released fix whose branch does not exist yet,
 // at most MAX_FIRES times and not again within REFIRE_AFTER_DAYS, and record
-// the draft pull request once the branch has one. A dry run lists what would
-// fire instead of firing. Injectable exec and fetch.
+// the draft pull request once the branch has one. A run fires at most
+// MAX_FIRES_PER_RUN fixes, spaced apart, and stops at the first failed call;
+// the rest are deferred to the next run. A dry run lists what would fire
+// instead of firing. Injectable exec, fetch and pause.
 import { eventLine } from './classify.mjs';
 import { run } from './fetch.mjs';
 import { toRecord } from './ledger-branch.mjs';
@@ -12,6 +14,12 @@ export const FIRE_HEADERS = { 'anthropic-beta': 'experimental-cc-routine-2026-04
 export const REFIRE_AFTER_DAYS = 3;
 export const MAX_FIRES = 2;
 export const FIRE_TIMEOUT_MS = 30_000;
+// Sessions start gradually: a few per run, spaced apart; the rest wait for the next run.
+export const MAX_FIRES_PER_RUN = 3;
+export const FIRE_SPACING_MS = 15_000;
+// A 5xx answer means no session was started, so the call is safe to repeat.
+export const FIRE_ATTEMPTS = 3;
+export const FIRE_BACKOFF_MS = 2_000;
 // `gh pr list --head` matches the branch name in any fork; only a pull request
 // from this repository is the routine's.
 export const SAME_REPO_PR = '[.[] | select(.isCrossRepository | not)][0].number // empty';
@@ -19,7 +27,7 @@ const ROUTINE = /^trig_[A-Za-z0-9]+$/;
 const DISPATCH_BRANCH = /^upstream\/[a-z0-9._-]+$/;
 const DAY = 86_400_000;
 
-export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env = process.env } = {}) {
+export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env = process.env, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   return {
     async branchExists(branch) {
       if (!DISPATCH_BRANCH.test(branch ?? '')) throw new Error(`not a dispatch branch: ${branch}`);
@@ -41,25 +49,35 @@ export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env
       const token = env.UPSTREAM_DISPATCH_TOKEN ?? '';
       if (!ROUTINE.test(routine)) throw new Error('UPSTREAM_DISPATCH_ROUTINE is not a routine id');
       if (!token) throw new Error('UPSTREAM_DISPATCH_TOKEN is not set');
-      const response = await fetchImpl(FIRE_URL(routine), {
-        method: 'POST', headers: { ...FIRE_HEADERS, authorization: `Bearer ${token}` }, body: JSON.stringify({ text }),
-        signal: AbortSignal.timeout(FIRE_TIMEOUT_MS),
-      });
-      const body = await response.json().catch(() => null);
-      const session = body?.claude_code_session_url;
-      if (response.status !== 200 || typeof session !== 'string') {
-        throw new Error(`the routine trigger answered HTTP ${response.status}${typeof session === 'string' ? '' : ' without a session'}`);
+      let failure = '';
+      for (let attempt = 1; attempt <= FIRE_ATTEMPTS; attempt++) {
+        if (attempt > 1) await sleep(FIRE_BACKOFF_MS * (attempt - 1));
+        const response = await fetchImpl(FIRE_URL(routine), {
+          method: 'POST', headers: { ...FIRE_HEADERS, authorization: `Bearer ${token}` }, body: JSON.stringify({ text }),
+          signal: AbortSignal.timeout(FIRE_TIMEOUT_MS),
+        });
+        const body = await response.json().catch(() => null);
+        const session = body?.claude_code_session_url;
+        if (response.status === 200 && typeof session === 'string') return session;
+        const requestId = response.headers?.get?.('request-id');
+        const detail = body?.error?.message ?? (typeof body?.error === 'string' ? body.error : '');
+        failure = `the routine trigger answered HTTP ${response.status}${typeof session === 'string' ? '' : ' without a session'}`
+          + `${requestId ? ` (request-id ${requestId})` : ''}${detail ? `: ${String(detail).slice(0, 200)}` : ''}`;
+        if (response.status < 500) break;
       }
-      return session;
+      throw new Error(failure);
     },
   };
 }
 
 /** Fire (or, in a dry run, list in `wouldFire`) each released fix; the branch and pull request lookups only read. */
-export async function dispatch({ released, records, dispatcher, repo, sentinel, now, recordedAt, dryRun = false }) {
+export async function dispatch({ released, records, dispatcher, repo, sentinel, now, recordedAt, dryRun = false, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   const out = [];
   const errors = [];
   const wouldFire = [];
+  const deferred = [];
+  let attempted = 0;
+  let triggerFailed = false;
   const today = recordedAt.slice(0, 10);
   const recordsOf = (id, event) => records.filter((item) => item.id === id && item.event === event);
   for (const event of released) {
@@ -77,8 +95,18 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
         wouldFire.push({ id: event.id, version, branch });
         continue;
       }
-      const session = await dispatcher.fire(`${event.id} ${version} ${branch}`);
-      out.push(toRecord(eventLine(sentinel, event.id, 'fired', today, { branch, session }), recordedAt));
+      if (triggerFailed || attempted >= MAX_FIRES_PER_RUN) {
+        deferred.push({ id: event.id, version, branch });
+        continue;
+      }
+      if (attempted++) await pause(FIRE_SPACING_MS);
+      try {
+        const session = await dispatcher.fire(`${event.id} ${version} ${branch}`);
+        out.push(toRecord(eventLine(sentinel, event.id, 'fired', today, { branch, session }), recordedAt));
+      } catch (error) {
+        triggerFailed = true;
+        throw error;
+      }
     } catch (error) {
       errors.push({ id: event.id, error: error.message });
     }
@@ -93,5 +121,5 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
       errors.push({ id, error: error.message });
     }
   }
-  return { records: out, errors, wouldFire };
+  return { records: out, errors, wouldFire, deferred };
 }
