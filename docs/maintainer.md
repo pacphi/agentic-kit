@@ -77,18 +77,18 @@ claude/                  # skills + managed CLAUDE.md/AGENTS.md block templates 
 tests/
   kit/*.test.mjs         # node:test unit suites
   statusline-segments.test.cjs      # statusline renderer suite
+README.md, CLAUDE.md, AGENTS.md   # the only documents at the root
 docs/
-  deja-vu.md             # managed companion lifecycle and privacy runbook (shipped)
-  dashboard.md           # local dashboard navigation, evidence, and guarded action surfaces (shipped)
-  host-support.md        # canonical host/Ruflo/AQE/Brain compatibility matrix (shipped)
-  installation.md        # package scope versus machine/user/project effects (shipped)
-  maintenance.md         # operator workflow, provider matrix, receipts, and recovery runbook (shipped)
-  models.md              # model lifecycle inventory and read-only planning guide (shipped)
-  providers.md           # provider and routing guide (shipped)
-  setup.md               # setup mutation contract (shipped)
-  troubleshooting.md     # symptom-to-fix runbook (shipped)
-  upgrading.md           # upgrade and capability-adoption motion (shipped)
-  archive/               # investigative history behind each guard (not shipped)
+  *.md                   # living guides, lower-case names, indexed in docs/README.md
+  explainer.html         # GitHub Pages source (pages.yml publishes it as index.html)
+  maintainer.md          # this guide
+  adr/                   # decision records, every status; never moved
+  ddd/                   # living domain model
+  schemas/               # living interchange contracts
+  assets/                # figures the living guides use
+  plans/                 # in-flight plans and specs, Superpowers' included
+  proposals/             # dormant proposals awaiting a decision
+  archive/               # frozen history, one index row per file (not shipped)
 .github/
   workflows/{ci,release,nightly,devcontainers,pages}.yml
   dependabot.yml
@@ -98,7 +98,6 @@ docs/
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/deja-vu.md`, `docs/dashboard.md`, `docs/host-support.md`, `docs/hooks.md`,
 `docs/installation.md`, `docs/models.md`, `docs/telemetry.md`, `docs/providers.md`, `docs/setup.md`, `docs/aqe-embeddings.md`,
 `docs/maintenance.md`, `docs/troubleshooting.md`, `docs/upgrading.md`, `docs/codex-statusline.md`,
-`docs/archive/2026-09-09-evidence-codex-context-0.153.4.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,
 `docs/adr/0032-model-lifecycle-intelligence.md`,
 `docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md`,

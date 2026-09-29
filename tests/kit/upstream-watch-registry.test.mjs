@@ -276,7 +276,7 @@ test('user-facing docs are scanned; history and research are exempt by name', ()
     assert.ok(fs.existsSync(file), `${file} no longer exists; drop its exemption`);
     assert.match(reason, /\w/);
   }
-  assert.ok(docs.every((file) => file === 'README.md' || /^docs\/[^/]+\.md$/.test(file)), 'only top-level guides; ADRs, audits, plans and research are history');
+  assert.ok(docs.every((file) => file === 'README.md' || /^docs\/[^/]+\.md$/.test(file)), 'only top-level guides; subfolders are records, plans, proposals or history');
 });
 
 test('every kit file a watch entry names exists and still cites the thread', () => {

@@ -133,5 +133,5 @@ jobs:
       - name: Check internal links (offline)
         uses: lycheeverse/lychee-action@v2
         with:
-          args: "--offline --include-fragments --config lychee.toml README.md CLAUDE.md AGENTS.md docs/maintainer.md 'docker/*.md' 'claude/**/*.md' 'src/templates/**/*.md' 'docs/**/*.md'"
+          args: "--offline --include-fragments --config lychee.toml README.md CLAUDE.md AGENTS.md 'docker/*.md' 'claude/**/*.md' 'src/templates/**/*.md' 'docs/**/*.md'"
           fail: true

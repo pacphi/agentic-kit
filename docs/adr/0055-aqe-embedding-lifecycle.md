@@ -26,7 +26,7 @@
   request under `aqe-embedding` (remediation program, branch 6b; see
   [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
-  [September repair](../archive/2026-09-09-audit-aqe-integration-repair.md)
+  [September repair](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-09-audit-aqe-integration-repair.md)
 
 ## Problem
 
@@ -170,4 +170,4 @@ Any other command, extra flag, subcommand or wrapper is reported as an unrecogni
 transport and preserved. A user program named like an AQE program that takes exactly
 these arguments receives the loopback endpoint; that value is non-secret and
 receipt-owned, and `aqe-mcp` was already trusted this way. Source: audit decision 3 in
-[the #237–#239 record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md).
+[the #237–#239 record](https://github.com/pacphi/agentic-kit/blob/main/docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md).

@@ -317,7 +317,7 @@ conflict-resolution, and writer-quiescence procedure. Upstream tracking:
 [ruvnet/ruflo#3196](https://github.com/ruvnet/ruflo/issues/3196) and
 [pacphi/agentic-kit#213](https://github.com/pacphi/agentic-kit/issues/213).
 
-[Local investigation and upstream boundary](archive/2026-09-09-audit-plugin-memory-status-followup.md)
+[Local investigation and upstream boundary](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-09-audit-plugin-memory-status-followup.md)
 records the source evidence and counts observed on 2026-09-09.
 
 ### What `ak status` reports about memory

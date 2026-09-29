@@ -94,7 +94,7 @@ model requests and inspects their recorded effective windows; it does not
 claim that a near-limit input was processed successfully.
 
 See the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
-for native settings and the [capacity evidence](archive/2026-09-09-evidence-codex-context-0.153.4.md)
+for native settings and the [capacity evidence](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-09-evidence-codex-context-0.153.4.md)
 for the initial conformance observations.
 
 Agentic-kit narrowly updates only these keys under `[tui]`:
