@@ -137,13 +137,18 @@ export function killProcessTree(child, { platform = process.platform, spawnFn = 
 /** Accumulate one child stream, capped at `maxBuffer` — `execFile` applies its
  *  own cap internally, so the spawn-based path below has to reimplement it. */
 function captureStream(stream, encoding, maxBuffer, onOverflow) {
-  const state = { text: '', overflowed: false };
-  stream?.setEncoding?.(encoding);
+  const chunks = [];
+  const state = {
+    bytes: 0,
+    overflowed: false,
+    get text() { return Buffer.concat(chunks).toString(encoding); },
+  };
   stream?.on('data', (chunk) => {
     if (state.overflowed) return;
-    state.text += chunk;
-    if (state.text.length > maxBuffer) {
-      state.text = state.text.slice(0, maxBuffer);
+    const remaining = maxBuffer - state.bytes;
+    chunks.push(chunk.subarray(0, remaining));
+    state.bytes += chunk.length;
+    if (state.bytes > maxBuffer) {
       state.overflowed = true;
       onOverflow();
     }
@@ -167,26 +172,60 @@ function runOwned(command, args, execOpts, { windows, input }) {
     let failure = null;
     let closed = false;
     let stopping = Promise.resolve();
+    const closePipes = () => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.stdin?.destroy();
+    };
+    const incomplete = (reason) => {
+      failure = `${reason}; incomplete process-tree cleanup`;
+      closePipes();
+    };
     const abort = (reason) => {
-      if (closed || (windows && (child.exitCode !== null || child.signalCode !== null))) return;
+      if (closed) return;
       if (failure) return;
       failure = reason;
       if (!windows) { killGroup(child); return; }
-      if (!Number.isInteger(child.pid) || child.pid < 1) return;
+      // A reaped root PID may already name a different process. The owned
+      // descendant may still hold our pipes, but cannot be safely found by PID.
+      if (child.exitCode !== null || child.signalCode !== null) {
+        incomplete(reason);
+        return;
+      }
+      if (!Number.isInteger(child.pid) || child.pid < 1) {
+        incomplete(reason);
+        return;
+      }
       stopping = new Promise((done) => {
         let killer;
+        const fallback = (detail) => {
+          incomplete(`${reason} (${detail})`);
+          if (child.exitCode === null && child.signalCode === null) {
+            try { child.kill('SIGKILL'); } catch { /* exited */ }
+          }
+          done();
+        };
         try {
           killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
             stdio: 'ignore', shell: false,
           });
-        } catch { try { child.kill('SIGKILL'); } catch { /* exited */ } done(); return; }
-        killer.once('error', () => { try { child.kill('SIGKILL'); } catch { /* exited */ } done(); });
-        killer.once('close', (code) => {
-          if (code !== 0 && child.exitCode === null && child.signalCode === null) {
-            try { child.kill('SIGKILL'); } catch { /* exited */ }
-          }
-          done();
-        });
+        } catch { fallback('taskkill could not start'); return; }
+        const finish = (code, detail) => {
+          clearTimeout(deadline);
+          killer.removeListener('error', onError);
+          killer.removeListener('close', onClose);
+          if (code === 0) done();
+          else fallback(detail);
+        };
+        const onError = () => finish(null, 'taskkill could not start');
+        const onClose = (code) => finish(code, `taskkill exited ${code}`);
+        const deadline = setTimeout(() => {
+          try { killer.kill('SIGKILL'); } catch { /* already exited */ }
+          killer.unref?.();
+          finish(null, 'taskkill exceeded cleanup deadline');
+        }, 1_000);
+        killer.once('error', onError);
+        killer.once('close', onClose);
       });
     };
     const onSignal = () => abort('The operation was aborted');
@@ -212,7 +251,7 @@ function runOwned(command, args, execOpts, { windows, input }) {
       stopping.then(() => resolve({
         code: failure ? exitCode || 1 : exitCode,
         stdout: out.text,
-        stderr: failure ? errOut.text || failure : errOut.text,
+        stderr: failure ? [errOut.text, failure].filter(Boolean).join('\n') : errOut.text,
         ...(exitSignal ? { signal: exitSignal } : {}),
       }));
     });
@@ -226,7 +265,7 @@ function runOwned(command, args, execOpts, { windows, input }) {
 
 /** Run a command; never throws. Returns {code, stdout, stderr}.
  *  `opts.input` (a string) is delivered on the child's stdin instead of argv;
- *  see `runWithInput` for the two guarantees that carries. */
+ *  `runOwned` keeps that payload out of the process table. */
 export async function run(cmd, args = [], opts = {}) {
   try {
     const env = opts.env ? { ...process.env, ...opts.env } : process.env;

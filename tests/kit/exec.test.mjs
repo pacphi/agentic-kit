@@ -91,6 +91,79 @@ test('an explicit live signal takes precedence over an aborted inherited signal'
   }
 });
 
+for (const stop of ['abort', 'timeout']) {
+  test(`Windows ${stop} after direct-child exit reports incomplete tree cleanup`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-exited-root-'));
+    const pidFile = path.join(dir, 'pids.json');
+    const exitFile = path.join(dir, 'parent-exit');
+    const controller = new AbortController();
+    const code = `const {spawn}=require('node:child_process');
+      const gc=spawn(process.execPath,['-e','setTimeout(()=>{},5000)'],{stdio:['ignore','inherit','inherit']});
+      gc.unref();
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
+      process.on('exit',()=>require('node:fs').writeFileSync(${JSON.stringify(exitFile)},'yes'));`;
+    let pids = [];
+    let pending;
+    try {
+      const started = Date.now();
+      pending = run(process.execPath, ['-e', code], {
+        windows: true, signal: controller.signal, timeout: stop === 'timeout' ? 1_200 : 5_000,
+      });
+      assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true);
+      pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+      assert.equal(await waitUntil(() => fs.existsSync(exitFile)), true, 'direct child exited');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(isAlive(pids[1]), true, 'descendant still owns the output pipe');
+      const stoppedAt = Date.now();
+      if (stop === 'abort') controller.abort();
+      const result = await pending;
+      assert.notEqual(result.code, 0, 'an incomplete run cannot report success');
+      assert.match(result.stderr, /incomplete.*tree cleanup/i);
+      assert.ok(Date.now() - (stop === 'abort' ? stoppedAt : started)
+        < (stop === 'abort' ? 1_400 : 2_600), 'return is bounded by abort or timeout');
+    } finally {
+      controller.abort();
+      for (const pid of pids) {
+        if (isAlive(pid)) {
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+        }
+      }
+      await pending;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('Windows taskkill stall has a bounded cleanup wait and reports uncertainty', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-taskkill-stall-'));
+  const killer = path.join(dir, 'taskkill.exe');
+  const oldPath = process.env.PATH;
+  fs.writeFileSync(killer, `#!${process.execPath}\nsetTimeout(() => process.exit(1), 1500);\n`, { mode: 0o755 });
+  process.env.PATH = `${dir}${path.delimiter}${oldPath}`;
+  try {
+    const started = Date.now();
+    const result = await run(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+      windows: true, timeout: 100,
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /incomplete.*tree cleanup/i);
+    assert.ok(Date.now() - started < 1400, 'does not wait for the stalled taskkill process');
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('run() enforces maxBuffer in UTF-8 bytes', async () => {
+  const result = await run(process.execPath, ['-e', 'process.stdout.write("ééé")'], {
+    maxBuffer: 4,
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /maxBuffer/i);
+});
+
 test('Windows abort reaps the Node child behind a PowerShell shim and its grandchild', {
   skip: process.platform !== 'win32',
 }, async () => {
