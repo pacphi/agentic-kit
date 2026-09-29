@@ -84,6 +84,30 @@ test('a disposable folder below a temporary root inside a tool folder keeps its 
   assert.equal(launch.env.CLAUDE_FLOW_MEMORY_PATH, undefined);
 });
 
+test('a temporary root equal to a tool folder does not exempt its descendants', (t) => {
+  const home = sandbox(t);
+  const cache = mkdir(path.join(home, '.cache'));
+  const child = mkdir(path.join(cache, 'project'));
+  const at = (cwd) => rufloMemoryLocation(cwd, { home, env: { TMPDIR: cache } });
+  assert.equal(at(cache).kind, 'user', 'the tool folder itself remains unsuitable');
+  const location = at(child);
+  assert.equal(location.kind, 'user');
+  assert.match(location.reason, /inside ~\/\.cache, a tool's own folder/);
+  assert.equal(location.db, path.join(userStore(home), 'memory.db'));
+});
+
+test('Windows same-path temp and tool roots are not deeper disposable boundaries', () => {
+  const home = 'C:\\Users\\Me';
+  const local = `${home}\\AppData\\Local`;
+  const options = { home, platform: 'win32', p: path.win32, env: { LOCALAPPDATA: local, TMPDIR: local.toLowerCase() } };
+  const tool = rufloMemoryLocation(local, options);
+  const child = rufloMemoryLocation(`${local}\\project`, options);
+  assert.equal(tool.kind, 'user');
+  assert.equal(child.kind, 'user');
+  assert.match(child.reason, /tool's own folder/);
+  assert.equal(child.db, `${home}\\.claude-flow\\memory\\memory.db`);
+});
+
 test('the filesystem root, the home folder and a temporary root use the one user-level store', (t) => {
   const home = sandbox(t);
   for (const [cwd, reason] of [
@@ -165,6 +189,25 @@ test('a Git repository at the home folder does not pull a plain subfolder into ~
   assert.equal(location.root, work);
   assert.equal(memoryProjectRoot(work, { home }), work, 'every ak launch contract agrees with the launcher');
   assert.equal(rufloMemoryLocation(home, { home }).kind, 'user');
+});
+
+test('user-level location explains both an unsuitable folder and its unsuitable repository root', (t) => {
+  const home = sandbox(t);
+  fs.mkdirSync(path.join(home, '.git'));
+  const codex = mkdir(path.join(home, '.codex', 'sessions'));
+  const location = rufloMemoryLocation(codex, { home });
+  assert.deepEqual([location.kind, location.root, location.dir, location.db],
+    ['user', userStore(home), userStore(home), path.join(userStore(home), 'memory.db')]);
+  assert.equal(location.reason, "inside ~/.codex, a tool's own folder, in a repository whose root is the home folder");
+});
+
+test('location does not repeat a reason when root and folder share one tool area', (t) => {
+  const home = sandbox(t);
+  const root = mkdir(path.join(home, '.codex', 'workspace'));
+  fs.mkdirSync(path.join(root, '.git'));
+  const child = mkdir(path.join(root, 'src'));
+  assert.equal(rufloMemoryLocation(child, { home }).reason, "inside ~/.codex, a tool's own folder");
+  assert.equal(rufloMemoryLocation(root, { home }).reason, "inside ~/.codex, a tool's own folder");
 });
 
 test('the launcher pins both memory variables to the user-level store and starts Ruflo inside it', (t) => {

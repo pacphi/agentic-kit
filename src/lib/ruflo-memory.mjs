@@ -36,9 +36,10 @@ import { componentById } from './ruflo-components/catalogue.mjs';
 // are the same folder, as the filesystem treats them.
 const realOr = (p, file) => { try { return fs.realpathSync(file); } catch { return p.resolve(file); } };
 const same = (p, a, b) => p.relative(a, b) === '';
+// Strict containment: equality cannot make a tool root a deeper temp boundary.
 const inside = (p, child, parent) => {
   const rel = p.relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel));
+  return rel !== '' && !rel.startsWith('..') && !p.isAbsolute(rel);
 };
 /** `~/…` for a folder under the home folder, else the absolute path. */
 export function homeRelative(file, home = paths.home, p = path) {
@@ -57,7 +58,8 @@ function unsuitableReason(dir, { home, env, platform, p }) {
   if (temps.some((temp) => same(p, dir, temp))) return 'a temporary folder';
   const tool = paths.toolInternalDirs({ home, env, platform, p }).find((folder) => {
     const real = realOr(p, folder);
-    return inside(p, dir, real) && !temps.some((temp) => inside(p, temp, real) && inside(p, dir, temp));
+    return (same(p, dir, real) || inside(p, dir, real))
+      && !temps.some((temp) => inside(p, temp, real) && inside(p, dir, temp));
   });
   return tool ? `inside ${homeRelative(tool, home, p)}, a tool's own folder` : null;
 }
@@ -75,14 +77,20 @@ export function rufloMemoryLocation(cwd = process.cwd(), {
   home = paths.home, env = process.env, platform = process.platform, p = path,
 } = {}) {
   const options = { home, env, platform, p };
-  let reason = null;
-  for (const [kind, candidate] of [['project', paths.repoRoot(cwd, p)], ['folder', cwd]]) {
-    if (!candidate) continue;
-    const root = realOr(p, candidate);
-    const why = unsuitableReason(root, options);
-    if (!why) return { kind, root, dir: p.join(root, '.swarm'), db: paths.projectMemoryDb(root, p), reason: null };
-    reason ??= why;
+  const repository = paths.repoRoot(cwd, p);
+  const projectRoot = repository && realOr(p, repository);
+  const projectReason = projectRoot && unsuitableReason(projectRoot, options);
+  if (projectRoot && !projectReason) {
+    return { kind: 'project', root: projectRoot, dir: p.join(projectRoot, '.swarm'), db: paths.projectMemoryDb(projectRoot, p), reason: null };
   }
+  const folderRoot = realOr(p, cwd);
+  const folderReason = unsuitableReason(folderRoot, options);
+  if (!folderReason) {
+    return { kind: 'folder', root: folderRoot, dir: p.join(folderRoot, '.swarm'), db: paths.projectMemoryDb(folderRoot, p), reason: null };
+  }
+  const reason = projectReason && !same(p, projectRoot, folderRoot) && projectReason !== folderReason
+    ? `${folderReason}, in a repository whose root is ${projectReason}`
+    : folderReason;
   const dir = paths.userMemoryDir(home, p);
   return { kind: 'user', root: dir, dir, db: p.join(dir, 'memory.db'), reason };
 }
