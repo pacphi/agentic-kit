@@ -13,4 +13,4 @@ node scripts/upstream-watch.mjs ledger --since 2026-09-01
 git fetch origin upstream-watch-ledger && git show origin/upstream-watch-ledger:events.ndjson
 ```
 
-How it works: `docs/UPSTREAM-WATCH.md` on `main`.
+How it works: `docs/upstream-watch.md` on `main`.
