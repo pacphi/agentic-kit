@@ -19,6 +19,31 @@ test('enumerated Codex thread sources classify without guessing an unknown sourc
   }
   assert.equal(classifySessionSurface({ host: 'codex', originator: 'codex_exec', threadSource: 'user' }).initiator, 'automation');
   assert.equal(classifySessionSurface({ host: 'codex', originator: 'codex_cli_rs', source: 'mcp', threadSource: 'user' }).initiator, 'agent');
+  for (const threadSource of [{}, 'future source']) {
+    const result = classifySessionSurface({ host: 'codex', originator: 'Codex Desktop', threadSource });
+    assert.equal(result.initiator, 'unknown');
+    assert.deepEqual(result.rawEvidence, { originator: 'Codex Desktop' });
+  }
+  assert.equal(classifySessionSurface({ host: 'codex', originator: 'Codex Desktop' }).initiator, 'person');
+  for (const originator of ['codex_exec', 'codex_sdk_ts']) {
+    assert.equal(classifySessionSurface({ host: 'codex', originator, threadSource: {} }).initiator, 'automation');
+  }
+  assert.equal(classifySessionSurface({ host: 'codex', originator: 'codex_cli_rs', source: 'mcp',
+    threadSource: {} }).initiator, 'agent');
+});
+
+test('malformed first thread source remains unknown through parser and ledger overlay', () => {
+  for (const threadSource of [{}, 'future source']) {
+    const rollout = new Rollout({ id: 'malformed' }).meta({ originator: 'Codex Desktop', thread_source: threadSource })
+      .turn().agent().tokenCount(usage({ input: 10, output: 2 }));
+    const rec = parseCodex(rollout.toString(), { id: 'malformed' }).session;
+    assert.equal(rec.sessionOrigin.initiator, 'unknown');
+    assert.deepEqual(rec.sessionOrigin.rawEvidence, { originator: 'Codex Desktop' });
+    const ledger = { threads: new Map([['malformed', { threadSource: 'future source' }]]), parents: new Map() };
+    const overlaid = applyCodexLedger([rec], ledger)[0];
+    assert.equal(overlaid.sessionOrigin.initiator, 'unknown');
+    assert.deepEqual(overlaid.sessionOrigin.rawEvidence, { originator: 'Codex Desktop' });
+  }
 });
 
 test('structured source proves parent only with the observed thread_spawn shape', () => {
@@ -71,6 +96,18 @@ test('Auto-review tokens remain counted but the unpublished model is unpriced', 
   assert.equal(evidence.estimatedUsd, 0);
   assert.equal(evidence.unpricedMessages, 1);
   assert.equal(rowCostEvidence({ ...row, model: 'gpt-5.6-sol' }, { provider: 'codex' }, { costOf }).unpricedMessages, 0);
+});
+
+test('ledger enrichment cannot relabel an imported copy as a reviewer', () => {
+  const copy = new Rollout({ id: 'imported' }).meta({ originator: 'Codex Desktop', thread_source: null })
+    .taskStarted('external-import-turn-1').user('synthetic copied text');
+  const rec = parseCodex(copy.toString(), { id: 'imported' }).session;
+  const ledger = { threads: new Map([['imported', { threadSource: 'guardian_review' }]]), parents: new Map() };
+  const enriched = applyCodexLedger([rec], ledger)[0];
+  assert.equal(enriched.sessionOrigin.initiator, 'imported-copy');
+  assert.equal(enriched.sessionOrigin.evidence, 'imported-copy');
+  assert.deepEqual(enriched.sessionOrigin.rawEvidence, {});
+  assert.deepEqual(enriched.usage, []);
 });
 
 test('cold and warm aggregates retain child own usage and unpriced reviewer coverage under parent surface', async () => {

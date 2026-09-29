@@ -85,14 +85,14 @@ function claudeClassification(entrypoint, sessionKind) {
 }
 
 /** @returns {[string, string, string[]]} */
-function codexClassification(originator, source, threadSource) {
+function codexClassification(originator, source, threadSource, rejectedThreadSource) {
   let [surface, initiator] = originator === null ? ['unknown', 'unknown']
     : CODEX.get(originator) ?? ['other-openai', 'unknown'];
   if (originator === 'codex_cli_rs' && source === 'mcp') [surface, initiator] = ['codex-mcp', 'agent'];
   if (surface === 'codex-mcp' || ['subagent', 'guardian_review', 'agent_created_thread'].includes(threadSource)) initiator = 'agent';
   else if (['codex-cli-exec', 'codex-sdk'].includes(surface) || threadSource === 'automation') initiator = 'automation';
   else if (['user', 'chatgpt_handoff'].includes(threadSource)) initiator = 'person';
-  else if (threadSource !== null) initiator = 'unknown';
+  else if (threadSource !== null || rejectedThreadSource) initiator = 'unknown';
   return [surface, initiator, []];
 }
 
@@ -104,6 +104,9 @@ export function classifySessionSurface(declaration = {}) {
   const originator = bounded(declaration.originator);
   const source = bounded(declaration.source);
   const threadSource = bounded(declaration.threadSource);
+  // Absence does not contradict a known surface's default initiator. A value
+  // that was declared but rejected by the bounded token parser does.
+  const rejectedThreadSource = declaration.threadSource != null && threadSource === null;
   const sessionKind = bounded(declaration.sessionKind);
   const rawEvidence = {};
   let surface = 'unknown', initiator = 'unknown', attributes = [];
@@ -116,7 +119,7 @@ export function classifySessionSurface(declaration = {}) {
     retain(rawEvidence, 'originator', originator);
     retain(rawEvidence, 'source', source);
     retain(rawEvidence, 'threadSource', threadSource);
-    [surface, initiator, attributes] = codexClassification(originator, source, threadSource);
+    [surface, initiator, attributes] = codexClassification(originator, source, threadSource, rejectedThreadSource);
   }
   if (declaration.importedCopy === true) initiator = 'imported-copy';
   return { surface, initiator, label: sessionSurfaceLabel(surface), rawEvidence, attributes,

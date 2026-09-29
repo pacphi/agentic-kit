@@ -23,3 +23,9 @@ Read only the first JSONL line of 1,806 local Codex rollout files, plus `turn_co
 ## Accounting limits
 
 The 26 schema remains unchanged. Existing schema-26 caches created before this unit may lack parsed parent IDs until a fresh cache rebuild; the final pre-PR gate owns that rebuild. A reviewer without a verified parent remains on its declared surface because no parent can be inferred. No provider calls, full unit/UI suite, real cache migration, or user database writes were made.
+
+## Independent review fix round 1 — 2026-09-29 11:05 UTC
+
+- **P2 confirmed:** a present `thread_source` rejected by the bounded token parser (`{}` or a string containing spaces) became `null`, allowing a known interactive originator's `person` default. The classifier now distinguishes an absent declaration from a rejected one without retaining rejected content. Focused fixtures cover direct classification, the first rollout metadata line, ledger overlay, and the SDK, exec, and MCP fixed initiators.
+- **P3 confirmed:** ledger backfill called `classifySessionSurface` without the imported-copy flag and could replace an imported copy's `initiator` with `agent`. `ledgerOrigin` now preserves the parser's imported-copy override. The regression fixture uses a real minimal imported rollout and a synthetic guardian-review ledger row; the exported helper remains safe even though `buildIndex` filters imported records before aggregation.
+- RED: both new defect fixtures failed against `5fe016d1`. GREEN: the same six focused test files listed above passed, **103 tests, 0 failures**. TypeScript `--noEmit`, targeted ESLint on the three changed source/test files, and `git diff --check` passed. No full unit/UI run or local corpus repeat was performed.

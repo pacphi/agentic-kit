@@ -1323,6 +1323,9 @@ function ledgerParent(rec, ledger, byId) {
 
 function ledgerOrigin(rec, source, parent) {
   let origin = rec.sessionOrigin;
+  // An imported transcript is a copy, regardless of what the optional ledger
+  // says about its thread. Preserve the parser's explicit override.
+  if (origin?.evidence === 'imported-copy' || origin?.initiator === 'imported-copy') return origin;
   if (origin && source !== rec.threadSource) {
     const raw = origin.rawEvidence ?? {};
     origin = { ...origin, ...classifySessionSurface({ host: 'codex', originator: raw.originator,
