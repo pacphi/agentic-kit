@@ -236,7 +236,7 @@ browser never derives a provider or publisher from a name and never invents an e
 An `unknown` cell explains which evidence is absent. Model details separately name published or
 discovered status, account access, local routability, and the operator's next evidence step. The
 table labels the discovery dimension **Catalogued**, not **Available**, so provider publication or
-local discovery cannot be mistaken for account entitlement. A local refresh now resolves OpenCode's
+local discovery cannot be mistaken for account entitlement. A local model refresh resolves OpenCode's
 effective configuration, removing unknowns caused only by ignored global, JSONC, agent, or command
 layers. Discovery still does not establish entitlement; configuration does not establish successful
 use; and a model id never establishes the serving provider. Catalog Explorer model details show an

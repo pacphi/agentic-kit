@@ -144,7 +144,7 @@ import { MNT, mntAge, MNT_SOURCE_COVERAGE_LABELS, mntGet, mntPost, mntRegisterDe
     // optional structured per-source detail, not text — this workspace has
     // no use for it beyond what `coverage` already gives, so it stays unread.
     var narrative=(MNT.discovery&&(MNT.discovery.narrative||MNT.discovery.progress))||"";
-    // Automatic sources are covered by Re-measure machine (System Full scan)
+    // Automatic sources are covered by Refresh machine (machine measurement)
     // and carry no per-source controls; only roots the user added expose
     // Pause/Stop while running, Resume/Stop while paused, and Retry after a
     // failure. A user root starts scanning when it is saved (no "scan now").
@@ -170,7 +170,7 @@ import { MNT, mntAge, MNT_SOURCE_COVERAGE_LABELS, mntGet, mntPost, mntRegisterDe
           +(entry.limitingReason?'<small>'+esc(entry.limitingReason)+'</small>':'')
           +(entry.lastCompletedAt?'<small>'+esc(mntAge(entry.lastCompletedAt))+'</small>':'')+' '+controls+'</td></tr>';
       }).join('')+'</tbody></table></section>'
-      +'<section class="mnt-scan-section"><h3>Evidence checks</h3><p>Runtimes, package managers, Ollama, and providers are checked by Refresh evidence, separately from filesystem coverage. The toolbar reports the latest operation outcome.</p></section>'
+      +'<section class="mnt-scan-section"><h3>Evidence checks</h3><p>Runtimes, package managers, Ollama, and providers are checked by Refresh, separately from filesystem coverage. The toolbar reports the latest operation outcome.</p></section>'
       +'<section class="mnt-scan-section"><h3>Project coverage</h3><p>'+esc(MNT.discovery&&MNT.discovery.projectCoverageNote||'Configured project roots contribute to filesystem coverage. Machine-discovered projects appear in Inventory.')+'</p></section>';
   }
   export function renderMntDiscovery(){

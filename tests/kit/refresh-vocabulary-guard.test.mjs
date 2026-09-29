@@ -1,21 +1,16 @@
 // refresh-vocabulary-guard.test.mjs — ADR-0063 (the refresh vocabulary): no
-// retired CLI spelling from before the one-refresh-flag vocabulary may
+// retired CLI or dashboard spelling from before the one-refresh vocabulary may
 // reappear in help text, README, docs, or the installed `claude/` guidance.
 //
-// Scope: src/** (comments included — they must describe current CLI
-// behaviour), bin/**, claude/**, README.md, and living top-level docs/*.md.
+// Scope: src/** (comments included — they must describe current behaviour),
+// bin/**, claude/**, README.md, and current docs/**/*.md.
 // docs/adr/, docs/archive/, docs/plans/, and docs/proposals/ are records that
 // may preserve retired spellings. In
 // src/lib/hook-audit/agentic-dependency-constraints.json only the dated
 // watch[].history[].note strings are skipped — every other string, including
 // `adjustment`, is scanned like any other source text.
 //
-// CLI patterns only: the dashboard's own retired spellings ("Full
-// scan", "Refresh evidence", "Re-measure machine", "Check again", "refresh
-// now") are out of this guard's scope until the dashboard half of this work
-// lands in a later branch (see docs/superpowers/plans/2026-09-28-branch-6b-
-// one-refresh-flag.md, "Closing this branch"). This guard never asserts an
-// UPGRADING section or an old -> new table exists (no legacy, no hints).
+// This guard never asserts an UPGRADING section or an old -> new table exists.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -60,13 +55,25 @@ const RETIRED_CLI_PATTERNS = [
   { label: 'ak usage prompts …--deep (flag anywhere on the same line)', pattern: /\bprompts\b[^\n]*\[?--deep\b/g },
 ];
 
+const RETIRED_DASHBOARD_PATTERNS = [
+  { label: 'retired dashboard scan control', pattern: /\bFull scan\b/g },
+  { label: 'retired dashboard evidence control', pattern: /\bRefresh evidence\b/g },
+  { label: 'retired dashboard measurement control', pattern: /\bRe-measure machine\b/g },
+  { label: 'retired dashboard local-check control', pattern: /\bCheck again\b/g },
+  { label: 'retired dashboard refresh prompt', pattern: /\brefresh now\b/g },
+  { label: 'retired dashboard GET refresh query', pattern: /refresh=(?:deep|scan)/g },
+  { label: 'retired dashboard host-health route', pattern: /\/api\/host-health\/local/g },
+];
+
+const RETIRED_PATTERNS = [...RETIRED_CLI_PATTERNS, ...RETIRED_DASHBOARD_PATTERNS];
+
 function lineOf(text, offset) {
   return text.slice(0, offset).split('\n').length;
 }
 
 function violations(relPath, text) {
   const found = [];
-  for (const { label, pattern } of RETIRED_CLI_PATTERNS) {
+  for (const { label, pattern } of RETIRED_PATTERNS) {
     pattern.lastIndex = 0;
     for (const match of text.matchAll(pattern)) {
       found.push(`${relPath}:${lineOf(text, match.index)} ${label}: ${JSON.stringify(match[0])}`);
@@ -157,14 +164,14 @@ function scopeFiles() {
   return files.filter((file) => file !== REGISTRY);
 }
 
-test('no retired CLI spelling remains in help, README, docs, or installed guidance', () => {
+test('no retired CLI or dashboard spelling remains in source, README, current docs, or installed guidance', () => {
   const found = [];
   for (const file of scopeFiles()) {
     const text = fs.readFileSync(file, 'utf8');
     found.push(...violations(path.relative(ROOT, file), text));
   }
   found.push(...registryViolations());
-  assert.deepEqual(found, [], `retired CLI spellings remain:\n${found.join('\n')}`);
+  assert.deepEqual(found, [], `retired CLI or dashboard spellings remain:\n${found.join('\n')}`);
 });
 
 test('the registry skip is narrow: dated watch[].history[].note strings still contain the old spellings they document', () => {

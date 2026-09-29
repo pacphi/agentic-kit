@@ -1,8 +1,13 @@
 # ADR-0048 — Inventory-led Maintenance resource management
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
-  human-evaluation and cross-platform gates
-- **Updated:** 2026-09-28 — Branch 6b gives this ADR's two scan controls CLI equivalents:
+  human usability, screen-reader, and cross-platform evaluation gates deferred to v5;
+  the former Refresh evidence and Re-measure machine controls are superseded by ADR-0063
+- **Updated:** 2026-09-29 — [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) replaces the
+  two dashboard scan controls with one Refresh control; its three visible choices start the
+  shared staged POST operation. D-15 moves the human usability, screen-reader, and
+  cross-platform evaluation gates to v5; automated checks do not satisfy them.
+- **Earlier update:** 2026-09-28 — Branch 6b gives this ADR's two scan controls CLI equivalents:
   `ak maintain --refresh` and `ak maintain --refresh=machine` (`src/lib/refresh.mjs`'s
   `--refresh[=live|machine]`, `ak status --help` for the shared stages). The `scan` verb, the
   `scans start`/`plan --deep`/`--refresh-inventory` re-measure flags, and `ak maintain recipes
@@ -113,7 +118,8 @@ The Focus browser amendment approved on 2026-09-08 is implemented and passes foc
 approved prototype establishes interaction intent, not production or adapter completeness. It is not
 yet Implemented in this record's own sense, because the
 [live acceptance criteria](../maintenance-acceptance.md)'s human-evaluation and
-cross-platform acceptance gates have not run on this machine. The dashboard's Maintenance panel now
+cross-platform acceptance gates have not run on this machine and are deferred to v5 under
+D-15. The dashboard's Maintenance panel now
 renders this ADR's Inventory/Guidance/Discovery/Activity workspace; ADR-0044's v1 HTTP routes and
 CLI verbs remain available as a documented compatibility surface until those gates pass and this
 record is updated again. ADR-0044 is not marked Superseded; see "Implementation status" for why.
@@ -121,7 +127,8 @@ record is updated again. ADR-0044 is not marked Superseded; see "Implementation 
 ## Current implementation boundary (2026-09-09)
 
 This stays **Accepted with implementation delivered**, not a completed human or
-cross-platform release certification. ADR-0050 adds evidence-backed repository
+cross-platform release certification. D-15 defers the usability, screen-reader, and
+cross-platform evaluation gates to v5. ADR-0050 adds evidence-backed repository
 groups, independent Desktop-origin filtering, and wrapping language icons.
 Current cards have no three-icon disclosure or repeated uncertainty labels.
 Installation counts and exact action identities are unchanged.

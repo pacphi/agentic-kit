@@ -186,10 +186,24 @@ test('dashboard HTTP executes and undoes one maintenance finding through the rea
   const server = await startDashboard({
     port: 0, maintenance: service, usage: {}, maintenanceOptions: HERMETIC_MAINTENANCE,
     fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    refreshStages: {
+      maintenance: async () => { await service.scan({ deep: false }); return { ok: true }; },
+      inventory: async () => ({ ok: true }), local: async () => ({ ok: true }),
+    },
   });
   t.after(() => server.close());
 
-  const report = await request(server, '/api/maintenance?refresh=scan');
+  const started = await request(server, '/api/refresh', { method: 'POST', body: { strength: 'local' } });
+  assert.equal(started.status, 202);
+  let state;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    state = (await request(server, '/api/refresh')).body;
+    if (!state.running) break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(state?.running, false, 'the explicit refresh finishes');
+  assert.equal(state?.ok, true);
+  const report = await request(server, '/api/maintenance');
   assert.equal(report.status, 200);
   assert.equal(report.headers['cache-control'], 'no-store');
   assertNoPrivateTransport(report.body);

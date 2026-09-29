@@ -94,6 +94,7 @@ const datetimeSrc = readSplit('datetime.mjs');
 const hostReadinessSrc = readSplit('host-readiness.mjs');
 const intelligenceSrc = readSplit('intelligence.mjs');
 const pollSrc = readSplit('poll.mjs');
+const refreshControlSrc = readSplit('refresh-control.mjs');
 // usage-rhythm.mjs declares its OWN `esc` on disk, and its comment says why:
 // the tests import it as real ESM, where bootstrap.mjs's `esc` is still the
 // build-time stub. In the concatenated bundle every file shares ONE scope, so
@@ -164,5 +165,5 @@ const bootSrc = readSplit('boot.mjs');
 export const JS = `
 (function(){
 ${bootstrapSrc}${contextCard.toString()}${contextHostCard.toString()}${repositoryTree.toString()}${overviewSrc}${datetimeSrc}${hostReadinessSrc}
-${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${rufloComponentsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${intelligenceSrc}${pollSrc}${refreshControlSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${rufloComponentsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

@@ -57,6 +57,10 @@ export class LiveSessionsService {
   #projection = emptyLiveProjection();
   #tailers = new Map();
   #contexts = new Map();
+  // Keep a bounded set of displaced native readers with their byte offsets
+  // and partial-line state. Re-entry within this retention window must not
+  // replay already counted records.
+  #dormantTailers = new Map();
   #timer = null;
   #started = false;
   #edgeKeys = new Set();
@@ -140,6 +144,7 @@ export class LiveSessionsService {
     if (this.#timer != null) this.#options.clearInterval(this.#timer);
     this.#timer = null;
     for (const tailer of this.#tailers.values()) tailer.close();
+    for (const { tailer } of this.#dormantTailers.values()) tailer.close();
     this.#runtimeBindings.clear();
     this.#historyPages.clear();
     this.#started = false;
@@ -253,9 +258,14 @@ export class LiveSessionsService {
     const desiredNative = new Set([...claude, ...codex]);
     for (const [file, context] of this.#contexts) {
       if (!['claude', 'codex'].includes(context.adapter) || desiredNative.has(file)) continue;
-      this.#tailers.get(file)?.close();
+      const tailer = this.#tailers.get(file);
+      tailer?.close();
+      if (tailer) this.#dormantTailers.set(file, { tailer, context });
       this.#tailers.delete(file);
       this.#contexts.delete(file);
+      while (this.#dormantTailers.size > Math.max(2, this.#options.maxFiles * 2)) {
+        this.#dormantTailers.delete(this.#dormantTailers.keys().next().value);
+      }
     }
     for (const file of claude) {
       this.#add(file, {
@@ -272,6 +282,13 @@ export class LiveSessionsService {
 
   #add(file, context, initial) {
     if (this.#tailers.has(file) || this.#tailers.size >= this.#options.maxFiles) return;
+    const dormant = this.#dormantTailers.get(file);
+    if (dormant) {
+      this.#dormantTailers.delete(file);
+      this.#tailers.set(file, dormant.tailer);
+      this.#contexts.set(file, dormant.context);
+      return;
+    }
     if (initial && ['claude', 'codex'].includes(context.adapter)) {
       // One shared bootstrap context so metadata learned early (codex
       // session_meta id/meta, project, model, provider) persists across the

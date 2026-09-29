@@ -1,7 +1,8 @@
 # ADR-0063 — One evidence store and the refresh vocabulary
 
 - **Status:** Accepted
-- **Updated:** 2026-09-28 — Branch 6b delivered the CLI refresh vocabulary
+- **Updated:** 2026-09-29 — Branch 6c delivered the dashboard refresh operation and retired GET-started scans
+- **Earlier update:** 2026-09-28 — Branch 6b delivered the CLI refresh vocabulary
 - **Date:** 2026-09-28
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (`/api/system/summary` projection),
@@ -15,10 +16,11 @@
   already recorded its own `Updated:` line), [ADR-0055](0055-aqe-embedding-lifecycle.md)
   (live-check evidence storage relocation, mechanical), [ADR-0053](0053-host-setup-evidence-and-usage-diagnostics.md)
   (host setup checks are now persisted evidence with an age rule)
-- **Supersedes:** [ADR-0048](0048-inventory-led-maintenance-resource-management.md)'s use of the
-  word "evidence" for its own, separate **Refresh evidence** / **Re-measure machine** scan
-  controls — terminology only; see "Relationship to ADR-0048" below. Their UI, backing code
-  (`scan-store.mjs`), and evidence semantics are unchanged by this branch.
+- **Supersedes:** [ADR-0048](0048-inventory-led-maintenance-resource-management.md)'s separate
+  **Refresh evidence** / **Re-measure machine** dashboard controls;
+  [ADR-0025](0025-machine-footprint-metrics.md) §5's GET-started deep refresh rationale; and
+  [ADR-0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md)'s
+  `GET /api/maintenance?refresh=scan` trigger. Their underlying measurements and stores remain.
 
 ## Context
 
@@ -404,7 +406,7 @@ the [issues 237–239 audit](../plans/2026-09-26-issues-237-238-239-verification
 Item 4 named. It closed CLI-only: the dashboard's own controls are untouched, and the dashboard
 half of this work moved to the next remediation program — see
 [the branch 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md)'s "Closing
-this branch" section, and "Ahead: the dashboard half" below.
+this branch" section and "Delivered in 6c" below.
 
 - **One flag, three strengths, one ordered stage table** — `--refresh[=live|machine]` across `ak
   status`, `ak system` and `ak maintain [report]`; see "The `--refresh` flag's three strengths"
@@ -485,42 +487,55 @@ this branch" section, and "Ahead: the dashboard half" below.
   and stopping before any write; `ak host adapters` refuses `--dry-run` outright (exit 2) because
   its verbs have no preview.
 
-## Ahead: the dashboard half
+## Delivered in 6c
 
-6b closed CLI-only — see
-[the branch 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md)'s "Closing
-this branch" section. The dashboard's own controls are unchanged by this branch and remain future
-work for the next remediation program:
+Branch 6c adds one dashboard **Refresh** control. Its visible choices are **Refresh**,
+**Refresh live**, and **Refresh machine**; the operation request calls their conceptual strengths
+`local`, `live`, and `machine`. The separate header **Reload** re-reads the active view and
+starts no checks. The former **Check again** local host-health button is folded into Refresh.
 
-- One dashboard **Refresh** control offering the same three strengths the CLI now has, and a
-  **Reload** control that only re-reads the current view.
-- A `POST /api/refresh` route driving that control through the same `runRefresh`/stage machinery
-  this branch built for the CLI, and the dashboard's existing read-only `GET` routes.
-- The eventual supersession of ADR-0048's **Refresh evidence** / **Re-measure machine** controls
-  and of [ADR-0025](0025-machine-footprint-metrics.md) §5's `GET ?refresh=deep` rationale, once
-  that dashboard work lands — neither is superseded by this branch, and both remain exactly as
-  their own ADRs describe them today.
+`POST /api/refresh` starts one explicit operation with a bounded JSON body: `strength` is
+required; `projectTrees` is an optional boolean for `machine` only. The response is 202 with
+`started: true` and the operation state, or 409 with the current state when work is already
+running. The server requires the per-session `x-dash-token` header and same-origin mutation
+metadata; a query token cannot authorize this POST. `GET /api/refresh` reads the latest state
+without starting work. That state has an `operationId`, strength, timestamps, running/completion
+fields, and sanitized stage progress, but no stage results. `GET /api/system`,
+`GET /api/system/summary`, `GET /api/maintenance`, and the host-health read remain reads:
+legacy refresh/scan query arguments are rejected, and `/api/host-health/local` was removed.
+The separate consent-gated `POST /api/host-health/connection` remains.
 
-What stays out of scope regardless: this store's storage does not unify with Maintenance's own
-`scan-store.mjs`/deep-snapshot system (R1 — one flag and, eventually, one dashboard control drive
-the existing chain; the footprint snapshot and its storage stay where they are), and
-`src/lib/host-health-evidence.mjs` (ADR-0053's setup-proof input-fingerprint helper) is still not
-folded into this store — see "What is deliberately not folded into this store" above, unchanged
-by 6b.
+The dashboard runs the shared `runRefresh` stage order from `src/lib/refresh.mjs`:
+
+| Strength | Ordered stages |
+|---|---|
+| `local` (Refresh) | Maintenance evidence → inventory → local evidence and versions |
+| `live` (Refresh live) | Maintenance evidence → inventory → live checks → local evidence and versions |
+| `machine` (Refresh machine) | Machine measurement → Maintenance evidence → inventory → local evidence and versions |
+
+A failed machine measurement skips its dependent Maintenance and inventory stages; the local
+stage still runs. Other stage failures do not stop later stages. Machine measurement can include
+project trees when explicitly selected. The Maintenance stage scans provider evidence; inventory
+rebuilds after it; local collects status and forces the host-readiness check. These stages use
+the existing Maintenance scan and footprint stores, not a merged evidence store.
+
+`createRefreshOperation` holds one current operation in one dashboard server process.
+Two tabs connected to that server share its single-flight state, so a concurrent POST gets 409.
+This is volatile process state, with neither durable operation history nor distributed mutual
+exclusion across servers. The client retains its accepted `operationId` and reports a result
+only for that identity. If its POST response is lost or another operation supersedes the
+server's latest state, the page may say its outcome is unavailable; it does not claim the
+other operation's result.
 
 ## Relationship to ADR-0048
 
-ADR-0048's **Refresh evidence** and **Re-measure machine** dashboard controls predate this branch
-and use the word "evidence" in the Maintenance-inventory sense (provider probes feeding the
-Inventory/Guidance/Discovery/Activity workspace), which is conceptually adjacent to — but a
-genuinely separate system from — the evidence store this ADR describes. This ADR's evidence store
-is the eventual "live" tier's technical precursor and this branch's own interim `--refresh` boolean
-is its no-suffix groundwork; ADR-0048's own controls, their backing code (`scan-store.mjs`), and
-their UI are unchanged by this branch. No file under Maintenance's own scan system was touched by
-Tasks 1–11. A reader should not infer that ADR-0048's controls now share code, storage, or an age
-rule with this ADR's evidence store — they do not, yet. Branch 6b gives those two controls CLI
-equivalents — `ak maintain --refresh` and `ak maintain --refresh=machine` — without changing the
-controls, their backing code, or their UI themselves; see "Delivered in 6b" above.
+ADR-0048's separate **Refresh evidence** and **Re-measure machine** dashboard controls are
+superseded by the single Refresh control above. Its Inventory/Guidance/Discovery/Activity
+workspace, scan storage (`scan-store.mjs`), evidence semantics, and guarded management
+actions remain. The CLI equivalents delivered in 6b are `ak maintain --refresh` and
+`ak maintain --refresh=machine`. The control unifies the user's start path, not the
+underlying storage or age rules. `src/lib/host-health-evidence.mjs` also remains outside the
+shared evidence envelope.
 
 ## Known limitations (recorded, not fixed, by this branch)
 

@@ -23,7 +23,7 @@ environment; native Windows mutation support remains an integration gate.
 ## Host alignment in User and Project views
 
 Select **Host alignment** under **More views**, then choose **User** or **Projects**
-and an optional project filter. Use **Refresh evidence** to inspect current host
+and an optional project filter. Use **Refresh** to inspect current host
 configuration. The rows identify retired peer transports and other host-alignment
 anomalies without exposing configuration contents or local paths in the inventory.
 
@@ -58,25 +58,22 @@ The dashboard workspace has four tabs. Each answers a different question.
 | **Activity** | What changed? Receipts, undo, interruption audits, dispositions, recipe changes, and scan records. |
 
 Opening Maintenance reads the last complete inventory and opens **Inventory** across all scopes.
-Nothing scans on open. A fresh installation has no inventory yet; the empty state reads **No
-inventory has been built yet. Use Refresh evidence, above, to build it.** and every installed
-automatic source reads **Not scanned yet** (a host that is not installed reads **Not installed**). Two actions sit side by side above the tabs, each with its own helper
-text:
+Nothing scans on open. A fresh installation has no inventory yet; the empty state asks you to
+use **Refresh** in the header, and every installed automatic source reads **Not scanned yet**
+(a host that is not installed reads **Not installed**).
 
-- **Refresh evidence** runs provider probes on the saved measurement and rebuilds the inventory.
-  It takes seconds. The CLI equivalent is `ak maintain --refresh`.
-- **Re-measure machine** walks the filesystem to re-measure installs, storage, projects, and every
-  discovery source, then refreshes evidence. It takes minutes. The CLI equivalent is
-  `ak maintain --refresh=machine`.
-
-Both controls run provider probes: Re-measure machine includes the Refresh evidence stage. While either action
-runs, both buttons are disabled, the status line names what is running ("Refreshing evidence…";
-during Re-measure machine, each phase in turn, from "Preparing measurement…" through "Machine
-measured · refreshing evidence…"), and apply, undo, and record are refused. If
-the work does not finish, the previous evidence is kept. The inventory build runs after the probes
-settle and can take a few seconds on a large footprint; the empty state reads **Building the
-inventory…** until the rows appear, and **The last inventory build did not complete** with a short
-reason if it fails. The retired Catalog link (`#system/catalog`) redirects to Inventory.
+The header has one **Refresh** button. Its selector shows **Refresh** (local strength),
+**Refresh live** (live strength), and **Refresh machine** (machine strength). The local strength
+runs provider probes on the saved measurement, rebuilds the inventory, and re-checks local
+evidence and versions. The live strength adds bounded live checks. The machine strength first
+re-measures installs, storage, and projects, then refreshes Maintenance evidence. Its inventory
+stage walks the discovery sources before rebuilding the inventory from the new measurement.
+The CLI equivalents are `ak maintain --refresh`, `ak maintain --refresh=live`, and
+`ak maintain --refresh=machine`. **Include project trees** applies only to **Refresh machine**.
+While an operation runs, another refresh cannot start; apply, undo, and record are refused.
+The prior complete evidence is retained if work does not finish. The empty state reads
+**Building the inventory…** while the inventory builds, or names the failure reason.
+The retired Catalog link (`#system/catalog`) redirects to Inventory.
 
 ## Inventory
 
@@ -299,7 +296,7 @@ Discovery is where you tell Agentic Kit where to look. Configuration is user int
   configuration, Codex user configuration, OpenCode user configuration, Hermes user configuration,
   Projects (every project a recorded host session has visited), Runtimes, Package managers, Ollama
   (over loopback only), and Providers. Each states what it inspects, never a path. Automatic
-  sources have no per-source scan control: their coverage comes from **Re-measure machine**, and
+  sources have no per-source scan control: their coverage comes from **Refresh machine**, and
   the non-filesystem ones (Runtimes, Package managers, Ollama, Providers) are covered by the
   provider check. Asking `ak maintain scans start` to walk one of those is refused with
   `SOURCE_NOT_SCANNABLE`. A host source whose folder is not on this machine (for example Hermes
@@ -337,7 +334,7 @@ Scans are resumable and completion-oriented.
   run. A started root keeps running through its work slices until it completes, pauses, stops, or
   fails; you never have to resume it yourself. `ak maintain scans start --source ID` does the same
   from the CLI and waits for the final state. Automatic sources show instead whether they are
-  measured by Re-measure machine or covered by the last measurement.
+  measured by choosing **Refresh machine** or covered by the last measurement.
 
 Progress is factual: "Scanned N entries. X of Y sources are complete. N sources have not been
 scanned yet." Counts are visited work, never totals.
@@ -460,7 +457,7 @@ ak maintain undo --receipt RECEIPT_ID --yes
 Undo needs the recorded provider and version, a reversible or compensating operation, and an exact
 current postimage. If anything changed after apply, undo refuses instead of overwriting the new
 state. If no inventory has been built yet, plan and apply refuse with `SCAN_REQUIRED`; choose
-**Refresh evidence** or run `ak maintain --refresh` first. If a placement cannot be
+**Refresh** or run `ak maintain --refresh` first. If a placement cannot be
 bound to an exact executable finding, they refuse with `PLACEMENT_FINDING_UNRESOLVED`.
 
 Rollback classes are separate from safety: **reversible** (the provider restores and verifies the
@@ -494,7 +491,8 @@ server registration and are not separate MCP installations.
 
 Measured user instruction files retain their resolved configuration location through
 **Reveal exact path**. Their paths remain private in ordinary inventory responses.
-Refresh evidence after upgrading to populate locations missing from an older snapshot.
+Select **Refresh** in the header selector and press the **Refresh** button after upgrading to
+populate locations missing from an older snapshot.
 
 Inventory can relate a standalone skill and a plugin-contributed skill by exact name, bounded
 entrypoint digest, or bounded full-definition digest. Full-definition equality includes the
@@ -542,7 +540,7 @@ transaction applies; follow the verb-specific options below.
 
 | Verb | What it does |
 |------|--------------|
-| `[report] [--refresh[=live\|machine]] [--project-trees]` | `report` (the default verb) reads the last measurement. A bare `--refresh` refreshes Maintenance evidence and rebuilds the Inventory first (the dashboard's **Refresh evidence**); `--refresh=machine` re-measures System first and walks every discovery source to completion before rebuilding (the dashboard's **Re-measure machine**); `--project-trees` with `--refresh=machine` also measures your projects' working trees. |
+| `[report] [--refresh[=live\|machine]] [--project-trees]` | `report` (the default verb) reads the last measurement. A bare `--refresh` refreshes Maintenance evidence and rebuilds the Inventory first (the dashboard's **Refresh**); `--refresh=machine` re-measures System first and walks every discovery source to completion before rebuilding (the dashboard's **Refresh machine**); `--project-trees` with `--refresh=machine` also measures your projects' working trees. |
 | `inventory [--scope S] [--view V] [--facet name=value ...] [--search TEXT] [--sort ORDER] [--cursor TOKEN] [--limit N]` | Queries placements. |
 | `show --placement ID [--reveal]` | Prints the inspector; `--reveal` prints the exact, owner-only path. |
 | `guidance [--lane LANE]` | Lists admitted Guidance entries and per-lane counts. |
@@ -627,10 +625,13 @@ or an export contains a local path unless you reveal or export it deliberately.
 
 ## Dashboard security boundary
 
-Maintenance is the only dashboard mutation surface. The v1 routes remain as compatibility:
+Maintenance actions are the dashboard's exact-placement mutation surface. The v1 routes remain
+for reads and explicit actions; refresh starts through the shared operation route:
 
 ```text
-GET  /api/maintenance            (?refresh=scan runs the provider check, then rebuilds the Inventory)
+GET  /api/maintenance            (reads the saved report)
+POST /api/refresh                (starts the selected refresh strength)
+GET  /api/refresh                (reads operation progress)
 POST /api/maintenance/plans
 POST /api/maintenance/apply
 POST /api/maintenance/undo
@@ -789,5 +790,6 @@ rows. Column headers stay pinned while dates and records scroll.
 Executable installations expose their measured launcher through **Reveal exact path**.
 Detection checks PATH (including Windows PATHEXT), resolves symlinks, and reads bounded npm
 `bin` metadata when a launcher is not on PATH. When only the installation root was measured,
-that root remains revealable. Paths stay out of the public inventory. Re-measure machine
-to collect new launcher evidence; discovery covers the environment running the scan.
+that root remains revealable. Paths stay out of the public inventory. Select **Refresh machine**
+in the header selector and press **Refresh** to collect new launcher evidence; discovery covers
+the environment running the scan.

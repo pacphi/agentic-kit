@@ -97,7 +97,7 @@ import { mntAge, mntFact, mntRefreshActiveDestination, mntText, mntValue } from 
     var code=mntText(error&&error.code).toUpperCase(),status=Number(error&&error.status);
     var effect=mntText(error&&error.effect);
     if(code==="MAINTENANCE_SCAN_IN_PROGRESS"||code==="SYSTEM_SCAN_IN_PROGRESS")return {
-      title:code==="SYSTEM_SCAN_IN_PROGRESS"?"Full scan in progress":"Provider check in progress",
+      title:code==="SYSTEM_SCAN_IN_PROGRESS"?"machine measurement in progress":"Provider check in progress",
       message:"The server did not start this change. Wait for current evidence to finish, then preview this row again.",
       status:"The server verified that no mutation started.",
     };
