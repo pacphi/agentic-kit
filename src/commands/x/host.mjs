@@ -32,7 +32,7 @@ import {
   hostManagement, hostEnableCommand, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
 } from '../../lib/host-management.mjs';
 import {
-  ok, warn, fail, info, dim, bold, yellow, humanOutputToStderr,
+  ok, warn, fail, info, dim, bold, yellow, humanOutputToStderr, reportFailure,
 } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
@@ -185,6 +185,12 @@ export async function run({ flags, positionals, pkgRoot }) {
   const sub = positionals[0] ?? 'status';
   const cwd = process.cwd();
 
+  if (['status', 'off', 'pick', 'reset-routes', 'align'].includes(sub) && positionals.length > 1) {
+    const error = `unexpected argument '${positionals[1]}'`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
+    return 2;
+  }
+
   if (sub === 'status') return status({ flags, cwd });
   if (sub === 'off') return off({ cwd, pkgRoot, flags });
   if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
@@ -196,12 +202,17 @@ export async function run({ flags, positionals, pkgRoot }) {
     // read-only preview to give --dry-run, so it is refused outright
     // instead of silently behaving like a real run: a flag we declare is a
     // flag we honor, or refuse.
-    if (flags['dry-run']) { fail('ak host adapters has no preview; run it without --dry-run'); return 2; }
+    if (flags['dry-run']) {
+      const error = 'ak host adapters has no preview; run it without --dry-run';
+      reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
+      return 2;
+    }
     return (await import('./host-adapters.mjs')).run({ flags, positionals: positionals.slice(1) });
   }
   if (sub === 'check-connection') return (await import('./host-connection.mjs')).run({ flags, positionals: positionals.slice(1) });
 
-  fail(`unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|adapters|align)`);
+  const error = `unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|adapters|align)`;
+  reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
   return 2;
 }
 

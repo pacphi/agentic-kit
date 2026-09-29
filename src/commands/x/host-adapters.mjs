@@ -25,7 +25,7 @@ import { HOST_REGISTRY } from '../../lib/adapters/registries.mjs';
 import * as consentStore from '../../lib/adapters/consent.mjs';
 import { runTieredConformance as defaultRunTieredConformance } from '../../lib/adapters/conformance.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
-import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
+import { ok, warn, fail, info, dim, bold, reportFailure } from '../../lib/output.mjs';
 import {
   grant as grantCap, gate as gateTier, status as statusReport, revokeGrant,
 } from './host-adapters-grants.mjs';
@@ -505,7 +505,8 @@ export async function run({
   if (failSafe) return failSafe(ctx);
 
   if (!flagEnabled(env)) {
-    fail(`experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`);
+    const error = `experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
     return 2;
   }
 
@@ -514,6 +515,7 @@ export async function run({
   const gated = GATED_HANDLERS[sub];
   if (gated) return gated(ctx);
 
-  fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance|grant|bless|gate|status|revoke-grant)`);
+  const error = `unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance|grant|bless|gate|status|revoke-grant)`;
+  reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
   return 2;
 }

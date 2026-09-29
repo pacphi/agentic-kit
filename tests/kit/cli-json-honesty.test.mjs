@@ -124,6 +124,56 @@ for (const [args, message] of USAGE_ERRORS) {
   });
 }
 
+const COMMAND_USAGE_ERRORS = [
+  [['usage', 'bogus', '--json'], /usage: ak usage/],
+  [['usage', 'score', '--window', '99', '--json'], /--window must be/],
+  [['usage', 'prompts', '--window', '99', '--json'], /--window must be/],
+  [['models', 'bogus', '--json'], /usage: ak models/],
+  [['models', 'explain', '--json'], /usage: ak models explain/],
+  [['models', 'plan', '--json'], /usage: ak models plan/],
+  [['models', 'status', 'extra', '--json'], /unexpected argument/],
+  [['models', 'status', '--host', 'bogus', '--json'], /unsupported model host/],
+  [['audit', 'bogus', '--json'], /requires the hooks or context subcommand/],
+  [['heal', 'bogus', '--json'], /requires the hooks subcommand/],
+  [['heal', 'hooks', '--yes', '--json'], /--yes requires --apply/],
+  [['x', 'aqe-store', 'bogus', '--json'], /usage: ak x aqe-store/],
+  [['x', 'aqe-embedding', 'bogus', '--json'], /aqe-embedding/],
+  [['x', 'codex-context', 'bogus', '--json'], /codex-context/],
+  [['x', 'skills', 'bogus', '--json'], /usage: ak x skills/],
+  [['x', 'reference', 'bogus', '--json'], /reference/],
+  [['x', 'statusline', 'bogus', '--json'], /usage: ak x statusline/],
+  [['x', 'daemon-gc', 'bogus', '--json'], /unexpected argument/],
+  [['x', 'harvest', 'bogus', '--json'], /unexpected argument/],
+  [['host', 'bogus', '--json'], /unknown host subcommand/],
+  [['host', 'status', 'extra', '--json'], /unexpected argument/],
+  [['host', 'adapters', '--dry-run', '--json'], /has no preview/],
+  [['host', 'adapters', 'unknown', '--json'], /experimental host-adapter surface is disabled/],
+];
+
+for (const [args, message] of COMMAND_USAGE_ERRORS) {
+  test(`ak ${args.join(' ')} reports one command-level JSON usage error`, () => {
+    const child = ak(args);
+    const out = oneJson(child);
+    assert.equal(child.status, 2, child.stderr);
+    assert.deepEqual(Object.keys(out), ['error', 'exitCode']);
+    assert.equal(out.exitCode, 2);
+    assert.match(out.error, message);
+    assert.match(child.stderr, message);
+  });
+}
+
+test('models rejects an unknown verb even when no snapshot exists', () => {
+  const child = ak(['models', 'bogus', '--json']);
+  assert.equal(child.status, 2, child.stderr);
+  assert.match(oneJson(child).error, /usage: ak models/);
+});
+
+test('plain status rejects a stray positional with exit 2', () => {
+  const child = ak(['status', 'stray']);
+  assert.equal(child.status, 2, child.stderr);
+  assert.match(child.stdout, /unexpected argument 'stray'/);
+});
+
 test('without --json a command-level usage error still prints on stdout', () => {
   const child = ak(['status', '--refresh=bogus']);
   assert.equal(child.status, 2);

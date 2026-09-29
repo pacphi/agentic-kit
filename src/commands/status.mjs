@@ -281,9 +281,9 @@ function strayArgumentError(positionals) {
 export async function run({ flags, positionals = [], pkgRoot, deps = {} }) {
   const request = refreshRequestFromFlags(flags);
   if ('error' in request) return usageError(flags, request.error);
-  if (!request.strength) return report(flags, { rows: await collect({ pkgRoot, refresh: false }) });
   const stray = strayArgumentError(positionals);
   if (stray) return usageError(flags, stray);
+  if (!request.strength) return report(flags, { rows: await collect({ pkgRoot, refresh: false }) });
   return runRefreshed({ flags, pkgRoot, request, deps });
 }
 

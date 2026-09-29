@@ -194,7 +194,9 @@ async function main() {
   } catch (err) {
     if (!String(err?.code ?? '').startsWith('ERR_PARSE_ARGS_')) throw err;
     if (cmd === 'telemetry') {
-      console.error('Telemetry failed: invalid command options.');
+      const error = 'Telemetry failed: invalid command options.';
+      console.error(error);
+      console.log(JSON.stringify({ error, exitCode: 2 }));
       return 2;
     }
     // Under --json a rejected option still answers with one JSON object (the

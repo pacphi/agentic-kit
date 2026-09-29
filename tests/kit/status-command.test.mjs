@@ -970,7 +970,7 @@ test('--refresh prints one line per finished stage, then the status table', asyn
   assert.match(r.out, /ak status\n.*versions +fake versions row/);
 });
 
-test('plain status runs no refresh stage', async () => {
+test('plain status rejects a stray positional before any refresh stage', async () => {
   seedHome();
   let calls = 0;
   const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
@@ -981,7 +981,8 @@ test('plain status runs no refresh stage', async () => {
     r = await captureLog(() => status.run({ flags: {}, positionals: ['extra'], pkgRoot: PKG_ROOT, deps: { refreshStages } }));
   } finally { process.chdir(cwd); }
   assert.equal(calls, 0);
-  assert.notEqual(r.result, 2, 'plain status still ignores a positional, as it always has');
+  assert.equal(r.result, 2);
+  assert.match(r.out, /unexpected argument 'extra'/);
 });
 
 test('a refresh with a stray argument is a usage error that names the one-token spelling', async () => {

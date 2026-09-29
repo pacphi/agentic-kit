@@ -4,7 +4,7 @@ import {
   listDaemons, staleDaemons, reap, listMcpTransports, orphanedMcpTransports,
   reapMcpTransports,
 } from '../../lib/daemons.mjs';
-import { ok, warn, dim } from '../../lib/output.mjs';
+import { ok, warn, dim, reportFailure } from '../../lib/output.mjs';
 
 export const options = {
   kill: { type: 'boolean', default: false },
@@ -32,7 +32,12 @@ Examples:
   ak x daemon-gc --kill   reap stale background daemons
   ak x daemon-gc --mcp --kill  also reap same-user PPID-1 MCP orphans`;
 
-export async function run({ flags }) {
+export async function run({ flags, positionals = [] }) {
+  if (positionals.length) {
+    const error = `unexpected argument '${positionals[0]}'`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(error) });
+    return 2;
+  }
   const daemons = await listDaemons();
   const stale = staleDaemons(daemons);
   const mcpTransports = await listMcpTransports();
