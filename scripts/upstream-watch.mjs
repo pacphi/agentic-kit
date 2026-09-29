@@ -286,7 +286,8 @@ async function record(registry, fetcher, options, { stdout, stderr, now, ledgerS
   const recorded = ledger.records.map((item) => item.line).join('\n');
   const all = ledgerEvents(report, registry, { since });
   const released = all.filter((event) => event.event === 'released' && event.fields.branch);
-  const fired = await dispatch({ released, records: ledger.records, dispatcher, repo, sentinel, now, recordedAt: runAt, dryRun: options.dryRun });
+  const eligibleIds = new Set(registry.watch.filter((entry) => PENDING.has(entry.status)).map((entry) => entry.id));
+  const fired = await dispatch({ released, records: ledger.records, dispatcher, repo, sentinel, now, recordedAt: runAt, dryRun: options.dryRun, eligibleIds });
   const records = [...withoutRecorded(all, recorded).map((event) => toRecord(event, runAt)), ...fired.records];
   const checkedAt = fetchErrors.length ? (ledger.checkedAt ?? since) : runAt;
   let commit = null;

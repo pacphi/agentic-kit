@@ -298,8 +298,11 @@ has GitHub write tools, so the limits below are instructions in its prompt, not 
 platform checks each push to a branch not prefixed `claude/` and refuses it when the branch is
 protected, someone else has an open pull request from it, or it carries someone else's commits
 ([Repositories and branch permissions](https://code.claude.com/docs/en/routines#repositories-and-branch-permissions)).
-GitHub does not notify you of your own pull request by default, so the watch's next run records
-`dispatch-pr` and its notice says the draft is ready.
+GitHub does not notify you of your own pull request by default, so the watch checks for an open
+draft pull request while the entry is `watching` or `fixed-unreleased`, for up to seven days after
+its latest firing. When found, it records `dispatch-pr` and its notice says the draft is ready.
+After that window, a late pull request needs manual reconciliation; the `fired` evidence remains
+in the ledger.
 
 - **Trigger:** API only.
 - **Prompt:**

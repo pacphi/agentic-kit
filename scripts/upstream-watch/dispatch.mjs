@@ -10,6 +10,7 @@ import { toRecord } from './ledger-branch.mjs';
 export const FIRE_URL = (routine) => `https://api.anthropic.com/v1/claude_code/routines/${routine}/fire`;
 export const FIRE_HEADERS = { 'anthropic-beta': 'experimental-cc-routine-2026-04-01', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
 export const REFIRE_AFTER_DAYS = 3;
+export const PR_OBSERVE_DAYS = 7;
 export const MAX_FIRES = 2;
 export const FIRE_TIMEOUT_MS = 30_000;
 // `gh pr list --head` matches the branch name in any fork; only a pull request
@@ -56,7 +57,7 @@ export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env
 }
 
 /** Fire (or, in a dry run, list in `wouldFire`) each released fix; the branch and pull request lookups only read. */
-export async function dispatch({ released, records, dispatcher, repo, sentinel, now, recordedAt, dryRun = false }) {
+export async function dispatch({ released, records, dispatcher, repo, sentinel, now, recordedAt, dryRun = false, eligibleIds = null }) {
   const out = [];
   const errors = [];
   const wouldFire = [];
@@ -85,6 +86,9 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
   }
   for (const id of new Set(records.filter((item) => item.event === 'fired').map((item) => item.id))) {
     if (recordsOf(id, 'dispatch-pr').length) continue;
+    if (eligibleIds && !eligibleIds.has(id)) continue;
+    const latestFiring = Math.max(...recordsOf(id, 'fired').map((item) => Date.parse(item.recordedAt)));
+    if (!Number.isFinite(latestFiring) || now.getTime() - latestFiring >= PR_OBSERVE_DAYS * DAY) continue;
     try {
       const branch = recordsOf(id, 'fired').at(-1).fields.branch;
       const pr = await dispatcher.openPullRequest(repo, branch);
