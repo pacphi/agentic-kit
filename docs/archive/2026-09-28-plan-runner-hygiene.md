@@ -1,0 +1,57 @@
+# Runner hygiene execution plan
+
+## Status
+
+**Implemented and independently reviewed**, captured before PR integration on 2026-09-29.
+Code head `e0fcc2eb` passed all local unit, UI, typecheck, lint, complexity, Markdown,
+build and internal-link gates. Unit results: 5,947 passed, zero failed, six native
+Windows-only skips; coverage 94.33% lines, 83.27% branches and 93.47% functions.
+System Chrome passed 495 dashboard checks and 15 Node UI tests. Native Windows
+and Linux Chrome proof remain the feature PR's CI gate at this capture point.
+
+Delivered: the About renderer regression, exact concurrent-writer exceptions,
+owner records and guarded focused runs, list-only sibling handling on every platform,
+Chrome environment isolation, tool-selector propagation regression, and owned-process
+exit/cancellation checks. A participating test acquires a run-bound hold before launching
+its children; uncertainty retains its own fixture and the enclosing run root. Holds do
+not discover unregistered descendants or authorize sibling removal.
+
+Task 13's immutable inventory and literal-path list were independently reviewed against
+snapshot `c4aa2015ccd66c47f99f9204d0444faac007e83e9a8b709ddcee04791819e6bb`:
+33,978 entries before the runner cutoff, four afterward and three legacy ownerless roots;
+27 unattributed, 21 recent and one lsof-matched entry were retained separately. The private
+handoff contains machine paths and stays outside git. Age, prefix attribution and lsof
+absence do not establish deletion safety. No backlog removal was performed.
+
+The source-bound research census recorded 647 sites in 279 files at its stated baseline;
+it does not count later edits or prove historical leak causes. LQ-1's propagation-defect
+premise was refuted, and a mutation-tested regression preserves the existing behavior.
+Final review found one cancellation-order defect; `e0fcc2eb` fixed it and passed scoped
+rereview. Releases, global installation and the aggregate main merge remain separately gated.
+
+## Contract and dependencies
+
+The [v2 scope](../plans/2026-09-28-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.
+
+The [cleanup design](2026-09-28-research-test-temp-folder-cleanup.md) selects B9-R5's explicit list-only fallback. Task 11 must not interpret a dead PID, empty process group, empty registry or empty handle scan as proof of abandonment. Task 12 must keep the interrupted root even after its known child exits on list-only platforms. This conditions the archived example's removal assertion; it does not relax B9-R5.
+
+## File, test and dependency map
+
+| Unit | Exact owned files or proposed files | Validation and acceptance | Depends on |
+|---|---|---|---|
+| Task 10 research | This plan; `docs/plans/2026-09-28-test-temp-folder-cleanup-design.md`; ignored scratch report/probes | Real macOS orphan observation, official docs, explicit unmeasured platforms; Markdown, links, docs citations/layout | Baseline and brief |
+| Task 5 About render | New `tests/kit/about-install-edit-render.test.mjs`; read `src/lib/dashboard/client/about.mjs`, `src/lib/install-edits.mjs`, `src/commands/status/sections/natives.mjs` | Real About renderer, escaped single Ruflo pin line, no AgentDB line/no-edit line; wording mutation fails; existing `about-install-edits.test.mjs`, `about-agentdb-join.test.mjs` | Research handoff; fresh file claims |
+| Task 7 concurrent writers | `scripts/real-state-tripwire.mjs`, `tests/kit/real-state-tripwire.test.mjs` | Absent-to-present `.claude-flow`, two proven-config files are concurrent locally, fail in strict mode; config.json still fails; `run-tests-runner.test.mjs`, `home-sandbox-tripwire.test.mjs` | Reverify installed supported Ruflo sources; no fabricated version |
+| Task 11 owner record and safe paths | New `scripts/run-roots.mjs`, `tests/kit/run-roots.test.mjs`; `scripts/run-tests.mjs`, `tests/kit/run-tests-runner.test.mjs`, `AGENTS.md` | Red then green path/owner/schema/symlink/UID/host/invalid data tests; listing does not change exit; interrupted roots never removed by defaults; `real-state-tripwire.test.mjs`, `temp-dir-helper.test.mjs` | Task 10 decisions accepted; preserve synchronous spawn/signal behavior |
+| Task 12 focus and exit proof | `scripts/run-tests.mjs`, `tests/kit/run-tests-runner.test.mjs`, `AGENTS.md` | Focus pass=0, leftover=4, missing args=2; killed runner's idle child and concurrently live runner retained; root still retained after child death on list-only platforms; exact-PID cleanup finally | Task 11; controller updates external brief template |
+| Windows smoke lifetime diagnosis | Proposed `tests/kit/status-zero-spawn.test.mjs`; new disposable fixture only if needed | Handshake shows whether fork outlives parent; compare explicit close wait; preserve assertion and cleanup errors; Windows Node 24 regression required | Controller authorizes implementation; native Windows CI, not fixture simulation |
+| LQ-1 environment premise | Read `scripts/run-tests.mjs`, `tests/kit/helpers/home-sandbox.mjs`; if proven defect, those files plus `tests/kit/run-tests-runner.test.mjs`, `tests/kit/spawn-env-guard.test.mjs` | Current runner deletes FORCE_COLOR only; demonstrate sentinel AQE variables across each actual child boundary before any patch; retain state isolation | Task 12; reconcile scope text with source |
+| LQ-4 Chrome environment | `tests/ui/helpers/launch-chrome.mjs`; new `tests/kit/launch-chrome-env.test.mjs`; environment helper only with exact claim | Preserve required display/path/platform variables and private Chrome temp; exclude user state; mocked launch failure and close cleanup; native UI smoke | Task 12; coordinate helper users; installed Playwright available |
+| Task 13 reviewed inventory | Ignored source/list/report in controller-approved report folder, no tracked cleanup program | Literal absolute paths, prefix attribution, exclusion counts, independent review of same snapshot; no removal | Last focused run; controller provides report destination/reviewer |
+| Branch handoff | Update this plan and design status; archive via `scripts/docs-relocate.mjs` in completion PR with index rows | Focused gates, type/lint/build and hermetic full gate appropriate to eventual implementation; exact commit/evidence receipt | All implementation units complete; integration approval |
+
+## Execution boundaries
+
+Use `node scripts/run-tests.mjs focus <files>` with disposable home/state roots for focused tests. Do not use pnpm in a worktree with symlinked dependencies. Run focused failure-path checks before wider gates; do not repeat green gates without a new concern. Each code unit needs its own failing/passing evidence and conventional commit after authorization. Before editing/staging `AGENTS.md`, verify there is no injected drift.
+
+Task 13 excludes recently modified entries, live-handle matches, unattributed prefixes, product-created `ak-sync-preview-npm-*`, and valid owner roots. Age is a manual-review filter only. Task 13 does not implement deletion. No unit claims interrupted-run backlog reclamation until a platform can prove every descendant gone.
