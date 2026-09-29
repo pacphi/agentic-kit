@@ -2,6 +2,8 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { censusDisclosure } from '../../census-presentation.mjs';
+import { projectSurfacesHtml } from './session-presentation.mjs';
 import { authHeaders, esc } from './bootstrap.mjs';
 import { formatLocalDateTime, formatLocalDateTimeLong, shortSessionId } from './datetime.mjs';
 import { ago } from './intelligence.mjs';
@@ -784,7 +786,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var control=opts.expandable?'<button type="button" class="project-chevron" data-project-tree="'+esc(opts.treeKey)+'" aria-expanded="'+opts.expanded+'">'+(opts.expanded?'⌄':'›')+'</button>':'';
     var worktreeMark=opts.worktree?'<span class="project-worktree-mark" aria-hidden="true">↳</span>':'';
     var display=opts.worktree?'<span class="project-worktree-name">'+esc(pr.label||'worktree')+'</span>':name;
-    return '<tr class="'+(opts.worktree?'project-worktree':'project-repository')+'"'+(opts.hidden?' hidden':'')+'><td>'+worktreeMark+display+'<span class="project-path">'+esc(pr.path||'not measured yet')+'</span></td>'
+    return '<tr class="'+(opts.worktree?'project-worktree':'project-repository')+'"'+(opts.hidden?' hidden':'')+'><td>'+worktreeMark+display+'<span class="project-path">'+esc(pr.path||'not measured yet')+'</span>'+projectSurfacesHtml(pr)+'</td>'
       +'<td class="num">'+mhtml(pr.loc&&pr.loc.total,function(v){return "~"+fmtTok(v);})+"</td>"
       +"<td>"+langCell(pr.loc)+"</td>"
       +'<td class="num">'+mhtml(pr.totalBytes,fmtBytes)+"</td>"
@@ -802,7 +804,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +". This view shows "+esc(fmtNum(tree.repositories.length))+" verified repositor"+(tree.repositories.length===1?"y":"ies")
       +" with "+esc(fmtNum(worktrees))+" nested worktree"+(worktrees===1?"":"s")+"; "+esc(fmtNum(tree.excludedDirectories))+" non-repository directories are excluded."
       +" Line counts are approximate: extension-bucketed, with node_modules and vendored "
-      +"trees excluded. Disk is the whole project directory, .git and node_modules included.</div>";
+      +"trees excluded. Disk is the whole project directory, .git and node_modules included. "+esc(censusDisclosure(p))+"</div>";
   }
 
   export function renderSysProjects(d){
@@ -811,7 +813,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var p=d.projects;
     if(!p){el.innerHTML=sysEmpty(NOT_SCANNED);return;}
     var all=p.projects||[];
-    if(!all.length&&!(p.discoveryProjects||[]).length){el.innerHTML=sysEmpty("no repository was discovered on this machine.");return;}
+    if(!all.length&&!(p.discoveryProjects||[]).length){el.innerHTML=sysEmpty("no repository was discovered on this machine.")+'<div class="sy-liner">'+esc(censusDisclosure(p))+"</div>";return;}
     var tree=repositoryTree({projects:all,discoveryProjects:p.discoveryProjects});
     var byPath={};tree.repositories.forEach(function(group){byPath[group.repository.path]=group;});
     var repositories=sortProjects(tree.repositories.map(function(group){return group.repository;}),projSort.key,projSort.dir);

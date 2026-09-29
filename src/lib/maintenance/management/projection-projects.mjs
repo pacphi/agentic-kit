@@ -1,3 +1,4 @@
+import { mergeSessionSurfaces } from '../../footprint/session-surfaces.mjs';
 import { projectLanguages } from './project-languages.mjs';
 // ADR-0048 project identity, breadcrumb, worktree/repository grouping, and
 // instruction-context-file mapping — split out of projection.mjs purely to
@@ -71,6 +72,7 @@ export function enrichProjectPresentation(builder, registry, rows, { installatio
       builder.upsertResource(entry.repositoryResourceId, { kind: 'related-storage', displayName: `${entry.repositoryLabel} repository` });
     }
     if (['git', 'worktree', 'folder'].includes(row.repository?.kind)) entry.projectKind = row.repository.kind;
+    if (Array.isArray(row.sessionSurfaces)) entry.sessionSurfaces = mergeSessionSurfaces(row.sessionSurfaces);
     if (Array.isArray(row.sessionOrigins)) entry.sessionOrigins = row.sessionOrigins
       .filter((origin) => ['claude-desktop', 'codex-desktop', 'unknown'].includes(origin.origin)
         && Number.isInteger(origin.sessions) && origin.sessions >= 0)
@@ -89,6 +91,7 @@ export function projectPresentation(entry) {
     repositoryEvidence: entry?.repositoryEvidence ?? (entry?.repositoryResourceId ? 'project-discovery' : null),
     repositoryObservedAt: entry?.repositoryObservedAt ?? null,
     sessionOrigins: entry?.sessionOrigins ?? [],
+    sessionSurfaces: entry?.sessionSurfaces ?? null,
   };
 }
 

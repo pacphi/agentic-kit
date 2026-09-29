@@ -17,11 +17,12 @@ const INTEL_CSS = `
 .mw-group-scroll{max-height:212px;overflow:auto;overscroll-behavior:contain}
 .mw-table:focus-visible,.mw-group-scroll:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .mw-row{display:grid; grid-template-columns:minmax(140px,1.6fr) minmax(110px,1fr) repeat(3,minmax(96px,1fr)); gap:10px; align-items:center; padding:8px 14px; background:var(--panel); font-size:12.5px}
-.mw-data-row{height:34px;box-sizing:border-box;border-top:1px solid var(--line)}
+.mw-data-row{min-height:34px;box-sizing:border-box;border-top:1px solid var(--line)}
 .mw-data-row .mw-val{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mw-row.mw-head{height:42px;box-sizing:border-box;position:sticky;top:0;z-index:1;background:var(--panel-2); color:var(--ink-dim); font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em;line-height:12px}
 .mw-row:not(.mw-head):hover{background:var(--panel-2)}
 .mw-name{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.session-surface-detail{white-space:normal;font-size:11px;line-height:1.5}.session-surface-detail summary{cursor:pointer}.session-surface-detail div{overflow-wrap:anywhere}
 .mw-designation{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mw-filter-pills{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px}.mw-filter-pill{border:1px solid var(--line-2);border-radius:999px;background:var(--panel);color:var(--ink-2);padding:5px 9px;cursor:pointer}.mw-filter-pill[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel))}
 /* Which learning stores a project carries — three tiny dots, one per store,

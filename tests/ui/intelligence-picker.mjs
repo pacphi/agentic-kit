@@ -51,7 +51,7 @@ test('Intelligence picker labels every learning location with the inventory desi
     values: Array.from(node.children, option => option.value), labels: Array.from(node.children, option => option.textContent) })));
   assert.deepEqual(groups.map(group => [group.label, group.values]), [
     ['Git repositories', ['repo-a', 'repo-z']], ['Git worktrees', ['tree-a', 'tree-z']],
-    ['User-level learning', ['user-a', 'user-z']], ['Other / unclassified', ['unknown-a', 'unknown-z']],
+    ['User-level learning', ['user-a', 'user-z']], ['Unknown', ['unknown-a', 'unknown-z']],
   ]);
   assert.equal(groups[0].labels[0], 'alpha — Git repository');
   assert.equal(groups[1].labels[0], 'Alpha tree — Git worktree');
@@ -117,7 +117,7 @@ test('Intelligence table keeps every learning location in one filterable invento
   assert.equal(await table.getByRole('columnheader').count(), 5);
   assert.deepEqual(await table.getByRole('columnheader').allTextContents(),
     ['Name', 'Designation', 'Patterns learned', 'Pattern store', 'Last active']);
-  assert.deepEqual(await table.locator('.mw-filter-pill').allTextContents(), ['All', 'Directory', 'Git repository', 'Git worktree']);
+  assert.deepEqual(await table.locator('.mw-filter-pill').allTextContents(), ['All', 'Git repository', 'Git worktree', 'Unknown', 'User-level learning']);
   const shots = process.env.AK_UI_ARTIFACTS;
   if (shots) fs.mkdirSync(shots, { recursive: true });
   for (const width of [1360, 1100, 390]) {
@@ -127,7 +127,7 @@ test('Intelligence table keeps every learning location in one filterable invento
       header: region.querySelector('.mw-head').getBoundingClientRect().height,
       row: region.querySelector('.mw-data-row').getBoundingClientRect().height,
     })));
-    for (const size of sizes) { assert.equal(size.row, 34); assert.ok(size.scroll > size.height); }
+    for (const size of sizes) { assert.ok(size.row >= 34); assert.ok(size.scroll > size.height); }
     assert.ok(await table.evaluate(el => el.getBoundingClientRect().height) <= 520);
     assert.equal(await page.evaluate(() => globalThis.document.documentElement.scrollWidth <= globalThis.innerWidth), true, `no horizontal overflow at ${width}px`);
     assert.equal(await page.locator('#mw-hero').innerText(), hero);
@@ -143,6 +143,6 @@ test('Intelligence table keeps every learning location in one filterable invento
   assert.equal(await table.locator('.mw-data-row').count(), 32);
   await table.getByRole('button', { name: 'Git repository', exact: true }).click();
   assert.equal(await table.locator('.mw-data-row').count(), 8);
-  assert.deepEqual(await table.locator('.mw-designation').allTextContents(), Array(8).fill('Git repository'));
+  assert.deepEqual(await table.locator('.mw-scope-value').allTextContents(), Array(8).fill('Git repository'));
   assert.deepEqual(errors, []);
 });

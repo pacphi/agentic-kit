@@ -1,3 +1,4 @@
+import { SESSION_SURFACE_LABELS } from '../session-surface.mjs';
 import { sendJson } from '../loopback-server.mjs';
 import {
   ACTION_VERBS, ADMINISTRATIVE_SCOPES, AUDIT_RESULTS, AUDIT_RESULT_LABELS, CARRIER_KINDS, CONFLICT_KINDS,
@@ -452,6 +453,14 @@ function projectNode(node, value) {
 
 const [ID, LABEL, STAMP] = [T.text(128), T.text(200), T.text(40)];
 const PROJECT_PRESENTATION = {
+  sessionSurfaces: T.list(T.obj({ host: T.oneOf(['claude', 'codex', 'opencode', 'unknown']),
+    surface: T.oneOf(Object.keys(SESSION_SURFACE_LABELS)), initiator: T.oneOf(['person', 'automation', 'agent', 'imported-copy', 'unknown']),
+    sessions: T.int, countBasis: T.oneOf(['declared-session-ids', 'transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations']),
+    rawEvidence: T.obj(Object.fromEntries(['entrypoint', 'originator', 'source', 'threadSource', 'sessionKind'].map((key) => [key, T.list(T.text(80), 16)]))),
+    rawEvidenceComplete: T.bool,
+    attributes: T.list(T.oneOf(['on 3P', 'started from Claude Desktop', 'started from mobile', 'started from a project', 'started from web']), 5),
+    thirdPartyProvider: T.oneOf(['amazon-bedrock', 'google-vertex-ai']), thirdPartyProviderBasis: T.oneOf(['assistant-model-id']),
+  }), 512),
   repositoryId: ID, repositoryLabel: LABEL, repositoryEvidence: T.oneOf(['git-directory', 'git-pointer', 'git-common-directory-and-backlink', 'project-discovery']),
   repositoryObservedAt: T.int,
   sessionOrigins: T.list(T.obj({ origin: T.oneOf(['claude-desktop', 'codex-desktop', 'unknown']), sessions: T.int,

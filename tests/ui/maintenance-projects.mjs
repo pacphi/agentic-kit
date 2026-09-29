@@ -1,3 +1,4 @@
+import { SESSION_SURFACE_LABELS, SESSION_HOST_LABELS, SESSION_INITIATOR_LABELS, SESSION_PROVIDER_LABELS, sessionPresentation } from '../../src/lib/session-surface.mjs';
 // Focused browser regression: real workspace markup, styles, client modules,
 // and public inventory projection; HTTP evidence is supplied by a fixed fixture.
 import { test } from 'node:test';
@@ -16,6 +17,7 @@ function fixture() {
   const projects = ['ampel', 'boon-worthy', 'emailibrium', 'finima', 'keel', 'prompt-genie', 'ampel-feature'].map((name) => ({
     loc: { languages: (name === 'ampel' ? ['javascript', 'python', 'rust', 'java', 'ada'] : ['typescript']).map(id => ({ id })) },
     repository: ['ampel','ampel-feature'].includes(name)?{repositoryId:'repository:0123456789abcdef0123',kind:name==='ampel-feature'?'worktree':'git',root:'/fixture/projects/ampel',evidence:name==='ampel-feature'?'git-common-directory-and-backlink':'git-directory',observedAt:Date.parse('2026-09-09T12:00:00Z')}:null,
+    sessionSurfaces: [{host:'codex',surface:name==='ampel-feature'?'chatgpt-desktop-work':'unknown',initiator:'person',sessions:1}],
     sessionOrigins: [{origin:name==='ampel-feature'?'codex-desktop':name==='ampel'?'claude-desktop':'unknown',sessions:1}],
     path: '/fixture/projects/'+name, label: name, hosts: ['claude', 'codex'], projectKind: name==='ampel-feature'?'worktree':'git',
   }));
@@ -68,7 +70,9 @@ test('project worktree visibility and all-installations navigation work on deskt
     function authHeaders(){return {};}
     function esc(value){return String(value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
     function ago(){return '';}
-    ${['maintenance-workspace', 'maintenance-cards', 'maintenance-filters', 'maintenance-guidance', 'maintenance-relationships', 'maintenance-inspector', 'maintenance-language-logos','maintenance-focus', 'maintenance-inventory'].map(clientSource).join('\n')}
+    const SESSION_SURFACE_LABELS=${JSON.stringify(SESSION_SURFACE_LABELS)},SESSION_HOST_LABELS=${JSON.stringify(SESSION_HOST_LABELS)},SESSION_INITIATOR_LABELS=${JSON.stringify(SESSION_INITIATOR_LABELS)},SESSION_PROVIDER_LABELS=${JSON.stringify(SESSION_PROVIDER_LABELS)};
+    ${sessionPresentation.toString()}
+    ${['session-presentation','maintenance-workspace', 'maintenance-cards', 'maintenance-filters', 'maintenance-guidance', 'maintenance-relationships', 'maintenance-inspector', 'maintenance-language-logos','maintenance-focus', 'maintenance-inventory'].map(clientSource).join('\n')}
     MNT.scope='project';wireMntInventory();wireMntInspector();loadMntInventory();
   ` });
   await page.locator('#mnt-results [data-mnt-focus]').first().waitFor();
@@ -82,11 +86,11 @@ test('project worktree visibility and all-installations navigation work on deskt
   assert.equal(await page.locator('[data-mnt-focus="'+worktreeId+'"]').count(), 1);
   const sharedGroup=page.locator('.mnt-repository-group').filter({has:page.locator('[data-mnt-focus="'+worktreeId+'"]')});
   assert.equal(await sharedGroup.locator('[data-mnt-level="project"]').count(),2);
-  const originFilter=page.locator('#mnt-facets input[data-mnt-facet="sessionOrigin"][value="codex-desktop"]');
+  const originFilter=page.locator('#mnt-facets input[data-mnt-facet="sessionOrigin"][value="chatgpt-desktop-work"]');
   await originFilter.check();await page.waitForFunction(()=>!globalThis.mntInventoryBusy);
   assert.equal(await page.locator('#mnt-results [data-mnt-level="project"]').count(),1);
-  assert.match(await page.locator('#mnt-facets').innerText(),/ChatGPT Desktop/);
-  assert.doesNotMatch(await page.locator('#mnt-results').innerText(),/ChatGPT Desktop/);
+  assert.match(await page.locator('#mnt-facets').innerText(),/ChatGPT desktop app · ChatGPT Work/);
+  assert.match(await page.locator('#mnt-results').innerText(),/ChatGPT desktop app · ChatGPT Work/);
   await originFilter.uncheck();await page.waitForFunction(()=>!globalThis.mntInventoryBusy);
 
   await page.locator('#mnt-facets [data-mnt-include-worktrees]').uncheck();

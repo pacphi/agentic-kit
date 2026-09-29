@@ -1,3 +1,4 @@
+import { SESSION_SURFACE_LABELS, SESSION_HOST_LABELS, SESSION_INITIATOR_LABELS, SESSION_PROVIDER_LABELS, sessionPresentation } from '../../src/lib/session-surface.mjs';
 // Real focus queries, public DTOs, page markup and browser modules.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +37,9 @@ test('focus browser progressively narrows to exact installations and preserves f
   function esc(v){return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
   function ago(){return '';}
   function mntWritesBlocked(){return false;}
-  ${['maintenance-workspace','maintenance-cards','maintenance-filters','maintenance-language-logos','maintenance-focus','maintenance-relationships','maintenance-guidance','maintenance-inspector','maintenance-inventory'].map(source).join('\n')}
+  const SESSION_SURFACE_LABELS=${JSON.stringify(SESSION_SURFACE_LABELS)},SESSION_HOST_LABELS=${JSON.stringify(SESSION_HOST_LABELS)},SESSION_INITIATOR_LABELS=${JSON.stringify(SESSION_INITIATOR_LABELS)},SESSION_PROVIDER_LABELS=${JSON.stringify(SESSION_PROVIDER_LABELS)};
+    ${sessionPresentation.toString()}
+    ${['session-presentation','maintenance-workspace','maintenance-cards','maintenance-filters','maintenance-language-logos','maintenance-focus','maintenance-relationships','maintenance-guidance','maintenance-inspector','maintenance-inventory'].map(source).join('\n')}
   wireMntInventory();wireMntInspector();loadMntInventory();
  `});
  await page.locator('[data-mnt-focus="user"]').waitFor();
@@ -93,7 +96,7 @@ test('polyglot cards show every language as a labelled, wrapping icon with no di
  const state={facets:{},query:{navigation:{level:'project',nodes:[{value:'prj_example',label:'billing-service',count:24,projectKind:'git',languages}]},groups:[]}};
  await page.setContent('<!doctype html><html data-theme="dark"><head><style>'+CSS+'</style></head><body><main style="padding:32px"><h2>Projects</h2><div id="cards"></div></main></body></html>');
  await page.addScriptTag({content:'var MNT='+JSON.stringify(state)+';var MNT_SCOPE_LABELS={};function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");}function mntKindLabel(s){return s;}function mntFacetValueLabel(_,s){return s;}function mntIcon(){return "";}function mntAvailableTo(){return "";}\n'
-  +source('maintenance-language-logos')+'\n'+source('maintenance-cards')+'\n'+source('maintenance-focus')
+  +'const SESSION_SURFACE_LABELS='+JSON.stringify(SESSION_SURFACE_LABELS)+';const SESSION_HOST_LABELS='+JSON.stringify(SESSION_HOST_LABELS)+';const SESSION_INITIATOR_LABELS='+JSON.stringify(SESSION_INITIATOR_LABELS)+';const SESSION_PROVIDER_LABELS='+JSON.stringify(SESSION_PROVIDER_LABELS)+';'+sessionPresentation.toString()+source('session-presentation')+'\n'+source('maintenance-language-logos')+'\n'+source('maintenance-cards')+'\n'+source('maintenance-focus')
   +'\ndocument.getElementById("cards").innerHTML=renderMntFocusResults(false);'});
  assert.deepEqual(errors,[]);
  assert.equal(await page.locator('.mnt-language-icon:visible').count(),5);

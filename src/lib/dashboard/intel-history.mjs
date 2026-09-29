@@ -193,7 +193,7 @@ export function readIntelHistory(cwd) {
  * when no project has adaptation data. This is a plain on-demand scan with
  * no caching/TTL of its own — a later caller adds that at the server layer.
  * @param {Array<{ path: string, label: string, learningState?: string[], key?: string,
- *   identityKey?: string, learningScope?: string }>} projects
+ *   identityKey?: string, learningScope?: string, hosts?: string[], sessionOrigins?: object[], sessionSurfaces?: object[] }>} projects
  * @returns {{
  *   totals: { patternsLearnedLifetime: number, patternStoreEntries: number,
  *     trajectoriesRecorded: number, projectCount: number,
@@ -259,6 +259,7 @@ export function readMachineWideIntel(projects) {
       label,
       key: entry?.key ?? entry?.identityKey ?? null,
       learningScope: ['repository', 'worktree', 'user'].includes(entry?.learningScope) ? entry.learningScope : 'unknown',
+      hosts: entry?.hosts ?? [], sessionOrigins: entry?.sessionOrigins ?? [], sessionSurfaces: entry?.sessionSurfaces ?? null,
       patternsLearned,
       patternStoreCount: patternStore.length,
       trajectoriesRecorded: trajectories,
