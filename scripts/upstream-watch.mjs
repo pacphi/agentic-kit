@@ -251,7 +251,7 @@ const WEEK = 7 * 86_400_000;
 function blindRecord(error, { stdout, stderr, json }, extra = {}) {
   stderr.write(`${error}\n`);
   const result = {
-    blind: true, error, records: [], fetchErrors: [], dispatchErrors: [], wouldFire: [], fired: [], parent: null, commit: null, notice: { post: false, body: '' }, ...extra,
+    blind: true, error, records: [], fetchErrors: [], dispatchErrors: [], wouldFire: [], deferred: [], fired: [], parent: null, commit: null, notice: { post: false, body: '' }, ...extra,
   };
   if (json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return BLIND;
@@ -286,7 +286,7 @@ async function record(registry, fetcher, options, { stdout, stderr, now, ledgerS
   const recorded = ledger.records.map((item) => item.line).join('\n');
   const all = ledgerEvents(report, registry, { since });
   const released = all.filter((event) => event.event === 'released' && event.fields.branch);
-  const fired = await dispatch({ released, records: ledger.records, dispatcher, repo, sentinel, now, recordedAt: runAt, dryRun: options.dryRun });
+  const fired = await dispatch({ released, records: ledger.records, dispatcher, repo, sentinel, now, recordedAt: runAt, dryRun: options.dryRun, pause: sleep });
   const records = [...withoutRecorded(all, recorded).map((event) => toRecord(event, runAt)), ...fired.records];
   const checkedAt = fetchErrors.length ? (ledger.checkedAt ?? since) : runAt;
   let commit = null;
@@ -306,12 +306,13 @@ async function record(registry, fetcher, options, { stdout, stderr, now, ledgerS
   }
   const body = renderNotice({ records, mention, date: runAt.slice(0, 10), recordedAt: runAt });
   const result = {
-    since, sinceSource, checkedAt, blind: false, records, fetchErrors, dispatchErrors: fired.errors, wouldFire: fired.wouldFire,
+    since, sinceSource, checkedAt, blind: false, records, fetchErrors, dispatchErrors: fired.errors, wouldFire: fired.wouldFire, deferred: fired.deferred,
     parent: ledger.commit, commit, notice: { post: Boolean(body), body },
   };
   for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
   for (const item of fired.errors) stderr.write(`Dispatch ${item.id}: ${item.error}\n`);
-  const lines = [...records.map((item) => item.line), ...fired.wouldFire.map((item) => `Would fire ${item.id} ${item.version} ${item.branch}`)];
+  const lines = [...records.map((item) => item.line), ...fired.wouldFire.map((item) => `Would fire ${item.id} ${item.version} ${item.branch}`),
+    ...fired.deferred.map((item) => `Deferred to the next run: ${item.id} ${item.version} ${item.branch}`)];
   stdout.write(options.json ? `${JSON.stringify(result, null, 2)}\n` : lines.length ? `${lines.join('\n')}\n` : 'No new records.\n');
   return 0;
 }
