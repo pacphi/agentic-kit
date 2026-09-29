@@ -1,12 +1,12 @@
 // Opt-in native contract for agentic-qe#574. No installed package is patched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { tempDir } from '../kit/helpers/temp-dir.mjs';
+import { createProcessScope } from './aqe-live-lock-process.mjs';
 
 const required = process.env.AK_AQE_LOCK_LIVE === '1';
 const digest = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -56,24 +56,9 @@ function childEnv(root, project) {
   };
 }
 
-function launch(file, args, options) {
-  const child = spawn(process.execPath, [file, ...args], { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = ''; let stderr = '';
-  child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (s) => { stdout += s; });
-  child.stderr.on('data', (s) => { stderr += s; });
-  const done = new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
-  });
-  return { child, done };
-}
-
-async function bounded(file, args, options, limit) {
-  const run = launch(file, args, options);
-  let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; run.child.kill('SIGKILL'); }, limit);
-  try { return { ...await run.done, timedOut }; } finally { clearTimeout(timer); }
+async function bounded(scope, file, args, options, limit) {
+  const run = scope.launch(process.execPath, [file, ...args], options);
+  return scope.wait(run, limit);
 }
 
 function snapshot(store) {
@@ -88,7 +73,10 @@ function check(label, result, owner, before, store) {
   const output = result.stdout + result.stderr;
   assert.equal(result.timedOut, false, `${label} timed out`);
   assert.equal(result.code, 0, `${label} exited ${result.code}: ${output.slice(-1200)}`);
-  assert.equal(owner.exitCode, null, `native holder exited during ${label}`);
+  assert.equal(owner.closed, false, `native holder closed during ${label}`);
+  assert.equal(owner.child.exitCode, null, `native holder exited during ${label}`);
+  assert.equal(owner.child.signalCode, null, `native holder signaled during ${label}`);
+  assert.ifError(owner.error);
   assert.match(output, /is locked by a live process/, `${label} missed live-lock warning`);
   assert.match(output, /LockHeld|0x0300/, `${label} missed LockHeld fallback`);
   assert.doesNotMatch(output, /FsyncFailed|0x0303/, `${label} emitted FsyncFailed`);
@@ -97,8 +85,17 @@ function check(label, result, owner, before, store) {
 }
 
 test('installed AQE degrades under a live native RVF lock without changing the store',
-  { skip: !required && 'set AK_AQE_LOCK_LIVE=1 for native proof', timeout: 240_000 }, async (t) => {
-    const root = tempDir('ak-aqe-live-lock', t);
+  { skip: !required && 'set AK_AQE_LOCK_LIVE=1 for native proof', timeout: 420_000 }, async (t) => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-live-lock-')));
+    const scope = createProcessScope(t.signal);
+    t.after(async () => {
+      try {
+        await scope.closeAll();
+      } catch (error) {
+        throw new Error(`owned child closure unverified; retained ${root}`, { cause: error });
+      }
+      fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    });
     const project = path.join(root, 'project'); fs.mkdirSync(project);
     fs.writeFileSync(path.join(project, 'package.json'), '{"name":"aqe-live-lock-probe","version":"1.0.0","type":"module"}\n');
     const env = childEnv(root, project);
@@ -111,7 +108,7 @@ test('installed AQE degrades under a live native RVF lock without changing the s
     assert.ok(fs.existsSync(entry) && fs.existsSync(adapter), 'installed AQE CLI and adapter required');
     const sourceHashes = { entry: digest(entry), adapter: digest(adapter) };
     const options = { cwd: project, env };
-    const init = await bounded(entry, ['init', '--minimal', '--auto'], options, 150_000);
+    const init = await bounded(scope, entry, ['init', '--minimal', '--auto'], options, 150_000);
     assert.equal(init.timedOut, false);
     assert.equal(init.code, 0, `aqe init failed: ${(init.stdout + init.stderr).slice(-1200)}`);
     const store = path.join(project, '.agentic-qe');
@@ -119,21 +116,25 @@ test('installed AQE degrades under a live native RVF lock without changing the s
     const holderFile = path.join(root, 'holder.mjs');
     const moduleUrl = pathToFileURL(adapter).href;
     fs.writeFileSync(holderFile, `import { createRequire } from 'node:module'; import fs from 'node:fs';\nglobalThis.require=createRequire(${JSON.stringify(adapter)});\nconst {getSharedRvfAdapter}=await import(${JSON.stringify(moduleUrl)});\nglobalThis.hold=getSharedRvfAdapter(${JSON.stringify(store)},384);\nif(!globalThis.hold)process.exit(2);\nfs.writeFileSync(${JSON.stringify(ready)},String(process.pid));\nconst timer=setInterval(()=>{if(!globalThis.hold)process.exit(3)},1000);\nprocess.on('SIGTERM',()=>{clearInterval(timer);globalThis.hold.close();process.exit(0)});\n`);
-    const owner = launch(holderFile, [], options);
+    const owner = scope.launch(process.execPath, [holderFile], options);
     try {
       const deadline = Date.now() + 30_000;
-      while (!fs.existsSync(ready) && owner.child.exitCode === null && Date.now() < deadline) await pause(50);
+      while (!fs.existsSync(ready) && !owner.closed && !owner.error && owner.child.exitCode === null
+        && owner.child.signalCode === null && Date.now() < deadline) await pause(50);
+      assert.ifError(owner.error);
       assert.ok(fs.existsSync(ready), 'holder did not signal ready');
       assert.equal(Number(fs.readFileSync(ready, 'utf8')), owner.child.pid, 'holder PID mismatch');
+      assert.equal(owner.closed, false, 'holder closed after ready');
       assert.equal(owner.child.exitCode, null, 'holder exited after ready');
+      assert.equal(owner.child.signalCode, null, 'holder signaled after ready');
       const before = snapshot(store);
       assert.ok(before['patterns.rvf'] && before['patterns.rvf.lock'], 'native RVF and lock required');
-      const status = await bounded(entry, ['status'], options, 150_000);
-      check('aqe status', status, owner.child, before, store);
+      const status = await bounded(scope, entry, ['status'], options, 150_000);
+      check('aqe status', status, owner, before, store);
       const challengerFile = path.join(root, 'challenger.mjs');
       fs.writeFileSync(challengerFile, `import {createRequire} from 'node:module';\nglobalThis.require=createRequire(${JSON.stringify(adapter)});\nconst {getSharedRvfAdapter}=await import(${JSON.stringify(moduleUrl)});\nconst adapter=getSharedRvfAdapter(${JSON.stringify(store)},384);\nconsole.log(JSON.stringify({fallback:adapter===null}));\nif(adapter){adapter.close();process.exitCode=2}\n`);
-      const challenger = await bounded(challengerFile, [], options, 30_000);
-      check('shipped adapter', challenger, owner.child, before, store);
+      const challenger = await bounded(scope, challengerFile, [], options, 30_000);
+      check('shipped adapter', challenger, owner, before, store);
       assert.match(challenger.stdout, /"fallback":true/, 'adapter did not fall back');
       console.log(JSON.stringify({ aqeVersion: pkg.version, platform: process.platform,
         node: process.version, sourceHashes, ownerPid: owner.child.pid,
@@ -141,11 +142,9 @@ test('installed AQE degrades under a live native RVF lock without changing the s
         adapter: { exit: challenger.code, fallback: true, liveLock: true, lockHeld: true, fsyncFailed: false },
         before, after: snapshot(store) }));
     } finally {
-      if (owner.child.exitCode === null) owner.child.kill('SIGTERM');
-      const timer = setTimeout(() => owner.child.kill('SIGKILL'), 10_000);
-      try {
-        const closed = await owner.done;
+      const closed = await scope.stop(owner, 10_000);
+      if (!t.signal.aborted) {
         assert.equal(closed.code, 0, `holder failed to close: ${closed.stderr.slice(-1000)}`);
-      } finally { clearTimeout(timer); }
+      }
     }
   });
