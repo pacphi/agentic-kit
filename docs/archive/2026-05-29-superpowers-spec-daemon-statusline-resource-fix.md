@@ -3,7 +3,7 @@
 **Date:** 2026-05-29
 **Branch:** `fix/daemon-statusline-resource-leak`
 **Status:** Approved (investigation + scoping complete)
-**Issue:** [#3 — install.sh fills Claude Code sandbox tmpfs, causing session crashes (ENOSPC)](https://github.com/pacphi/ruflo-machine-ref/issues/3)
+**Issue:** #3 — install.sh fills Claude Code sandbox tmpfs, causing session crashes (ENOSPC)
 
 ## Problem
 

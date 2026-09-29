@@ -58,6 +58,7 @@ The twelve relocation artifacts found by the metadata audit for issue 211 were r
 | shell-kit troubleshooting:321 | `archive/2026-06-11-token-consumption-recurrence.md` | [June recurrence](2026-06-11-token-consumption-recurrence.md) | Same file, same folder |
 | host-extensibility explainer:227 | `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
 | host-extensibility explainer:679 | `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
+| daemon-statusline spec:6 | `https://github.com/pacphi/ruflo-machine-ref/issues/3` | unlinked | Online check returned 404; no successor found |
 
 External links and upstream resolution claims are retained as historical evidence and were not
 reconfirmed by this metadata audit. The per-file inventory and limitations are recorded in the
