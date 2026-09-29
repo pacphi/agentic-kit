@@ -271,8 +271,8 @@ function emptyCodexDiagnostics() {
   return {
     files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0, importedMixed: 0, importedTurnsExcluded: 0, importAmbiguousRecords: 0,
     importOwnershipIncompleteFiles: 0, importedTurnCountIncompleteFiles: 0,
-    filesWithTokens: 0, filesWithResponses: 0,
-    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
+    filesWithTokens: 0, filesWithResponses: 0, zeroResponseUsageFiles: 0, zeroResponseUnsupportedFiles: 0,
+    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0, totalOnlyTokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0, clippedLines: 0, warnings: [],
   };
 }
@@ -285,6 +285,7 @@ function addCodexParseDiagnostics(target, stats) {
   target.legacyEvents += stats.legacyEvents;
   target.itemCompletedEvents += stats.itemCompletedEvents;
   target.tokenCountEvents += stats.tokenCountEvents;
+  target.totalOnlyTokenCountEvents += stats.totalOnlyTokenCountEvents ?? 0;
   target.prompts += stats.prompts;
   target.responses += stats.responses;
   target.clippedLines += stats.clippedLines ?? 0;
@@ -302,10 +303,10 @@ function addCodexParseDiagnostics(target, stats) {
 
 function finalizeCodexHealth(root, diagnostics) {
   const warnings = [];
-  const tokenFiles = diagnostics.filesWithTokens;
   const responseFiles = diagnostics.filesWithResponses;
-  if (tokenFiles > 0 && responseFiles === 0) warnings.push('zero-response-yield');
-  else if (tokenFiles > responseFiles) warnings.push('partial-response-yield');
+  if (diagnostics.zeroResponseUnsupportedFiles > 0 && responseFiles === 0) warnings.push('zero-response-yield');
+  else if (diagnostics.zeroResponseUnsupportedFiles > 0) warnings.push('partial-response-yield');
+  if (diagnostics.totalOnlyTokenCountEvents > 0) warnings.push('total-only-token-count');
   if (Object.keys(diagnostics.unknownItemTypes).length || diagnostics.unknownItemTypeOverflow > 0) {
     warnings.push('unknown-item-types');
   }
@@ -314,11 +315,13 @@ function finalizeCodexHealth(root, diagnostics) {
   if (diagnostics.unparsedFiles > 0) warnings.push('unparsed-rollouts');
   if (diagnostics.clippedLines > 0) warnings.push('oversized-lines-clipped');
   diagnostics.warnings = warnings;
-  const hasYieldWarning = warnings.includes('zero-response-yield') || warnings.includes('partial-response-yield');
-  const status = root.status === 'ok' && hasYieldWarning
+  const hasUsageWarning = warnings.includes('zero-response-yield') || warnings.includes('partial-response-yield')
+    || warnings.includes('total-only-token-count');
+  const status = root.status === 'ok' && hasUsageWarning
     ? 'degraded' : root.status;
   const reason = status === 'degraded' && root.status === 'ok'
-    ? (warnings.includes('zero-response-yield') ? 'parse-yield-zero' : 'parse-yield-partial') : root.reason;
+    ? (warnings.includes('zero-response-yield') ? 'parse-yield-zero'
+      : warnings.includes('partial-response-yield') ? 'parse-yield-partial' : 'usage-total-only') : root.reason;
   return { ...root, status, reason, diagnostics };
 }
 
@@ -708,7 +711,15 @@ function recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit,
     return false;
   }
   if (imports) codexDiagnostics.importedMixed++;
-  if (session) { addCodexParseDiagnostics(codexDiagnostics, parseStats); return true; }
+  if (session) {
+    addCodexParseDiagnostics(codexDiagnostics, parseStats);
+    if (!session.responses && parseStats?.tokenCountEvents > 0) {
+      if (session.usage?.some((row) => row.input > 0 || row.output > 0 || row.cacheRead > 0 || row.cacheWrite > 0))
+        codexDiagnostics.zeroResponseUsageFiles++;
+      else codexDiagnostics.zeroResponseUnsupportedFiles++;
+    }
+    return true;
+  }
   codexDiagnostics.unparsedFiles++;
   const reason = failure.reason ?? 'parse-error';
   codexDiagnostics.unparsedReasons[reason] = (codexDiagnostics.unparsedReasons[reason] ?? 0) + 1;

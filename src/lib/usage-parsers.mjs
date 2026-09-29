@@ -815,7 +815,7 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
 
 function codexParseStats() {
   return {
-    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
+    legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0, totalOnlyTokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
     // Oversized rollout lines the streaming reader clipped instead of parsing
     // (codex-rollout-reader.mjs); always 0 for a rollout read as a string.
@@ -946,6 +946,14 @@ function applyCodexRateLimit(rec, rl, ms) {
  *  thread's own usage nor a context or rate-limit observation of it. */
 function handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay) {
   stats.tokenCountEvents++;
+  const total = decoded.usage.total;
+  if (!replay && Number.isFinite(Number(total?.total_tokens)) && Number(total.total_tokens) > 0
+      && !['input_tokens', 'cached_input_tokens', 'output_tokens'].some((field) =>
+        Number.isFinite(Number(total[field])) && Number(total[field]) > 0)) {
+    // A total alone cannot establish input, cache or output, so it cannot be
+    // priced or folded into a component row. Preserve the observed gap.
+    stats.totalOnlyTokenCountEvents++;
+  }
   walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay, usageState.importOwnership ? decoded.usage.last : null);
   if (replay) return;
   // Codex re-emits an identical token_count (measured: ~2.8% of events) with

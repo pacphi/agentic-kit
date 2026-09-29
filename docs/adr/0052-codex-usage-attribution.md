@@ -12,6 +12,14 @@
   record with at least one response (`usage-aggregate.mjs`'s `buildSessionRows`), so the file's 176,326
   tokens never reach any total regardless of the explanation. The advisory is right in substance;
   classification is unchanged. Extends the "Not done" bullet below with the measured counts.
+- **Updated:** 2026-09-29 — Unit 8 re-read the one gap candidate selected from a read-only schema-25
+  cache under a 2 MiB source bound. Its current source has five token snapshots with full
+  input/cache/output components, no normalized assistant response, tool items and an abort.
+  The parser already retains its component row; aggregation now admits a Codex record with
+  positive component usage even when responses are zero. A positive total-only counter
+  remains unsupported: it supplies no input/cache/output split or price. Source health
+  discloses such events as `total-only-token-count` and reports zero-response records with
+  counted components separately from those without attributable component rows.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),
@@ -243,14 +251,12 @@ subagent and previously dropped usage is now priced.
 - A stream tee or push channel for live oversized rollouts is out of scope.
 - The cause of counter restarts is unknown (decision 4).
 - A subagent with no ordinals still reports no usage (decision 2).
-- One rollout carries `token_count`s but no agent message, so the pre-existing
-  `partial-response-yield` warning remains — measured on the reference machine (2026-09-28): of 1,714
-  Codex rollouts (734 token-bearing), exactly 1 is such a gap file. It is explained by a cached fact
-  (`session.aborts > 0`, tool-only activity) but that does not change what is counted: the aggregate
-  never builds a session row for a record with zero responses (`usage-aggregate.mjs`'s
-  `buildSessionRows`), so the file's usage (176,326 tokens, its own `last_token_usage.total_tokens`
-  sum across its `token_count` events) reaches no total either way. Counting that usage, or
-  documenting the shape more precisely, is left to the usage-accuracy branch.
+- The 2026-09-28 full-corpus count (1,714 rollouts, 734 token-bearing, one
+  zero-response gap) is historical. Unit 8's bounded 2026-09-29 re-read of that gap
+  candidate found 11,082 uncached input, 163,456 cached input and 1,788 output
+  tokens in a native, zero-response record. Those components now reach aggregate
+  totals and cost estimation. Total-only counters still cannot yield a split or
+  price and are diagnosed rather than silently treated as free usage.
 - The historical 2026-09-27 observation (6 of 924 import-marked files) did not prove
   that every token snapshot in those files belonged to a native turn. Unit 7 implements
   decision 12 per turn. The 2026-09-29 metadata-only reproduction found 6 mixed files among

@@ -898,7 +898,10 @@ function buildSessionRow(rec, usage, verdict) {
 function buildSessionRows(records, { cutoff, endMs = null, deps, byDay, byModel, rates }) {
   const sessions = [];
   for (const rec of records) {
-    if (!rec || !rec.responses) continue;                 // no assistant turn → not a session
+    // Codex can spend measured tokens in an aborted/tool-only turn. A positive
+    // component row is enough evidence to include it even without a message.
+    if (!rec || (!rec.responses && !(rec.host === 'codex' && rec.usage?.some((row) =>
+      row.input > 0 || row.output > 0 || row.cacheRead > 0 || row.cacheWrite > 0)))) continue;
     if (rec.end === null || rec.end < cutoff) continue;    // outside the window
     if (endMs != null && rec.end >= endMs) continue;       // ... or after the window asked for
     const usage = foldSessionUsageRows(rec, deps, byDay, byModel, rates);

@@ -33,10 +33,12 @@ const ZERO = Object.freeze({ input_tokens: 0, cached_input_tokens: 0, output_tok
 const MONOTONIC = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'total_tokens'];
 
 const snapshotOf = (t) => Object.fromEntries(FIELDS.map((f) => [f, Number(t?.[f]) || 0]));
+const isTotalOnly = (t) => t.total_tokens > 0 && !t.input_tokens && !t.cached_input_tokens && !t.output_tokens;
 
 /**
  * @typedef {object} CodexUsageWalk
  * @property {boolean} excludedBaseline
+ * @property {boolean} unknownBaseline
  * @property {boolean} unattributable
  * @property {Record<string, number>|null} prev
  * @property {string|null} model
@@ -53,6 +55,7 @@ export function newCodexUsageWalk({ unattributable = false } = {}) {
   return {
     unattributable,
     excludedBaseline: false,
+    unknownBaseline: false, // a total-only counter hid the component baseline
     prev: null,        // the previous cumulative snapshot, replayed ones included
     model: null,       // the model of the turn_context in effect
     lastMs: null,      // the last finite event time seen on a token_count
@@ -100,18 +103,27 @@ export function walkCodexTokenCount(walk, total, ms, replay, dayOf, last = null)
   if (!total) return;
   const cur = snapshotOf(total);
   const prev = walk.prev;
-  walk.prev = cur;
   if (Number.isFinite(ms)) walk.lastMs = ms;
+  if (isTotalOnly(cur)) {
+    // A total-only snapshot has no component baseline. Treat the next full
+    // snapshot as a new baseline unless that call itself proves a reset.
+    walk.unknownBaseline = true;
+    walk.excludedBaseline = replay;
+    return;
+  }
   // A first native call can reset ABOVE the copied baseline. Matching
   // last/total counters prove that reset; an identical re-emission does not.
   const lastSnapshot = last ? snapshotOf(last) : null;
-  const explicitReset = walk.excludedBaseline && lastSnapshot && prev !== null
+  const explicitReset = (walk.excludedBaseline || walk.unknownBaseline) && lastSnapshot
     && FIELDS.every((f) => cur[f] === lastSnapshot[f])
-    && FIELDS.some((f) => cur[f] !== prev[f]);
-  const restarted = prev !== null && (explicitReset || MONOTONIC.some((f) => cur[f] < prev[f]));
+    && (prev === null || FIELDS.some((f) => cur[f] !== prev[f]));
+  const restarted = explicitReset || (prev !== null && MONOTONIC.some((f) => cur[f] < prev[f]));
+  const unknownBaseline = walk.unknownBaseline;
+  walk.unknownBaseline = false;
+  walk.prev = cur;
   walk.excludedBaseline = replay;
   if (restarted) walk.segments++;
-  if (replay || walk.unattributable) return;
+  if (replay || walk.unattributable || (unknownBaseline && !restarted)) return;
   const base = prev === null || restarted ? ZERO : prev;
   const d = Object.fromEntries(FIELDS.map((f) => [f, Math.max(0, cur[f] - base[f])]));
   if (!d.input_tokens && !d.output_tokens && !d.cached_input_tokens) return;
