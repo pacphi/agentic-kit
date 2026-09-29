@@ -1445,7 +1445,7 @@ export function applyCodexLedger(records, ledger) {
   // optional SQLite ledger is unavailable.
   if (!ledger || !(ledger.threads instanceof Map)) ledger = { threads: new Map(), parents: new Map() };
   const byId = new Map(records.filter((rec) => rec?.provider === 'codex').map((rec) => [rec.id, rec]));
-  return records.map((rec) => {
+  const overlaid = records.map((rec) => {
     if (!rec || rec.provider !== 'codex') return rec;
     const t = ledger.threads.get(rec.id);
     const fromEdges = ledger.parents instanceof Map && ledger.parents.has(rec.id) ? 'subagent' : null;
@@ -1460,6 +1460,7 @@ export function applyCodexLedger(records, ledger) {
     out.sessionOrigin = ledgerOrigin(rec, source, parentLink?.parent);
     return out;
   });
+  return overlaid.some((rec, index) => rec !== records[index]) ? overlaid : records;
 }
 
 /** The /api/session payload for any parsed record (claude, codex, opencode):

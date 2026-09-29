@@ -32,5 +32,7 @@ export function projectSurfacesHtml(project){
       +' · '+esc(row.sessions)+' sessions ('+esc(row.countBasis||'legacy count basis unknown')+')</div>';}).join(''):'<div>Host, initiator and provider: Unknown</div>')+'</details>';
 }
 export function surfaceFacetLabel(value){
+  if(value==='unknown')return 'Legacy origin: no declared desktop origin';
+  if(value==='surface-unknown')return 'Unknown session surface';
   if(value==='codex-desktop')return sessionPresentation({origin:value}).note;
   return Object.hasOwn(SESSION_SURFACE_LABELS,value)?SESSION_SURFACE_LABELS[value]:'Unknown';}

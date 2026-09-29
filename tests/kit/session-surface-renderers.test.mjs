@@ -39,6 +39,8 @@ test('Maintenance origin facet shares the same surface vocabulary and honest leg
   const context = renderer('maintenance-filters');
   assert.equal(context.mntFacetValueLabel('sessionOrigin', 'chatgpt-desktop-work'), 'ChatGPT desktop app · ChatGPT Work (local)');
   assert.equal(context.mntFacetValueLabel('sessionOrigin', 'codex-desktop'), 'ChatGPT desktop app observed; mode not recorded in this legacy snapshot');
+  assert.equal(context.mntFacetValueLabel('sessionOrigin', 'unknown'), 'Legacy origin: no declared desktop origin');
+  assert.equal(context.mntFacetValueLabel('sessionOrigin', 'surface-unknown'), 'Unknown session surface');
 });
 test('Intelligence and System disclose pure, mixed and unresolved import counts, including an empty project census', () => {
   const counts = { importedExcluded: 4, importedMixed: 2, importedUnresolved: 3 };

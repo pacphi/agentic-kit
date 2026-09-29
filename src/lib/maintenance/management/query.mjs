@@ -268,13 +268,13 @@ function channelValues(placement, index) {
 }
 
 // Existing saved filters address legacy origin membership. Keep the coarse
-// desktop key independently labelled even when a refresh adds precise surfaces.
+// origin keys independently labelled even when a refresh adds precise surfaces.
 function sessionOriginFacetValues(placement) {
   if (!placement.projectId) return [];
   const legacy = (placement.sessionOrigins ?? []).filter((entry) => entry.sessions > 0).map((entry) => entry.origin);
   if (!Array.isArray(placement.sessionSurfaces)) return [...new Set(placement.sessionOrigins?.length ? legacy : ['unknown'])];
-  return [...new Set([...placement.sessionSurfaces.filter((entry) => entry.sessions > 0).map((entry) => entry.surface),
-    ...legacy.filter((origin) => origin === 'codex-desktop')])];
+  return [...new Set([...placement.sessionSurfaces.filter((entry) => entry.sessions > 0).map((entry) => entry.surface === 'unknown' ? 'surface-unknown' : entry.surface),
+    ...(placement.sessionOrigins?.length ? legacy : ['unknown'])])];
 }
 
 const FACET_EXTRACTORS = Object.freeze({

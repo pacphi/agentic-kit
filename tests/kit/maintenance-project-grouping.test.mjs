@@ -131,3 +131,35 @@ for (const stateSource of ['saved preference', 'bookmarked hash']) {
       'refreshing to the richer contract must not invalidate the saved legacy filter');
   });
 }
+
+for (const stateSource of ['saved preference', 'bookmarked hash']) {
+  test(`legacy Unknown filter from ${stateSource} retains membership after surface refresh`, () => {
+    const context = vm.createContext({ URLSearchParams, localStorage: { getItem: () => null } });
+    const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/maintenance-workspace.mjs', import.meta.url), 'utf8')
+      .replace(/^import\s[\s\S]*?from ['"][^'"]+['"];\s*$/gm, '').replace(/\bexport (?=(?:function|var)\b)/g, '');
+    vm.runInContext(source, context);
+    if (stateSource === 'saved preference') context.mntApplyPreferredState({ lastView: { scope: 'project', facets: { sessionOrigin: ['unknown'] } } });
+    else context.mntApplyState(context.mntParseHashParts(['system', 'maintenance', 'inventory?scope=project&facet.sessionOrigin=unknown']));
+    const restored = JSON.parse(JSON.stringify(context.MNT));
+    assert.deepEqual(restored.facets.sessionOrigin, ['unknown']);
+    const rows = ['codex-cli', 'codex-ide', 'unknown'].map((surface) => ({ path: '/' + surface,
+      sessionOrigins: [{ origin: 'unknown', sessions: 1 }] }));
+    rows.push({ path: '/desktop', sessionOrigins: [{ origin: 'codex-desktop', sessions: 1 }] });
+    const query = validateMaintenanceV2Query('inventory', new URLSearchParams('scope=project&facet.sessionOrigin=unknown'));
+    const before = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    assert.equal(runInventoryQuery(before, query).total, 3);
+    rows.forEach((row, i) => { row.sessionSurfaces = [{ host: 'codex', surface: ['codex-cli', 'codex-ide', 'unknown', 'chatgpt-desktop-work'][i], sessions: 1 }]; });
+    const after = build({ projects: [], discoveryProjects: rows }, rows.map((row) => row.path));
+    assert.equal(runInventoryQuery(after, { scope: restored.scope, facets: restored.facets }).total, 3);
+    assert.equal(runInventoryQuery(after, query).total, 3);
+    assert.equal(runInventoryQuery(after, { scope: 'project', facets: { sessionOrigin: ['surface-unknown'] } }).total, 1);
+  });
+}
+
+test('implicit legacy Unknown membership also survives richer surface evidence', () => {
+  const row = { path: '/no-origin' };
+  const query = { scope: 'project', facets: { sessionOrigin: ['unknown'] } };
+  assert.equal(runInventoryQuery(build({ projects: [], discoveryProjects: [row] }, [row.path]), query).total, 1);
+  row.sessionSurfaces = [{ host: 'codex', surface: 'codex-cli', sessions: 1 }];
+  assert.equal(runInventoryQuery(build({ projects: [], discoveryProjects: [row] }, [row.path]), query).total, 1);
+});
