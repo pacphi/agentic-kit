@@ -60,12 +60,24 @@ const CLAUDE_ATTRIBUTES = new Map([
   ['remote_mobile', 'started from mobile'], ['remote_projects', 'started from a project'],
   ['remote', 'started from web'],
 ]);
+const RAW_VALUES = Object.freeze({
+  entrypoint: new Set([...CLAUDE.keys(), 'bench', 'claude-security', 'claude-coworker']),
+  originator: new Set([...CODEX.keys(), 'codex_cli_rs']),
+  source: new Set(['vscode', 'exec', 'mcp']),
+  threadSource: new Set(['user', 'chatgpt_handoff', 'subagent', 'guardian_review',
+    'agent_created_thread', 'automation']),
+  sessionKind: new Set(['bg', 'daemon', 'daemon-worker']),
+});
 
 // Raw values are internal enum-like tokens, not arbitrary transcript metadata.
 // Drop malformed or oversized values rather than retain prompt-like content.
 function bounded(value) {
   return typeof value === 'string' && value.length <= 80
     && (value === 'Codex Desktop' || /^[A-Za-z][A-Za-z0-9_.-]*$/u.test(value)) ? value : null;
+}
+
+function retain(rawEvidence, field, value) {
+  if (value !== null && RAW_VALUES[field].has(value)) rawEvidence[field] = value;
 }
 
 export function sessionSurfaceLabel(surface) {
@@ -86,11 +98,9 @@ function codexClassification(originator, source, threadSource) {
   let [surface, initiator] = originator === null ? ['unknown', 'unknown']
     : CODEX.get(originator) ?? ['other-openai', 'unknown'];
   if (originator === 'codex_cli_rs' && source === 'mcp') [surface, initiator] = ['codex-mcp', 'agent'];
-  if (['subagent', 'guardian_review', 'agent_created_thread'].includes(threadSource)) initiator = 'agent';
-  else if (threadSource === 'automation') initiator = 'automation';
-  else if (['user', 'chatgpt_handoff'].includes(threadSource)) {
-    initiator = surface === 'codex-cli-exec' ? 'automation' : 'person';
-  }
+  if (surface === 'codex-mcp' || ['subagent', 'guardian_review', 'agent_created_thread'].includes(threadSource)) initiator = 'agent';
+  else if (['codex-cli-exec', 'codex-sdk'].includes(surface) || threadSource === 'automation') initiator = 'automation';
+  else if (['user', 'chatgpt_handoff'].includes(threadSource)) initiator = 'person';
   return [surface, initiator, []];
 }
 
@@ -107,13 +117,13 @@ export function classifySessionSurface(declaration = {}) {
   let surface = 'unknown', initiator = 'unknown', attributes = [];
 
   if (host === 'claude') {
-    if (entrypoint !== null) rawEvidence.entrypoint = entrypoint;
-    if (sessionKind !== null) rawEvidence.sessionKind = sessionKind;
+    retain(rawEvidence, 'entrypoint', entrypoint);
+    retain(rawEvidence, 'sessionKind', sessionKind);
     [surface, initiator, attributes] = claudeClassification(entrypoint, sessionKind);
   } else if (host === 'codex') {
-    if (originator !== null) rawEvidence.originator = originator;
-    if (source !== null) rawEvidence.source = source;
-    if (threadSource !== null) rawEvidence.threadSource = threadSource;
+    retain(rawEvidence, 'originator', originator);
+    retain(rawEvidence, 'source', source);
+    retain(rawEvidence, 'threadSource', threadSource);
     [surface, initiator, attributes] = codexClassification(originator, source, threadSource);
   }
   if (declaration.importedCopy === true) initiator = 'imported-copy';

@@ -51,7 +51,8 @@ test('maps every ADR-0060 OpenAI originator, including source-dependent MCP', ()
     assert.equal(actual.surface, surface, originator);
     assert.equal(actual.initiator, initiator, originator);
     assert.equal(actual.label, sessionSurfaceLabel(surface), originator);
-    assert.deepEqual(actual.rawEvidence, source ? { originator, source } : { originator }, originator);
+    assert.deepEqual(actual.rawEvidence, originator === 'future-client' ? { source } : source
+      ? { originator, source } : { originator }, originator);
   }
 });
 
@@ -63,6 +64,13 @@ test('keeps initiator orthogonal to surface and import state', () => {
   assert.equal(classifySessionSurface({ host: 'codex', originator: 'Codex Desktop', threadSource: 'automation' }).initiator, 'automation');
   assert.equal(classifySessionSurface({ host: 'codex', originator: 'Codex Desktop', importedCopy: true }).initiator, 'imported-copy');
   assert.equal(classifySessionSurface({ host: 'codex', originator: 'codex_exec', threadSource: 'user' }).initiator, 'automation');
+  for (const threadSource of ['user', 'chatgpt_handoff']) {
+    assert.equal(classifySessionSurface({ host: 'codex', originator: 'codex_cli_rs', source: 'mcp', threadSource }).initiator, 'agent');
+    for (const originator of ['codex_sdk_ts', 'codex_python_sdk']) {
+      assert.equal(classifySessionSurface({ host: 'codex', originator, threadSource }).initiator, 'automation');
+    }
+  }
+  assert.equal(classifySessionSurface({ host: 'codex', originator: 'codex_sdk_ts', threadSource: 'guardian_review' }).initiator, 'agent');
 });
 
 test('unknown declarations remain bounded and do not become product claims', () => {
@@ -79,6 +87,12 @@ test('unknown declarations remain bounded and do not become product claims', () 
   assert.deepEqual(unknown.rawEvidence, {});
   assert.ok(!JSON.stringify(unknown).includes('private prompt'));
   assert.deepEqual(classifySessionSurface({ host: 'codex', originator: 'user prompt' }).rawEvidence, {});
+  for (const field of ['entrypoint', 'originator', 'source', 'threadSource', 'sessionKind']) {
+    const value = 'privateSingleTokenCanary';
+    const candidate = classifySessionSurface({ host: field === 'entrypoint' || field === 'sessionKind' ? 'claude' : 'codex',
+      [field]: value });
+    assert.ok(!JSON.stringify(candidate).includes(value), field);
+  }
   assert.equal(sessionSurfaceLabel('__proto__'), 'Unknown');
 });
 
