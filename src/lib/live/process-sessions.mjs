@@ -80,6 +80,47 @@ function argvOf(command, executable) {
   return tokens(text);
 }
 
+// Codex's root CLI accepts options before a subcommand. Consume only options
+// with known arity; an unknown option, missing value, prompt, or `--` leaves
+// the role unproven. In particular, a value equal to "app-server" is a value,
+// not a subcommand. `ps args=` has no reliable quoting for spaced values, so
+// ambiguous command lines degrade to an ordinary controller.
+const CODEX_VALUE_OPTIONS = new Set([
+  '-c', '--config', '-s', '--sandbox', '-a', '--ask-for-approval',
+  '-m', '--model', '-p', '--profile', '-C', '--cd',
+  '--enable', '--disable', '--local-provider', '--add-dir',
+  '--remote', '--remote-auth-token-env',
+]);
+const CODEX_SWITCH_OPTIONS = new Set([
+  '--strict-config', '--oss', '--approve-for-me',
+  '--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust',
+  '--worktree', '--search', '--no-alt-screen', '--no-daemon',
+]);
+const validConfigOverride = (value) => /^[^\s=]+=.*/.test(value);
+function codexSubcommand(argv, offset) {
+  for (let index = offset; index < argv.length && index < offset + 32; index++) {
+    const token = argv[index];
+    if (token === 'app-server' || token === 'mcp-server') return token;
+    if (token === '--') return null;
+    if (CODEX_SWITCH_OPTIONS.has(token)) continue;
+    if (CODEX_VALUE_OPTIONS.has(token)) {
+      if (index + 1 >= argv.length || argv[index + 1].startsWith('-')) return null;
+      if ((token === '-c' || token === '--config')
+        && !validConfigOverride(argv[index + 1])) return null;
+      index++;
+      continue;
+    }
+    const option = token?.split('=', 1)[0];
+    if (CODEX_VALUE_OPTIONS.has(option) && token.length > option.length + 1) {
+      if ((option === '-c' || option === '--config')
+        && !validConfigOverride(token.slice(option.length + 1))) return null;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
 /** Identify only a controller executable or its supported Node launcher. */
 export function hostFromCommand(command, executable = null) {
   const argv = argvOf(command, executable);
@@ -91,7 +132,7 @@ export function hostFromCommand(command, executable = null) {
     host = HOST_NAMES.get(executableName(argv[wrapperIndex])) ?? null;
     argumentOffset = wrapperIndex + 1;
   }
-  if (host === 'codex' && argv[argumentOffset] === 'mcp-server') return null;
+  if (host === 'codex' && codexSubcommand(argv, argumentOffset) === 'mcp-server') return null;
   return host;
 }
 
@@ -117,10 +158,14 @@ const supportedExecutable = (executable) => {
 
 /** Reduce process argv to a non-sensitive controller role, then discard argv. */
 function controllerKind(row) {
+  if (desktopApplication(row.executable)) return 'desktop-app';
   const argv = argvOf(row.command, row.executable);
   const program = executableName(row.executable ?? argv[0]);
   const argumentOffset = ['node', 'nodejs'].includes(program) ? 2 : 1;
-  if (argv[argumentOffset] === 'app-server') return 'host-service';
+  const codex = program === 'codex'
+    || (['node', 'nodejs'].includes(program) && executableName(argv[1]) === 'codex');
+  if (codex ? codexSubcommand(argv, argumentOffset) === 'app-server'
+    : argv[argumentOffset] === 'app-server') return 'host-service';
   const executable = String(row.executable ?? argv[0] ?? '').replaceAll('\\', '/');
   // The Claude desktop app runs its own Claude Code CLI from a versioned
   // bundle (`…/Claude/claude-code/<version>/claude.app/Contents/MacOS/claude`).

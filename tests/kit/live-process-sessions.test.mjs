@@ -13,6 +13,8 @@ test('host process detection recognizes controllers and rejects helpers', () => 
   assert.equal(hostFromCommand('node /opt/bin/codex'), 'codex');
   assert.equal(hostFromCommand('/usr/local/bin/opencode --continue'), 'opencode');
   assert.equal(hostFromCommand('codex mcp-server'), null);
+  assert.equal(hostFromCommand('codex -s read-only mcp-server'), null);
+  assert.equal(hostFromCommand('node /opt/bin/codex -c model="test" mcp-server'), null);
   assert.equal(hostFromCommand('/opt/bin/codex-code-mode-host'), null);
   assert.equal(hostFromCommand('node app.mjs codex'), null);
   assert.equal(hostFromCommand('python worker.py claude'), null);
@@ -79,6 +81,46 @@ test('runtime survey classifies host services and desktop apps without retaining
   ]);
   assert.equal(survey.processes.some((entry) => Object.hasOwn(entry, 'command')), false,
     'classification emits an enum, never the potentially sensitive argv');
+});
+
+test('Codex global options before app-server identify a service, never a session', async () => {
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const app = '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT';
+  const bundled = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';
+  const processRows = [
+    { pid: 10, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex -s read-only -a never app-server' },
+    { pid: 20, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --config model="test" app-server' },
+    { pid: 30, ppid: 1, startedAt, executable: app, command: `${app} app-server` },
+    { pid: 31, ppid: 30, startedAt, executable: bundled,
+      command: `${bundled} --config=model="test" --strict-config app-server` },
+    { pid: 40, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --config app-server' },
+    { pid: 50, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --unknown value app-server' },
+    { pid: 60, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex -- app-server' },
+    { pid: 70, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --model app-server' },
+    { pid: 80, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --config malformed app-server' },
+  ];
+  const cwdByPid = new Map(processRows.map((row) => [row.pid, `/repos/${row.pid}`]));
+  const survey = await surveyHostProcesses({ platform: 'darwin', processRows, cwdByPid,
+    metricsByPid: new Map() });
+  assert.deepEqual(survey.processes.map(({ pid, controllerKind }) => ({ pid, controllerKind })), [
+    { pid: 10, controllerKind: 'host-service' },
+    { pid: 20, controllerKind: 'host-service' },
+    { pid: 30, controllerKind: 'desktop-app' },
+    { pid: 40, controllerKind: 'project-session' },
+    { pid: 50, controllerKind: 'project-session' },
+    { pid: 60, controllerKind: 'project-session' },
+    { pid: 70, controllerKind: 'project-session' },
+    { pid: 80, controllerKind: 'project-session' },
+  ]);
+  assert.deepEqual((await listActiveHostSessions({ platform: 'darwin', processRows, cwdByPid,
+    inspectWorkspace: async () => null })).map(({ pid }) => pid), [40, 50, 60, 70, 80]);
 });
 
 // macOS `ps -o comm=` prints the executable's full path, and many real paths
