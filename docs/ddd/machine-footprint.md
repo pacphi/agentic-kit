@@ -13,7 +13,7 @@ Maintenance's implemented Focus browser (broader acceptance gates remain open) p
 this measured evidence one level at a time, with repository choices and optional worktree
 visibility. That presentation cannot change source inclusion, complete-placement counts, or
 collector ownership. Its evidence-backed relationship disclosures are governed by the
-[Maintenance guide](../MAINTENANCE.md).
+[Maintenance guide](../maintenance.md).
 
 ## Purpose
 
@@ -865,7 +865,7 @@ normative and this table restates it for readers of this document.
 - [Context map](context-map.md) — where this context sits
 - [Historical usage / Observability / Project intelligence](context-map.md) — the neighboring
   contexts this domain is deliberately distinct from
-- [Dashboard guide](../DASHBOARD.md)
+- [Dashboard guide](../dashboard.md)
 - `src/lib/footprint/` — the collectors: `walk.mjs` (the bounded walker and the `Measurement`
   vocabulary), `install.mjs`, `storage.mjs`, `runtime.mjs`, `catalog.mjs`, `projects.mjs`,
   `consumers.mjs` (the ranked largest-consumers view), `project-sources.mjs` (cross-host project

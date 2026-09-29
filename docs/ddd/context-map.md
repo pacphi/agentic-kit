@@ -62,7 +62,7 @@ The Focus browser amendment approved on 2026-09-08 is a Dashboard interaction ov
 management projection; its automated coverage does not close the separate human and platform
 acceptance gates. Scope/repository/type/family browsing
 and context-preserving relationship links add no measurement, provenance, or action authority.
-See the [current Maintenance guide](../MAINTENANCE.md).
+See the [current Maintenance guide](../maintenance.md).
 
 Maintenance is the human-guided control plane for upgrades, stale/unsupported resource cleanup,
 lifecycle remediation, verification, guarded undo, recovery, and receipts. It does not own the

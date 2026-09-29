@@ -25,22 +25,22 @@ ak setup --with-deja-vu # optional local transcript search, MCP mode by default
 way to run the package. Local dependencies, `npm exec`/`npx`, verified tarballs,
 Git revisions, and contributor links have different package footprints while
 `ak setup` retains the same machine/user/project effects. See
-[Installation and scope](docs/INSTALLATION.md) before choosing a non-global method
+[Installation and scope](docs/installation.md) before choosing a non-global method
 or deploying on a shared machine.
 
 Want to try it before installing anything locally? Open this repo in GitHub
 Codespaces (or any [dev container](https://containers.dev)-compatible tool) —
 a "try the published release" configuration installs `ak` into a disposable
-container for you. See [docs/DEVCONTAINERS.md](https://github.com/pacphi/agentic-kit/blob/main/docs/DEVCONTAINERS.md).
+container for you. See [docs/devcontainers.md](https://github.com/pacphi/agentic-kit/blob/main/docs/devcontainers.md).
 
 **What you get:**
 
 - **One command** installs, repairs, and checks ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
 - **Source-grounded knowledge:** *RuvNet Brain* — an offline knowledge base over the rUv stack — powers the `search_ruvnet` MCP tool, so answers about ruflo/AgentDB/RVF/SPARC cite real source instead of stale training priors.
-- **Local transcript recall (optional):** [deja-vu](docs/DEJA-VU.md) indexes coding-agent histories for MCP search or host-native automatic recall. It is off by default because the derived plaintext index has its own privacy and retention boundary.
+- **Local transcript recall (optional):** [deja-vu](docs/deja-vu.md) indexes coding-agent histories for MCP search or host-native automatic recall. It is off by default because the derived plaintext index has its own privacy and retention boundary.
 - **Multi-host execution (optional):** Claude, Codex, and opt-in OpenCode can share one activity policy; `ak run` is the canonical executor, while `ak setup --codex` enables the subscription-backed Claude/Codex defaults.
 - **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard report observed state and explicit evidence gaps.
-- **Managed ruflo components:** ak applies and reports ruflo's opt-in agent pickers, MCP tool governance, learning profile, and promotional funnel — see [Managed ruflo components](docs/MANAGED-TOOLS.md#managed-ruflo-components).
+- **Managed ruflo components:** ak applies and reports ruflo's opt-in agent pickers, MCP tool governance, learning profile, and promotional funnel — see [Managed ruflo components](docs/managed-tools.md#managed-ruflo-components).
 - **Scoped verification:** `ak status --refresh=live` exercises named paths against real CLIs and
   reports their results; `ak status` shows each remembered result with its age, and a plain
   `--refresh=live` runs the quick, free subset first, while `--only CHECK` names one check
@@ -65,7 +65,7 @@ record: [docs/adr/0016-capability-driven-integration-adapters.md](https://github
 
 For a capability-by-capability comparison of Claude, Codex, and OpenCode across
 Ruflo, agentic-qe, and RuvNet Brain—including current limitations and upstream
-issues—see [Host support](docs/HOST-SUPPORT.md).
+issues—see [Host support](docs/host-support.md).
 
 ## Why this exists
 
@@ -121,10 +121,10 @@ ak uninstall    leave cleanly                [--dry-run] [--this-project] [--rem
 > [!TIP]
 > **When in doubt: `ak sync`.** Setup, sync, and uninstall support `--dry-run`. Maintenance uses a
 > separate short-lived plan, digest, exact action IDs, and explicit `--yes` confirmation before it
-> changes anything. See the [Maintenance runbook](docs/MAINTENANCE.md).
+> changes anything. See the [Maintenance runbook](docs/maintenance.md).
 
 deja-vu is a separately opted-in companion, not another curated memory store. Read the
-[deja-vu runbook](docs/DEJA-VU.md) before enabling it: the guide covers MCP versus auto events,
+[deja-vu runbook](docs/deja-vu.md) before enabling it: the guide covers MCP versus auto events,
 the plaintext derived index, untrusted recall, Codex plugin coexistence, health checks, and the
 independent package/data removal scopes.
 
@@ -136,7 +136,7 @@ Hook healing never edits trust state, plugin caches, generated runtime copies, o
 OpenCode modules, or unsupported schemas. For exact verified profiles it can also retire
 the frozen incompatible Ruflo Claude-hook projection one reviewed project at a time,
 with an estate-wide transactional apply and guarded undo. See the
-[hook assurance runbook](docs/HOOKS.md) for the preview/authorize/apply/verify/undo journey
+[hook assurance runbook](docs/hooks.md) for the preview/authorize/apply/verify/undo journey
 and current platform limits.
 
 <details>
@@ -144,16 +144,16 @@ and current platform limits.
 
 | Verb | What it does |
 | ------ | -------------- |
-| **setup** | Installs/updates ruflo + agentic-qe globally (handling npm ≥11.17's `allow-scripts` so natives build; AgentDB ships inside ruflo, so ak installs no separate copy), installs and verifies the exact Ruflo-compatible **agent-browser** native executor without adding its plugin/skills (`--no-agent-browser` disables it), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~2 GB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into the machine-wide guidance files (`~/.claude/CLAUDE.md`, plus `~/.codex/AGENTS.md` on codex machines), offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` entry in the current folder; without one it's skipped with a note. `--project` forces the same project setup in the current directory (e.g. a not-yet-`git init`-ed folder); it does not locate an ancestor repository. Project initialization runs `ruflo init --full --force` and can replace existing agent configuration, so read the [setup scope and project mutation contract](docs/SETUP.md) before using it on an existing project. `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-agent-browser` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. `--codex` enables + installs the Codex host during setup (ambidextrous dual-host mode; both hosts become available for routing), and `--primary-host claude\|codex` picks which host leads (codex implies `--codex`). |
+| **setup** | Installs/updates ruflo + agentic-qe globally (handling npm ≥11.17's `allow-scripts` so natives build; AgentDB ships inside ruflo, so ak installs no separate copy), installs and verifies the exact Ruflo-compatible **agent-browser** native executor without adding its plugin/skills (`--no-agent-browser` disables it), installs the **RuvNet Brain** (an offline knowledge base over the rUv stack, powering the `search_ruvnet` MCP — a ~2 GB one-time download, prompted; skip with `--no-ruvnet-brain`), deploys the token-audit skill, merges the managed guidance blocks into the machine-wide guidance files (`~/.claude/CLAUDE.md`, plus `~/.codex/AGENTS.md` on codex machines), offers one-time MCP registration (user scope, with a tool-family picker), and — inside a repo — initializes the project: sanitized `ruflo init`, absolute memory-path pin, a **verified** store→disk write, statusline footer, and a background daemon with **local-only ($0) workers** (token-spending AI workers stay opt-in behind upstream's machine-wide budget). Project scope triggers on a `.git` entry in the current folder; without one it's skipped with a note. `--project` forces the same project setup in the current directory (e.g. a not-yet-`git init`-ed folder); it does not locate an ancestor repository. Project initialization runs `ruflo init --full --force` and can replace existing agent configuration, so read the [setup scope and project mutation contract](docs/setup.md) before using it on an existing project. `--minimal` skips it, `--yes` accepts all prompts (non-interactive), `--no-aqe` / `--no-agent-browser` / `--no-ruvnet-brain` / `--no-security` disable those subsystems, and `--reconfigure` re-offers MCP registration. `--codex` enables + installs the Codex host during setup (ambidextrous dual-host mode; both hosts become available for routing), and `--primary-host claude\|codex` picks which host leads (codex implies `--codex`). |
 | **status** | Per-subsystem ✓/⚠/✗ (versions, the kit's own version, **ruvnet-brain**, natives, **memory-pin**, security, learning, aqe/RVF, the managed **agent-browser** package/native/config/browser readiness, MCP, **hosts**, **providers**, **routing**, daemons, guidance blocks, statusline), each drift row naming what `sync` would do about it, or marking a step you must take yourself as `→ manual:` (sync never plans those) — plus a **health-history** line that flags regressions since the last sync. Browser status is filesystem-only: it never runs doctor or launches Chrome. |
 | **sync** | The one convergence verb: upgrades first when a new release exists, then re-heals everything an upgrade wipes, then re-checks and reports. Included in that heal: it **installs any enabled frontier host** (claude/codex/opencode) that's entirely absent — never touching an external (mise/brew/native) install — and **re-applies provider wiring** (the `ENABLE_*` host env, OpenCode's native configuration, the AQE default/fallback/agent overrides, admitted Agentic-QE 3.13.12+ `externalProviders`, and ruflo API providers) whenever it has drifted. External-provider reconciliation preserves foreign entries, refuses same-id conflicts, and prunes only entries whose exact value still matches an agentic-kit ownership receipt. On a dual-host project, sync also **seeds/heals the Claude/Codex default routing policy**. It appends a health-history snapshot, refreshes RuvNet Brain when enabled, and self-updates the kit last. A planned fix whose status row is still there afterwards is reported `unresolved:` and sync exits 1. A row whose fix you do by hand (`→ manual:`) never changes sync's exit code; a failing or warning one is listed under "needs your action". `--no-upgrade` skips self-update and package upgrades. `--skip <subsystem>` (repeatable) leaves one subsystem out of this run only, including the step it owns; it is reported "skipped by request" and never counts as a failure. `--json` prints one JSON result on stdout (`plan`, `steps`, `unresolved`, `skipped`, `needsYourAction`, `converged`, `exitCode`) and sends the human lines to stderr. Model refresh/diff/plan findings remain advisory. |
-| **dashboard** | Opens the local web dashboard (`127.0.0.1:7431`, localhost-only, never detaches) with five primary areas: **About · Overview · Usage · Observability · System**. Ordinary views remain observation-only. System's **Full scan** remeasures local inventory and then chains one provider check. **System → Maintenance** is the sole action surface, with four destinations: **Inventory** (scope → repository where applicable → type → resource → exact installation), **Guidance** (only outcomes the kit can ground), **Discovery** (where it looks), and **Activity** (receipts, undo, interruption audits). Every write is one exact placement and one action, with a server-derived short-lived plan, explicit confirmation, and a one-use capability. Advisory remains a measurement; the former Catalog tab redirects to Inventory and its cards now sit in System Summary. The page is self-contained, offline-first, protected by a per-session token, and never executes a browser-supplied command. Action targets resolve server-side; Discovery accepts validated source-root configuration. Full navigation and security semantics: [Dashboard guide](docs/DASHBOARD.md); provider and recovery limits: [Maintenance runbook](docs/MAINTENANCE.md). **Auto-opens your browser** (`--no-open` for headless/SSH); `--port N` changes the port. Stop with Ctrl-C. (Also available as `ak x dashboard`.) |
+| **dashboard** | Opens the local web dashboard (`127.0.0.1:7431`, localhost-only, never detaches) with five primary areas: **About · Overview · Usage · Observability · System**. Ordinary views remain observation-only. System's **Full scan** remeasures local inventory and then chains one provider check. **System → Maintenance** is the sole action surface, with four destinations: **Inventory** (scope → repository where applicable → type → resource → exact installation), **Guidance** (only outcomes the kit can ground), **Discovery** (where it looks), and **Activity** (receipts, undo, interruption audits). Every write is one exact placement and one action, with a server-derived short-lived plan, explicit confirmation, and a one-use capability. Advisory remains a measurement; the former Catalog tab redirects to Inventory and its cards now sit in System Summary. The page is self-contained, offline-first, protected by a per-session token, and never executes a browser-supplied command. Action targets resolve server-side; Discovery accepts validated source-root configuration. Full navigation and security semantics: [Dashboard guide](docs/dashboard.md); provider and recovery limits: [Maintenance runbook](docs/maintenance.md). **Auto-opens your browser** (`--no-open` for headless/SSH); `--port N` changes the port. Stop with Ctrl-C. (Also available as `ak x dashboard`.) |
 | **usage** | `score` and `prompts` summarize retained local transcript evidence. `status` reads provider-account analytics from cache; `refresh openrouter` explicitly contacts the OpenRouter management API using `OPENROUTER_MANAGEMENT_KEY`, then writes a credential-free mode-`0600` cache. Cache reads make no OpenRouter request. Account rows have no grounded host/session/project correlation and are never merged into transcript totals. |
-| **models** | Builds a private, host-scoped model inventory from Claude, Codex, OpenCode, Ollama, bounded local usage evidence, and a dated bundled record of Anthropic's public model/lifecycle facts. `status`, `diff`, `explain`, and `plan` are cache-only and read-only; `refresh --online` is the sole online-catalogue boundary. Public facts never imply account or OpenRouter routability. Swap plans enumerate routes plus Agentic QE/Ruflo consumers and print a copyable canonical action without executing it. The CLI exposes exact local evidence deliberately; the Dashboard exposes source-proven public catalogue identity and uses the owner-visible model read contract; secret-shaped values remain masked. See [Model lifecycle intelligence](docs/MODELS.md). |
+| **models** | Builds a private, host-scoped model inventory from Claude, Codex, OpenCode, Ollama, bounded local usage evidence, and a dated bundled record of Anthropic's public model/lifecycle facts. `status`, `diff`, `explain`, and `plan` are cache-only and read-only; `refresh --online` is the sole online-catalogue boundary. Public facts never imply account or OpenRouter routability. Swap plans enumerate routes plus Agentic QE/Ruflo consumers and print a copyable canonical action without executing it. The CLI exposes exact local evidence deliberately; the Dashboard exposes source-proven public catalogue identity and uses the owner-visible model read contract; secret-shaped values remain masked. See [Model lifecycle intelligence](docs/models.md). |
 | **admin** | Opens the **maintainer admin** (`127.0.0.1:7432`, localhost-only, foreground) — the project-telemetry sibling of `dashboard`, with the same dark/light visual theme and persisted theme preference: unique repo visitors and cloners (GitHub traffic API, needs a push-access token via `GITHUB_TOKEN`/`GH_TOKEN`/`gh auth token` — panels degrade honestly without one), contributors and watchers, npm download momentum (last 7d vs prior 7d, sparklines — shown as trend only, never an absolute reach number, since mirrors/CI inflate the raw count), latest CI run status and open Dependabot alerts, a **"since you last looked"** delta strip over a local baseline, open issues/PRs from others (oldest first), and external humans ranked by recency (bots excluded). Access is gated by a **per-session token** carried in the URL fragment and sent header-only; the page makes **zero external fetches** (the server proxies GitHub/npm; your credential never reaches the page or the payload). Where `dashboard` is offline-first, `admin` does deliberate GitHub/npm egress — that contract split is why they're siblings, not tabs. `--port N`, `--no-open`; Ctrl-C stops. (Also available as `ak x admin`.) |
 | **about** | A plain-words directory of every component the kit installs and configures — one entry per component: what it is, what it does for you, where to read more, and an honest state chip read from the same detection `ak status` uses (the prose is authored with the release; the chip is the only runtime fact). `ak about [entry-id]` opens one entry; `--category` narrows to `hosts`, `engine-memory`, `quality`, `safety`, `knowledge`, `kit`, or `configured`; `--no-detect` skips state resolution for an instant editorial read; `--json` emits the directory with resolved chips. The dashboard's About area renders this identical directory. |
 | **system** | What the stack occupies on your machine. The default read is the cheap tier: the live agent-process census, the files growing fastest between scans, and the last full scan's figures carried forward with their date. `--refresh=machine` re-walks install trees, storage, the cross-host catalog, and the hosted repositories with recorded sessions, then persists the result; `--project-trees` also measures the working trees of your own projects; excluded local-only, unsupported-remote, and sessionless project candidates remain counted with reasons. Production runs this synchronous measurement in one worker so the dashboard can continue reporting activity; this is responsiveness containment, not a claim that the scan finishes sooner. `--json` emits the same snapshot payload `/api/system` serves. |
-| **maintain** | Inventory-led maintenance. `inventory`, `show`, `guidance`, and `procedure` read the verified placement inventory and the outcomes the kit can ground; `discovery`, `sources`, and `scans` manage where it looks and resumable scan coverage; `activity`, `receipt`, and `audit` read receipts and run the read-only interruption audit. `ak maintain` (or `ak maintain report`) reads the last measurement; `--refresh[=live\|machine]` refreshes Maintenance evidence and the inventory first, adding live checks or a full machine re-measure as named. Every write is one action: `plan --executable` derives one action, `apply` needs the plan ID, digest, one action ID, and `--yes`, `undo` needs a committed reversible receipt, and `reconcile` records one audited outcome for one receipt. `recover` is a read-only alias for `audit`. Placements without a registered provider stay report-only. See [Maintenance](docs/MAINTENANCE.md). |
+| **maintain** | Inventory-led maintenance. `inventory`, `show`, `guidance`, and `procedure` read the verified placement inventory and the outcomes the kit can ground; `discovery`, `sources`, and `scans` manage where it looks and resumable scan coverage; `activity`, `receipt`, and `audit` read receipts and run the read-only interruption audit. `ak maintain` (or `ak maintain report`) reads the last measurement; `--refresh[=live\|machine]` refreshes Maintenance evidence and the inventory first, adding live checks or a full machine re-measure as named. Every write is one action: `plan --executable` derives one action, `apply` needs the plan ID, digest, one action ID, and `--yes`, `undo` needs a committed reversible receipt, and `reconcile` records one audited outcome for one receipt. `recover` is a read-only alias for `audit`. Placements without a registered provider stay report-only. See [Maintenance](docs/maintenance.md). |
 | **run** | **Canonical execution surface.** Executes the template vocabulary through host-neutral supervised adapters. It accepts an explicit OpenCode route (persisted or `--route`) alongside Claude/Codex; `--dry-run` prints the exact static plan (with each worker's escalation ladder); at runtime, successful dependencies pass runtime-only, sanitized handoffs capped at 2 KiB each/8 KiB fan-in, never exposed in public JSON. A handoff may cross hosts/vendors and must exclude secrets, credentials, raw logs, and transcript excerpts. `--escalate` advances a failed worker one rung of its route's ladder per attempt (bounded by the ladder; permission/consent and uncertain results are never escalated). `--timeout` is one absolute readiness→prepare→launch→observe budget per attempt, while separately bounded teardown proves whether resources terminated. An OpenCode worker runs an isolated loopback server with ephemeral basic authentication, returns only normalized observed facts, and aborts instead of approving a permission request. `ak run` does not turn OpenCode into an AQE provider or primary host. |
 | **host** | Execution-host status, selection, primary-host choice, activity routing, reversible teardown, and the consent-gated connection check: `ak host status\|pick\|reset-routes\|off\|check-connection`. The plumbing spelling is `ak x host`. Inference providers and bindings remain separate concepts even though their controls share this workflow. |
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); owned configuration is removed and ak's receipted edits inside Ruflo's install are put back, while project memory/transcripts are retained by default; `--purge` widens the documented package/config scope. |
@@ -189,7 +189,7 @@ single native line made from built-in fields instead. Opt into a compact
 machine-wide preset with `ak x statusline codex native` (or use `extended` on
 a wide terminal); `ak sync` then keeps the selected preset converged without
 rewriting unrelated `~/.codex/config.toml` settings. See
-[Managed Codex status line](docs/CODEX-STATUSLINE.md) for fields, ownership,
+[Managed Codex status line](docs/codex-statusline.md) for fields, ownership,
 rollback, and the current parity boundary.
 
 ## Requirements
@@ -231,7 +231,7 @@ you opt in.
 > [!NOTE]
 > ruflo and agentic-qe keep **separate config stores** — they don't share one file. `ak`
 > converges both from `kit.json`. Which store to edit for which knob is in
-> [docs/PROVIDERS.md](docs/PROVIDERS.md#native-configs-one-front-door).
+> [docs/providers.md](docs/providers.md#native-configs-one-front-door).
 
 - **Per-activity routing** — when **both** hosts are enabled (and agentic-qe ≥ 3.13.1), `ak` seeds a
   policy that routes each kind of work to the host + model that suits it — Claude for architecture,
@@ -253,9 +253,9 @@ you opt in.
 `ak host status` shows each host as Managed by ak, Found, not managed, or Not installed, plus
 what's wired and routed; `ak host pick` chooses and
 applies (reversibly); `ak host off` restores the claude-only default. Full guide:
-[docs/PROVIDERS.md](docs/PROVIDERS.md). Already on an older `ak` and adopting a later capability
-(like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `host pick` motion.
-The detailed compatibility matrix is in [docs/HOST-SUPPORT.md](docs/HOST-SUPPORT.md).
+[docs/providers.md](docs/providers.md). Already on an older `ak` and adopting a later capability
+(like dual-host)? [docs/upgrading.md](docs/upgrading.md) covers the `sync` vs `host pick` motion.
+The detailed compatibility matrix is in [docs/host-support.md](docs/host-support.md).
 
 </details>
 
@@ -310,21 +310,21 @@ Design record: [docs/adr/0017-opencode-host.md](https://github.com/pacphi/agenti
 
 ## Troubleshooting
 
-[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → `agentic-kit` command.
+[docs/troubleshooting.md](docs/troubleshooting.md) — symptom → `agentic-kit` command.
 
-[docs/INSTALLATION.md](docs/INSTALLATION.md) — global versus local, one-shot,
+[docs/installation.md](docs/installation.md) — global versus local, one-shot,
 tarball, Git, and source-checkout installs, including user/machine/project impact.
 
-[docs/HOST-SUPPORT.md](docs/HOST-SUPPORT.md) — Claude, Codex, and OpenCode support
+[docs/host-support.md](docs/host-support.md) — Claude, Codex, and OpenCode support
 across Ruflo, AQE, and RuvNet Brain, with limitations and current upstream risks.
 
-[docs/DEVCONTAINERS.md](https://github.com/pacphi/agentic-kit/blob/main/docs/DEVCONTAINERS.md) — Codespaces/dev container setup,
+[docs/devcontainers.md](https://github.com/pacphi/agentic-kit/blob/main/docs/devcontainers.md) — Codespaces/dev container setup,
 both for contributing to this repo and for trying the published release.
 
-[docs/DASHBOARD.md](docs/DASHBOARD.md) — dashboard navigation, deep links, keyboard behavior, and
+[docs/dashboard.md](docs/dashboard.md) — dashboard navigation, deep links, keyboard behavior, and
 the meaning of each primary and secondary view.
 
-[docs/MAINTENANCE.md](docs/MAINTENANCE.md) — the inventory-led Maintenance workspace, including the
+[docs/maintenance.md](docs/maintenance.md) — the inventory-led Maintenance workspace, including the
 implemented Focus browser, contextual relationships, and exact
 action boundaries: Inventory,
 Guidance, Discovery, Activity, one-action plans, undo, interruption audit and reconciliation, the
@@ -332,7 +332,7 @@ Guidance, Discovery, Activity, one-action plans, undo, interruption audit and re
 
 ## How tools are managed
 
-[docs/MANAGED-TOOLS.md](https://github.com/pacphi/agentic-kit/blob/main/docs/MANAGED-TOOLS.md) — the consistency contract every
+[docs/managed-tools.md](https://github.com/pacphi/agentic-kit/blob/main/docs/managed-tools.md) — the consistency contract every
 managed tool follows (release-pinned installs, sync as the single updater,
 disk-first version truth, one drift story across status/statusline/dashboard),
 with the per-tool table and the checklist for adding a new tool.
@@ -371,4 +371,4 @@ current release):
 Use `ak telemetry export --output ./snapshot.json` to produce a private, versioned JSON snapshot
 of usage and retained maintenance evidence. `ak telemetry aggregate FILE...` combines the latest
 snapshot per installation without counting repeated exports twice. No vendor dashboard or network
-service is required. See [Fleet evidence export](docs/TELEMETRY.md) for schema, coverage and limits.
+service is required. See [Fleet evidence export](docs/telemetry.md) for schema, coverage and limits.

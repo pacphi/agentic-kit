@@ -1,5 +1,5 @@
 > Archived snapshot, 2026-09-08. Original status and evidence below are historical.
-> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> Current guidance: [Maintenance](../maintenance.md), [acceptance and open gates](../maintenance-acceptance.md),
 > and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
 
 # Maintenance experience specification
@@ -385,8 +385,8 @@ project discovery is a policy toggle, not an extra filesystem root in the covera
 ### Hosts and external adapters (2026-09-07 correction)
 
 The filter rail keeps **Hosts** (Claude, Codex, OpenCode) separate from **Adapters**
-(external host integrations, including Hermes). This follows [Host support](../HOST-SUPPORT.md)
-and the [Hermes external adapter guide](../HERMES-HOST-ADAPTER.md). An adapter filter counts
+(external host integrations, including Hermes). This follows [Host support](../host-support.md)
+and the [Hermes external adapter guide](../hermes-host-adapter.md). An adapter filter counts
 associated inventory resources; a zero count does not assert installation, admission, trust,
 or runtime health. Existing preview and capability gates continue to govern actions.
 

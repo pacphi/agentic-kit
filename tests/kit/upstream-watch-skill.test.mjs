@@ -54,7 +54,7 @@ test('the skill names every report group the watcher can produce', () => {
 // #213 and #240 are already registry entries; nothing says they still migrate.
 test('tracking issues are named as ours, not as issues to migrate', () => {
   assert.equal(Object.fromEntries(GROUPS).tracking, 'Our tracking issues');
-  for (const file of [...SKILLS, 'docs/UPSTREAM-WATCH.md']) {
+  for (const file of [...SKILLS, 'docs/upstream-watch.md']) {
     assert.doesNotMatch(readText(file), /to migrate|migrates? here/i, file);
   }
 });

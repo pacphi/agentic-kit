@@ -1,0 +1,237 @@
+# Managed tools — the consistency contract
+
+Every tool ak manages follows one contract for how it is installed, updated,
+version-detected, and displayed. This doc states the contract's five
+invariants, maps every managed tool onto them, and gives the checklist for
+adding a new tool without breaking them.
+
+The **host** rows here mean execution drivers such as Claude Code, Codex CLI, and OpenCode.
+Inference **providers** such as OpenRouter and Ollama are not install-owned hosts. Provider intent
+may use a **binding** and native configuration **projection**, while transcripts and catalogues
+remain separate **observability** evidence. The shared lifecycle and value-precise ownership
+design is Accepted in [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
+
+Each invariant traces to a live failure it prevents — the appendix records
+them.
+
+## The five invariants
+
+1. **Disk-first installed versions.** The "installed" side of every drift
+   check is read from what is actually on disk — never from a cached claim or
+   a side-record that can go stale. If a tool can change outside ak (manual
+   npm install, a hand-run updater), the reads still tell the truth.
+
+2. **Single update owner, with honest disowning.** `ak sync` is the only
+   updater for everything ak claims to manage. Where ak does *not* own the
+   artifact, it says so instead of pretending: externally-installed hosts are
+   filtered out of drift entirely, and a tool that ships its own self-updater
+   (the RuvNet Brain's nightly LaunchAgent) is detected as drift and disabled
+   by sync. One owner means the release stamp, the drift check, and the thing
+   on disk can converge.
+
+3. **Same-namespace comparisons.** Installed and latest are always compared
+   in the same version namespace: npm semver vs npm semver, GitHub release
+   tag vs release tag. A comparison across namespaces can never converge
+   (the appendix records the live case). "Latest" is not always npm-latest
+   either — agent-browser's authority is Ruflo's compatibility range.
+
+4. **One drift story across all surfaces.** `ak status` rows, the statusline
+   footer chips, and the dashboard (subsystem cards *and* the update banner)
+   reuse the same collectors where applicable. Separate invocations and cached snapshots
+   can differ in freshness; compare capture times before treating a mismatch as drift. The dashboard banner
+   is the easy one to miss: `driftReport()` only knows npm tools, so
+   non-npm-managed tools (the brain, the kit itself) are folded into the same
+   `{pkg, installed, latest, outdated}` array explicitly
+   (`foldBrainDrift()` / the `selfDrift` fold in
+   `src/lib/dashboard-server.mjs`).
+
+5. **Exit status outranks artifact presence.** Every managed operation reports
+   both an outcome (`ok`, `degraded`, `failed`, or `skipped`) and whether a
+   usable artifact remains. A failed repair can therefore say that an older
+   install is still usable, but it cannot render green or advance a release
+   stamp. A fallback is `degraded`, never an implied native repair. Version
+   stamps advance only after the installer exits successfully.
+
+## The tools
+
+| Tool | Install / update spec | Update owner | Installed version read from | Drift compared against | status / statusline / dashboard |
+| --- | --- | --- | --- | --- | --- |
+| **ruflo** | npm `ruflo@latest` | `ak sync` | disk: global `package.json` | npm `view latest` (TTL-cached) | row ✓ / upstream's own `RuFlo V<x>` header ✓ (ak never writes it; status flags a baked version above the install) / card + banner ✓ |
+| **agent-browser** | exact npm `0.27.0` on Node 22/23; `0.27.3` on Node 24+ | `ak sync`, only when receipt-owned; compatible external installs are disowned | disk: global `package.json` plus package-owned native executable | Ruflo's `>=0.27.0 <0.28.0` contract, not npm latest | row ✓ / n/a / About + System ✓; generic update banner excluded |
+| **agentic-qe** | npm `agentic-qe@latest` | `ak sync` | disk: global `package.json` (project-local fallback) | npm `view latest` (TTL-cached) | row ✓ / `Agentic QE V<x>` chip ✓ / card + banner ✓ |
+| **hosts** (Claude, Codex, OpenCode; OpenCode routes explicitly through `ak run`) | npm `@latest` — only when npm-managed | `ak sync` if npm-installed; **explicitly disowned** if brew/mise/native | disk: global `package.json`, else `--version` probe | npm latest for npm-managed only; external → `outdated:false` | row ✓ (version + method) / n/a / card + banner (npm-managed only) ✓ |
+| **agentdb** | none — ships inside ruflo; ak installs no separate copy | ruflo (its upgrade carries it); native bindings healed by `ak sync` (`natives`), which receipts any better-sqlite3 line it rewrites inside Ruflo's install (restored by `ak uninstall`) | disk: ruflo's bundled `agentdb/package.json` | none — not an ak update target | natives row ✓ / n/a / About card version ✓; banner excluded |
+| **ruvnet-brain** | npm `ruvnet-brain@latest` (never `github:` HEAD): an install with the bundle's own updater refreshes through `--update`; otherwise a `--version v<tag>`-pinned install | `ak sync`, stamping only the release then observed on disk; the installer's own nightly self-updater is suppressed at install (`--no-nightly-prompt`) and disabled by sync if found (`ruvnet-brain-nightly` subsystem) | disk: KB `SOURCE.json → releaseTag`, falling back to ak's kit.json stamp for pre-stamping bundles | GitHub `releases/latest` tag (TTL-cached) | row ✓ / `V<tag>` chip ✓ / card + banner ✓ |
+| **deja-vu** (opt-in companion) | npm `@vshulcz/deja-vu@latest`; v0.19.0 is the accepted contract baseline | `ak sync` only for an ak-receipted npm install; external binary/plugin installs are disowned | disk: global package plus bounded `deja version`; plugin or binary presence does not prove ownership | npm latest for owned npm; external → installed-only | content-free row / n/a / card + banner for owned npm drift |
+| **kit (self)** | npm, **pinned to the exact version drift saw** (`@pacphi/agentic-kit@<v>`) | `ak sync` (runs last — npm replaces the running code) | disk: running copy's `package.json` | npm `latest` (+ `next` for prereleases, TTL-cached) | row ✓ / n/a / header version + card + banner ✓ |
+
+Statusline "n/a" cells are by design: the footer decorates the activation rows
+it renders (ruflo / Agentic QE / brain) — hosts and the kit have no
+footer row to decorate, and their versions live in `ak status` and the
+dashboard.
+
+## Managed companion lifecycle boundary
+
+[ADR-0035](adr/0035-managed-deja-vu-companion.md) applies this contract to deja-vu without making
+it a host, provider, routing target, or AgentDB replacement. Its lifecycle is narrower than package
+presence:
+
+1. **Opt-in intent precedes history access.** Detection may report an external install, but no
+   transcript scan, index build, host wiring, or plugin adoption follows without consent.
+2. **Package, target, plugin, and data ownership stay separate.** Ak updates or removes only its
+   receipted npm package and exact per-host targets. Upstream `wiring.json`, binary presence, and
+   host-plugin presence are observations, not ownership receipts.
+3. **Enabled hosts select explicit targets.** Ak never delegates scope to deja-vu's `--all` or
+   aggregate `--auto` discovery. MCP is the default; automatic event injection is a second,
+   per-host consent.
+4. **Indexing preserves guidance ownership.** Target installs use `--no-guidance --no-index`, then
+   ak runs one bounded `deja index` when required. It does not call `deja warmup`, which also writes
+   deja's CLI skill, and uses `index --rebuild` only for diagnosed corruption.
+5. **Verification is schema- and evidence-driven.** Normal status parses
+   `deja doctor --json --offline` schema version 2 and independently observes host wiring/plugin
+   facts. Doctor exit zero alone is not health, and unknown additive fields remain compatible.
+6. **Removal has three scopes.** Wiring removal is ordinary; owned package removal is explicit;
+   data purge is separately previewed and confirmed. Source transcripts and primary notes,
+   exclusions, tombstones, policy, peers, and imported history are preserved by default. An
+explicit index purge can still destroy imported-only material whose sole copy is in that index.
+
+## Managed Ruflo browser executor boundary
+
+[ADR-0043](adr/0043-managed-ruflo-browser-executor.md) applies the same ownership discipline to
+Ruflo's current browser executor without making it a companion or installing another plugin/skill
+catalog. Its exact compatible package, native binary, trusted MCP-only config, and browser payload
+are separate facts. Existing compatible packages stay external; incompatible external packages
+are preserved, and status lists the options: install a compatible 0.27.x yourself, or set
+`agentBrowser: false`. Normal detection never runs `agent-browser doctor` or launches Chrome. Package
+removal is receipt-gated, while browser/session/profile data is always preserved.
+
+## Managed ruflo components
+
+[ADR-0058](adr/0058-managed-ruflo-components.md) applies the same ownership discipline to a set of
+opt-in ruflo capabilities that ship off by default: two agent pickers, MCP tool governance, the
+learning profile, MetaHarness turn-credit, a memory durability fix, and ruflo's promotional
+funnel. `ak setup` and `ak sync` apply the managed value for each component the installed ruflo
+version supports; `ak status` reports the real state, never a bare label.
+
+| Component | Managed value | Minimum ruflo | Applied by |
+| --- | --- | --- | --- |
+| Typesafe agent picker | on | 3.43.0 | global `@ruvector/typesafe` package + `CLAUDE_FLOW_ROUTER_TYPESAFE=1` |
+| MiniLM agent picker | on | 3.44.0 | `CLAUDE_FLOW_ROUTER_EMBEDDER=minilm` |
+| MCP tool governance | on; 120 calls/min, audit on | 3.42.0 | project `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` (enforced on stdio launches from Ruflo 3.46.0) |
+| Learning profile | `balanced` | 3.42.1 | `RUFLO_INTELLIGENCE_MODE=balanced` |
+| MetaHarness turn-credit | on | 3.36.0 | nothing to apply; ak confirms ruflo's bundled dependency resolves |
+| Memory durability fix (#2887) | on | 3.36.0 | nothing to apply; ak confirms `@claude-flow/memory` ≥ 3.0.0-alpha.22 |
+| Ruflo funnel (promotions) | off | any ruflo with `ruflo funnel` | `ruflo funnel disable` |
+| Encryption at rest | — | — | not managed yet; waits on ADR-0059 and is left out of the "N of M active" count |
+
+Opt out of any component in `kit.json`:
+
+```json
+{ "rufloComponents": { "minilmPicker": false, "learningProfile": "edge", "funnel": true } }
+```
+
+`false` means "ak does not manage this component" — the next `ak sync` restores, by receipt,
+whatever value existed before ak changed it; until it runs, `ak status` shows the component as
+`not applied` with that sync as its fix. `funnel` is inverted: `true` means "leave ruflo's funnel
+alone" (ak's managed value is off), and the next `ak sync` re-enables the funnel if ak was the one
+that disabled it. Turning `typesafePicker` off removes its environment variable but keeps the
+`@ruvector/typesafe` package; only `ak uninstall --purge` removes a package ak installed.
+
+A value ak did not write is never overwritten: a variable you set yourself, or one of ak's values
+you changed afterwards, is reported `user-managed` and kept, and ak still applies the other
+components in the same settings file. If you delete a value ak set, `ak status` reports it
+`drifted` and the next `ak sync` puts it back.
+
+The governance policy file is enforced only when it carries ak's own `_about` marker; a
+project's own pre-existing `.harness/mcp-policy.json` is left alone and reported `user-managed`.
+Ruflo 3.46.0 and newer apply the policy on the stdio MCP launches Claude Code, Codex and OpenCode
+use: calls beyond the cap are refused and every call is audited. Older Ruflo does not apply it on
+those launches, so there the component reports `unknown`, because no audit records appear. ak
+keeps its own policy file out of git with one line in the repository's `.git/info/exclude`
+(never `.gitignore`, and never the whole `.harness/` folder, which other tools use for files they
+commit); removing the policy removes that line.
+
+Every state `ak status`, `ak setup`, and the dashboard show carries its meaning and, where one
+applies, the fix:
+
+| State | Meaning | Action |
+| --- | --- | --- |
+| `active` | Applied and confirmed by ruflo's own evidence. | none |
+| `applied, not verified` | Set, but not yet confirmed — usually the hosts have not restarted. | restart Claude Code, Codex and OpenCode |
+| `needs ruflo ≥ X` | The installed ruflo is too old for this component. | `ak sync` upgrades ruflo |
+| `not applied` | ak has not applied the managed value yet. | `ak sync` |
+| `drifted` | A value ak set was removed. | `ak sync` restores it, or set the component to `false` to leave it out |
+| `user-managed` | You set your own value or opted out; ak reports it and leaves it alone. | none |
+| `partial` | Applied for some hosts only; the ones missing are named. | shown per host |
+| `blocked` | Applying failed; the reason is shown. | the specific next step |
+| `not yet managed` | ak does not manage this yet (encryption at rest, ADR-0059). | none |
+| `unknown` | No current evidence, so ak does not claim the component is on. | `ak status --refresh` |
+
+Restart Claude Code, Codex and OpenCode after a setup or sync that changes any component —
+hosts read their environment at start-up, so a component stays `applied, not verified` until a
+new session and ruflo's own check confirm it. See
+[Ruflo components](adr/0058-managed-ruflo-components.md) for the full design, and
+[Troubleshooting](troubleshooting.md) for governance that stays `unknown` and stuck
+`applied, not verified` rows.
+
+## Where each piece lives
+
+- **npm tools** — `src/lib/versions.mjs` (`installedVersion`, `driftReport`,
+  `selfDrift`), heals in `src/lib/heal.mjs` (`upgradePackage`, `selfUpdate`).
+- **hosts** — `src/lib/providers.mjs` (`hostInstallState`, `installHost`,
+  `updateHost`, `hostDrift`).
+- **agentdb** — `src/lib/agentdb.mjs` (`bundledVersion`, read-only). A standalone
+  global `agentdb` is not ak's: ak neither installs, repins, monitors nor removes it.
+- **agent-browser** — `src/lib/agent-browser.mjs` (Node-aware exact version,
+  native verification, trusted MCP config, receipt-gated teardown); lifecycle
+  rationale in [ADR-0043](adr/0043-managed-ruflo-browser-executor.md).
+- **ruflo components** — `src/lib/ruflo-components/` (catalogue, states, `kit.json` intent,
+  the owned Claude/Codex/OpenCode environment projection, the governance policy file, evidence
+  collection and classification, apply/reconcile, uninstall teardown); surfaced in
+  `src/commands/status/sections/ruflo-components.mjs` and the dashboard's Overview > Runtime
+  panel; design in [ADR-0058](adr/0058-managed-ruflo-components.md).
+- **ruvnet-brain** — `src/lib/ruvnet-brain.mjs` (`installedReleaseOnDisk`,
+  `latestVersion`, `classifyDrift`, `drift`, nightly-agent detection), heals
+  `installRuvnetBrain` / `disableRuvnetBrainNightly`. Full background on its
+  three version namespaces and the installer's `--yes` gotcha: docs/maintainer.md.
+- **deja-vu companion** — lifecycle and upstream-version boundary in
+  [ADR-0035](adr/0035-managed-deja-vu-companion.md); implementation follows the common adapter and
+  managed-version seams rather than adding a host/provider registry member.
+- **display surfaces** — `src/commands/status.mjs` (rows),
+  `src/templates/statusline-footer.cjs` (chips),
+  `src/lib/dashboard-server.mjs` (cards from the same rows; banner =
+  `driftReport` + `selfDrift` fold + `foldBrainDrift`).
+
+## Adding a new tool: the checklist
+
+1. **Install a published artifact** (npm release, tagged release asset) —
+   never a moving branch head. If the installer takes a version, resolve the
+   target version *first*, install it pinned, and only then record it.
+2. **Decide the version authority** and keep both sides of the drift check in
+   that one namespace. Document the authority if it isn't npm-latest.
+3. **Read installed state from disk** in a way that survives out-of-band
+   changes. If the tool stamps its own version on disk, prefer that stamp;
+   keep any ak-side record as a fallback only.
+4. **Make sync the only updater.** If the tool ships auto-update machinery,
+   suppress it at install time and detect + disable it as drift (its own
+   subsystem, so sync's fix is proportionate — never a forced reinstall).
+   If ak can't own updates (external install), report installed-only and
+   `outdated: false`.
+5. **Wire all the surfaces**: a `status` row (with the fix named), the
+   statusline only if the tool has a footer row, a dashboard card (free —
+   cards render status rows), and the dashboard banner (fold into the drift
+   array if the tool isn't in `driftReport`).
+6. **Lock it with tests**: the install spec + suppression flags (regression
+   lock), the disk-read parser's edge cases (missing / malformed / junk),
+   and the display resolution order.
+
+## Appendix — the observed failures behind the contract
+
+Each invariant exists because its failure mode was observed live, not
+hypothesized: a version stamp disagreeing with what was actually on disk; a
+statusline showing a different version than `ak status`; a third-party
+self-updater rewriting managed files behind ak's back; an "update available"
+banner that stayed silent for tools it didn't know about; and the original
+ruvnet-brain drift bug — a cross-namespace comparison (plugin semver
+`0.5.0-dev` vs release tag `3.0.1`) that could never converge, the live case
+behind invariant 3.

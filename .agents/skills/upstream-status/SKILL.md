@@ -70,4 +70,4 @@ is the daily workflow's command, so never run it without `--dry-run`.
   `--since` selects by the event's date; `--recorded-since <iso-time>` selects what the runs since
   then recorded (a notice's last line gives its run's time).
 
-Details: `docs/UPSTREAM-WATCH.md`.
+Details: `docs/upstream-watch.md`.

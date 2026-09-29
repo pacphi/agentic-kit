@@ -7,7 +7,7 @@
 // The parity gate below therefore reads the AUTHORITATIVE REGISTRIES, not a list kept here:
 // the host registry (src/lib/adapters), the managed-tool catalog the System area measures
 // (src/lib/footprint/install.mjs), and the maintainer contract's own tools table
-// (docs/MANAGED-TOOLS.md). Three independent authorities, all of which a new tool must pass
+// (docs/managed-tools.md). Three independent authorities, all of which a new tool must pass
 // through, so no single omission can let it ship uncarded. The reverse direction is checked
 // against ak's own source: a card for a package ak never installs, or a "configured surface"
 // naming a command ak does not ship, is a lie the same gate fails on.
@@ -60,9 +60,9 @@ const resolveEntries = (index, key) => [...(index.get(key) ?? [])];
  *  exists to catch. An empty parse fails the test — a restructured doc must be re-read, not
  *  silently believed. */
 function managedToolsDocRows() {
-  const doc = readFileSync(path.join(ROOT, 'docs/MANAGED-TOOLS.md'), 'utf8');
+  const doc = readFileSync(path.join(ROOT, 'docs/managed-tools.md'), 'utf8');
   const section = doc.split(/^## /m).find((part) => part.startsWith('The tools'));
-  assert.ok(section, 'docs/MANAGED-TOOLS.md must still have a "## The tools" section');
+  assert.ok(section, 'docs/managed-tools.md must still have a "## The tools" section');
   return [...section.matchAll(/^\|\s*\*\*(.+?)\*\*/gm)].map((match) => match[1].trim());
 }
 
@@ -170,7 +170,7 @@ test('deja-vu is an authored package card without machine paths or raw history c
 test('the managed-tools contract names no tool the directory omits', () => {
   const index = identityIndex();
   const rows = managedToolsDocRows();
-  assert.ok(rows.length >= 5, `docs/MANAGED-TOOLS.md tools table parsed to ${rows.length} rows`);
+  assert.ok(rows.length >= 5, `docs/managed-tools.md tools table parsed to ${rows.length} rows`);
 
   const missing = [];
   for (const row of rows) {
@@ -179,7 +179,7 @@ test('the managed-tools contract names no tool the directory omits', () => {
     if (!resolveEntries(index, key).length) missing.push(`${row} (looked up as '${key}')`);
   }
   assert.deepEqual(missing, [],
-    'MANAGED-TOOLS.md documents these tools but About introduces none of them');
+    'managed-tools.md documents these tools but About introduces none of them');
 
   // The family row is the one that cannot resolve by name; prove it is covered by ids.
   assert.equal(
@@ -282,7 +282,7 @@ test('taglines stay inside their ten-word budget and read as one line', () => {
 
 test('each paragraph is ONE paragraph inside the ~50-word band', () => {
   for (const entry of ENTRIES) {
-    // The card's height is designed around this band (docs/assets/about-tab-mock.html); a
+    // The card's height is designed around this band (docs/archive/2026-08-08-artifact-about-tab-mock.html); a
     // paragraph outside it either says nothing or turns the card back into documentation.
     const count = words(entry.paragraph).length;
     assert.ok(count >= 40 && count <= 58,

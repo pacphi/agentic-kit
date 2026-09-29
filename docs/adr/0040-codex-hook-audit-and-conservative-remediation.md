@@ -8,7 +8,7 @@
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [ADR-0027](0027-shared-project-census.md),
   [ADR-0029](0029-host-adapter-extension-point.md)
-- **Evidence:** [2026-09-01 hook audit](../audits/codex-hooks-audit-2026-09-01.md)
+- **Evidence:** [2026-09-01 hook audit](../archive/2026-09-01-audit-codex-hooks.md)
 - **Extended by:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md)
 
 ## Current implementation boundary (2026-09-09)

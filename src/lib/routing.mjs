@@ -70,7 +70,7 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 
 // ── Model catalog ────────────────────────────────────────────────────────────
 // Known-good model choices per host, surfaced as help in `ak x host pick`,
-// `--help`, and docs/PROVIDERS.md. NOT a hard allow-list: any model your host CLI
+// `--help`, and docs/providers.md. NOT a hard allow-list: any model your host CLI
 // accepts also works — these are ak's curated picks. Web-verified on the date
 // below; model lines move fast, so re-check and let users override (ADR-0002/0003).
 // Notes must state work-per-task, not only price: a note that compares cost

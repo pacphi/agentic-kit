@@ -3,7 +3,7 @@
 - **Status:** Accepted (implementation in progress — see Implementation status)
 - **Date:** 2026-09-23
 - **Updated:** 2026-09-23 — accepted after maintainer review; implementation plan at
-  [docs/superpowers/plans/2026-09-23-managed-ruflo-components.md](../superpowers/plans/2026-09-23-managed-ruflo-components.md)
+  [2026-09-23-superpowers-plan-managed-ruflo-components.md](../archive/2026-09-23-superpowers-plan-managed-ruflo-components.md)
 - **Updated:** 2026-09-23 — implementation status refreshed against the merged branch commits
   (catalogue through the dashboard panel); §7's picker evidence corrected (the route probe's
   `embedder=` marker and `doctor -c typesafe`, not a per-picker routed-count stat ruflo does not

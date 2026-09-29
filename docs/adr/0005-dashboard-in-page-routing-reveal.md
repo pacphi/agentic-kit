@@ -102,7 +102,7 @@ Surface routing via **in-page reveal**, not a new page or tab:
 - `src/lib/dashboard-server.mjs` (`renderPage`, `#cards`, `#history`/`renderHistory`, `PREF`, `shellOutStatus`)
 - `src/lib/dashboard/page.mjs` and `src/lib/dashboard/client.mjs` (five-area shell, shared secondary
   rail, canonical hashes, headings, and keyboard semantics)
-- [Dashboard user guide](../DASHBOARD.md)
+- [Dashboard user guide](../dashboard.md)
 - [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) (implemented Maintenance action
   boundary)
 - Mockup: ak dashboard — Routing panel; ADR-0001, ADR-0003

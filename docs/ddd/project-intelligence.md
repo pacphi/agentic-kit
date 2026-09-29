@@ -64,7 +64,7 @@ shares across contexts — `JsonlTailer`, `sseChannel`, `reserveClientSlot`/`cli
 `transcriptSseFrame` — never Observability's canonical normalizer, `ObservedSession` aggregate, or
 replay/snapshot cursor. `GET /api/live/intelligence` shares the `/api/live/*` path prefix with
 Observability's endpoints by transport convention only; it is not covered by
-[OBSERVABILITY.md](../OBSERVABILITY.md)'s evidence, privacy, or capability-coverage contract, and it
+[observability.md](../observability.md)'s evidence, privacy, or capability-coverage contract, and it
 needs no `--live-source` registration because its sources are always a discovered project's own,
 never a remote or unregistered one.
 
@@ -278,4 +278,4 @@ support, the stream — both paths resolve the same selected project and return 
 - [ADR-0024](../adr/0024-project-intelligence-telemetry.md)
 - [Observability](observability.md) — the bounded context this domain is deliberately distinct from
 - [Context map](context-map.md)
-- [Dashboard guide](../DASHBOARD.md)
+- [Dashboard guide](../dashboard.md)

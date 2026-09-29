@@ -404,7 +404,7 @@ unchanged; `kind` is deliberately broader on the image-only edge, because "not c
 prompt" and "not the human" are different claims. Codex user-message events can also contain harness or mirrored context. Current
 parsers apply the provenance gates documented by ADR-0038/0039; role alone does not
 establish a human prompt. Full mechanics:
-[`docs/TRANSCRIPTS.md`](../TRANSCRIPTS.md).
+[`docs/transcripts.md`](../transcripts.md).
 
 > **Proposed extension in [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md)
 > (2026-07-27):** this section's principle — *withheld content announces itself* — was scoped to
@@ -483,7 +483,7 @@ two evidence streams requires a new decision and fixtures from both sides.
 
 ## References
 
-- **[`docs/USAGE-SCORECARD-METRICS.md`](../USAGE-SCORECARD-METRICS.md)** — the maintainer-facing
+- **[`docs/usage-scorecard-metrics.md`](../usage-scorecard-metrics.md)** — the maintainer-facing
   metrics reference: every Scorecard-tab figure's exact formula, source-line citation, worked
   example, and external pricing citation, added 2026-07-25 after a user-reported Codex-vs-Claude
   cost discrepancy traced to two real bugs in `parseCodex` (fixed same day). Read that document to

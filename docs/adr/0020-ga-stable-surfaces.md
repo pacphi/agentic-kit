@@ -83,7 +83,7 @@ its actual inference provider is independently observed.
 | Templates, route overrides, concurrency, timeout, JSON output, escalation, and error behavior | **Migrate.** `ak run` preserves them through templates, repeatable `--route`, `--max-concurrent`, `--timeout`, `--json`, `--escalate`, and structured worker results; it is concurrent by default and uses `--max-concurrent 1` for sequential execution. |
 | Active help, templates, operational docs, dashboard copy, and examples | **Migrate.** Render only GA commands and canonical fields. |
 | Historical ADR vocabulary | **Retain as history.** Each affected ADR points to this implemented decision. |
-| Upgrade and GA release guidance | **Retain once.** `docs/UPGRADING.md` is the sole active compatibility vocabulary. |
+| Upgrade and GA release guidance | **Retain once.** `docs/upgrading.md` is the sole active compatibility vocabulary. |
 | npm package source enumeration and ignored/generated workspace artifacts | **Migrate.** The manifest excludes hidden QE/runtime state and the build gate rejects generated or private artifacts in the dry-run tarball. |
 
 ## Consequences

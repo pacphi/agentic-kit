@@ -95,7 +95,7 @@
   [ADR-0047](0047-streaming-observation-forest.md)
 - **Documentation update (2026-09-08):** Experimental design and mockup records are archived;
   live acceptance criteria, language coverage and the proposed project-metadata adapters remain maintained.
-- **Current release gates:** [Maintenance acceptance](../MAINTENANCE-ACCEPTANCE.md)
+- **Current release gates:** [Maintenance acceptance](../maintenance-acceptance.md)
 - **Historical design:** [Archived maintenance overhaul package](../archive/2026-09-04-design-maintenance-overhaul-overview.md)
 
 ## Status of the governed system
@@ -112,7 +112,7 @@ source implementations and named automated tests within their recorded scope (se
 The Focus browser amendment approved on 2026-09-08 is implemented and passes focused verification; the
 approved prototype establishes interaction intent, not production or adapter completeness. It is not
 yet Implemented in this record's own sense, because the
-[live acceptance criteria](../MAINTENANCE-ACCEPTANCE.md)'s human-evaluation and
+[live acceptance criteria](../maintenance-acceptance.md)'s human-evaluation and
 cross-platform acceptance gates have not run on this machine. The dashboard's Maintenance panel now
 renders this ADR's Inventory/Guidance/Discovery/Activity workspace; ADR-0044's v1 HTTP routes and
 CLI verbs remain available as a documented compatibility surface until those gates pass and this
@@ -466,7 +466,7 @@ consequential, actionable conditions.
 Implementation proceeds through separately gated slices: contracts and fixtures; read-only
 management projection; Discovery and resumable scans; Inventory and Guidance; existing action
 migration; interruption audit; exact model removal; Catalog redirects and retirement. The detailed
-[acceptance criteria](../MAINTENANCE-ACCEPTANCE.md) define the current gates; the
+[acceptance criteria](../maintenance-acceptance.md) define the current gates; the
 [archived migration plan](../archive/2026-09-04-design-maintenance-overhaul-migration-plan.md) preserves the original sequence.
 
 This ADR moves from Proposed to Accepted only after the schema, interaction prototype, provider

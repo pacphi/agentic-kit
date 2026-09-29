@@ -1,6 +1,6 @@
 name: upstream-watch
 
-# The upstream watch (docs/UPSTREAM-WATCH.md, decision 15). The script decides
+# The upstream watch (docs/upstream-watch.md, decision 15). The script decides
 # everything: the window, the new records, the dispatch firings and the notice
 # text. This workflow pushes the ledger commit the script built, posts the
 # notice as a commit comment on it, and fails the run when a read or a

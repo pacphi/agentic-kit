@@ -357,27 +357,27 @@ test('COST_AXIS_NOTE contrasts the per-token and per-task axes by name', () => {
   assert.match(COST_AXIS_NOTE, /per[-\s]task/i);
 });
 
-// ── docs/PROVIDERS.md renders the catalog — keep the two from drifting ──────
+// ── docs/providers.md renders the catalog — keep the two from drifting ──────
 
 test('provider guide directs model selection to current evidence without copying unsupported benchmarks', () => {
-  const doc = fs.readFileSync(path.join(PKG_ROOT, 'docs', 'PROVIDERS.md'), 'utf8');
+  const doc = fs.readFileSync(path.join(PKG_ROOT, 'docs', 'providers.md'), 'utf8');
   assert.match(doc, /ak models refresh/);
   assert.match(doc, /ak host pick --help/);
   assert.match(doc, /not a\s+benchmark or entitlement guarantee/);
   assert.doesNotMatch(doc, /~2–3×|roughly half the agentic turns/);
 });
 
-test('docs/PROVIDERS.md documents every provider-axis (aqe-fallback) model by id', () => {
-  const doc = fs.readFileSync(path.join(PKG_ROOT, 'docs', 'PROVIDERS.md'), 'utf8');
+test('docs/providers.md documents every provider-axis (aqe-fallback) model by id', () => {
+  const doc = fs.readFileSync(path.join(PKG_ROOT, 'docs', 'providers.md'), 'utf8');
   for (const [prov, models] of Object.entries(PROVIDER_MODEL_CATALOG)) {
     for (const m of models) {
-      assert.ok(doc.includes(m.id), `docs/PROVIDERS.md never mentions ${prov} model ${m.id}`);
+      assert.ok(doc.includes(m.id), `docs/providers.md never mentions ${prov} model ${m.id}`);
     }
   }
 });
 
-test('docs/PROVIDERS.md states the per-token vs per-task caveat alongside the table', () => {
-  const doc = fs.readFileSync(path.join(PKG_ROOT, 'docs', 'PROVIDERS.md'), 'utf8');
+test('docs/providers.md states the per-token vs per-task caveat alongside the table', () => {
+  const doc = fs.readFileSync(path.join(PKG_ROOT, 'docs', 'providers.md'), 'utf8');
   assert.match(doc, PER_TOKEN_QUALIFIER);
   assert.match(doc, /per[-\s]task/i);
 });

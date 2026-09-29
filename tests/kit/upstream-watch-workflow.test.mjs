@@ -73,7 +73,7 @@ test('the trigger token reaches only the Record step, and the since input never 
 });
 
 test('the docs describe the ledger branch, commit-comment notices and the API trigger', () => {
-  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8').replace(/\r\n/g, '\n');
+  const doc = fs.readFileSync('docs/upstream-watch.md', 'utf8').replace(/\r\n/g, '\n');
   const daily = doc.slice(doc.indexOf('## The daily workflow'), doc.indexOf('## The dispatch routine'));
   const routine = doc.slice(doc.indexOf('## The dispatch routine'));
   assert.match(daily, /`17 14 \* \* \*`/);
@@ -86,7 +86,7 @@ test('the docs describe the ledger branch, commit-comment notices and the API tr
 });
 
 test('current-state docs carry no trace of the comment ledger', () => {
-  for (const file of ['MAINTAINER.md', 'docs/ddd/ubiquitous-language.md', '.claude/skills/upstream-status/SKILL.md', '.agents/skills/upstream-status/SKILL.md']) {
+  for (const file of ['docs/maintainer.md', 'docs/ddd/ubiquitous-language.md', '.claude/skills/upstream-status/SKILL.md', '.agents/skills/upstream-status/SKILL.md']) {
     const text = fs.readFileSync(file, 'utf8');
     for (const stale of [/#243/, /upstream-dispatch/, /ledger\.authors/, /upstream-watch\.mjs comment/, /--ledger /, /locked "Upstream watch"/]) {
       assert.doesNotMatch(text, stale, `${file}: ${stale}`);

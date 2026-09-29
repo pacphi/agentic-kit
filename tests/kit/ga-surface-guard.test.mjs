@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const UPGRADE = path.join(ROOT, 'docs', 'UPGRADING.md');
+const UPGRADE = path.join(ROOT, 'docs', 'upgrading.md');
 const MIGRATION_HEADING = '## 4.0 GA surface migration';
 
 const retired = [
@@ -81,7 +81,7 @@ function stripJavaScriptComments(text) {
 test('active docs, generated guidance, and rendered help contain only GA surfaces', () => {
   const activeDocs = [
     path.join(ROOT, 'README.md'),
-    path.join(ROOT, 'MAINTAINER.md'),
+    path.join(ROOT, 'docs/maintainer.md'),
     path.join(ROOT, 'AGENTS.md'),
     path.join(ROOT, 'CLAUDE.md'),
     path.join(ROOT, 'docs', 'adr', 'README.md'),
@@ -242,7 +242,7 @@ test('GA-amended ADRs carry living-plan metadata', () => {
 });
 
 test('maintainer command and package inventories match the stable manifest', () => {
-  const maintainer = fs.readFileSync(path.join(ROOT, 'MAINTAINER.md'), 'utf8');
+  const maintainer = fs.readFileSync(path.join(ROOT, 'docs/maintainer.md'), 'utf8');
   assert.doesNotMatch(
     maintainer,
     /\*\*(?:Porcelain|Plumbing)\*\*[^\n]*`(?:dual|provider)`/,

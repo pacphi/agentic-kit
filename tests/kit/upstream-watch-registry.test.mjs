@@ -21,7 +21,7 @@ const ids = (text) => findCitations(text).map((citation) => citation.id);
 const SYNTHETIC = new Map([
   ['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']],
   // A placeholder id in an example command, not a real thread.
-  ['ruvnet/ruflo#1234', ['docs/AUTHORING-HOST-ADAPTERS.md']],
+  ['ruvnet/ruflo#1234', ['docs/authoring-host-adapters.md']],
 ]);
 // The watch tooling's own tests and fixtures spell citations as data.
 const SELF_CITING = ['tests/kit/upstream-watch-', 'tests/fixtures/upstream-watch/'];
@@ -270,13 +270,13 @@ test('every watched-repository thread cited in tracked source or user-facing doc
 
 test('user-facing docs are scanned; history and research are exempt by name', () => {
   const docs = userFacingDocs(process.cwd());
-  assert.ok(docs.includes('README.md') && docs.includes('docs/HOST-SUPPORT.md') && docs.includes('docs/UPSTREAM-WATCH.md'));
+  assert.ok(docs.includes('README.md') && docs.includes('docs/host-support.md') && docs.includes('docs/upstream-watch.md'));
   for (const [file, reason] of USER_DOC_EXEMPT) {
     assert.ok(!docs.includes(file), file);
     assert.ok(fs.existsSync(file), `${file} no longer exists; drop its exemption`);
     assert.match(reason, /\w/);
   }
-  assert.ok(docs.every((file) => file === 'README.md' || /^docs\/[^/]+\.md$/.test(file)), 'only top-level guides; ADRs, audits, plans and research are history');
+  assert.ok(docs.every((file) => file === 'README.md' || /^docs\/[^/]+\.md$/.test(file)), 'only top-level guides; subfolders are records, plans, proposals or history');
 });
 
 test('every kit file a watch entry names exists and still cites the thread', () => {
@@ -302,7 +302,7 @@ test('every registered id is in a watched repository, spelled canonically', () =
 // even before any source cites it (the citation guard cannot see it then).
 // The audit record's list of filed upstream evidence is the source of truth.
 test('every upstream thread the audit record lists as filed is registered', () => {
-  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8');
+  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8');
   const start = audit.indexOf('### Item 6 — new upstream evidence');
   const item6 = audit.slice(start, audit.indexOf('\n### ', start + 1));
   const filed = [...new Set(ids(item6))];
@@ -312,7 +312,7 @@ test('every upstream thread the audit record lists as filed is registered', () =
 });
 
 test('the audit record carries the Branch 4 decisions in decision format', () => {
-  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
   const start = audit.indexOf('## Branch 4 decisions');
   assert.ok(start > 0);
   const next = audit.indexOf('\n## ', start + 1);
@@ -338,7 +338,7 @@ test('an invalid support window invalidates the registry', () => {
 });
 
 test('the audit record carries the Branch 5 decisions in decision format', () => {
-  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
   const start = audit.indexOf('## Branch 5 decisions');
   assert.ok(start > 0);
   const next = audit.indexOf('\n## ', start + 1);
@@ -351,7 +351,7 @@ test('the audit record carries the Branch 5 decisions in decision format', () =>
 });
 
 test('the audit record carries decision 15 in decision format', () => {
-  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
   const start = audit.indexOf('## Decision 15 ');
   assert.ok(start > 0);
   const section = audit.slice(start);

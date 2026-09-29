@@ -3,9 +3,9 @@
 // reappear in help text, README, docs, or the installed `claude/` guidance.
 //
 // Scope: src/** (comments included — they must describe current CLI
-// behaviour), bin/**, claude/**, README.md, and docs/**/*.md except
-// docs/adr/, docs/audits/, docs/superpowers/, and docs/research/ (history
-// lives there and may still name retired spellings). In
+// behaviour), bin/**, claude/**, README.md, and living top-level docs/*.md.
+// docs/adr/, docs/archive/, docs/plans/, and docs/proposals/ are records that
+// may preserve retired spellings. In
 // src/lib/hook-audit/agentic-dependency-constraints.json only the dated
 // watch[].history[].note strings are skipped — every other string, including
 // `adjustment`, is scanned like any other source text.
@@ -55,7 +55,7 @@ const RETIRED_CLI_PATTERNS = [
   { label: 'ak status/system […] --deep|--live (bracketed options before the flag)',
     pattern: /\b(?:status|system)\s+(?:\[[^\]\n]*\]\s*)*\[?--(?:deep|live)\b/g },
   // `ak usage prompts --deep` behind unrelated prose on the same line (the
-  // USAGE-SCORECARD-METRICS.md line the original guard missed had no direct
+  // usage-scorecard-metrics.md line the original guard missed had no direct
   // `prompts --deep` adjacency at all).
   { label: 'ak usage prompts …--deep (flag anywhere on the same line)', pattern: /\bprompts\b[^\n]*\[?--deep\b/g },
 ];
@@ -144,7 +144,7 @@ function registryViolations() {
 
 function scopeFiles() {
   const docsRoot = path.join(ROOT, 'docs');
-  const docsExclude = ['adr', 'audits', 'superpowers', 'research'].map((dir) => path.join(docsRoot, dir) + path.sep);
+  const docsExclude = ['adr', 'archive', 'plans', 'proposals'].map((dir) => path.join(docsRoot, dir) + path.sep);
   const files = [
     path.join(ROOT, 'README.md'),
     ...listFiles(path.join(ROOT, 'src')),

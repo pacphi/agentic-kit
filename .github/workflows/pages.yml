@@ -1,6 +1,6 @@
 name: pages
 
-# Publishes explainer.html as the repo's GitHub Pages site
+# Publishes docs/explainer.html as the repo's GitHub Pages site
 # (https://pacphi.github.io/agentic-kit/). The file on main is the single
 # source of truth — this workflow just renames it to index.html at deploy
 # time, so nothing is committed twice and no gh-pages branch exists.
@@ -9,7 +9,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'explainer.html'
+      - 'docs/explainer.html'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -32,10 +32,10 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
-      - name: Stage site (explainer.html -> index.html)
+      - name: Stage site (docs/explainer.html -> index.html)
         run: |
           mkdir -p _site
-          cp explainer.html _site/index.html
+          cp docs/explainer.html _site/index.html
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

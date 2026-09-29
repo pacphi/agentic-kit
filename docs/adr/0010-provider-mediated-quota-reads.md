@@ -2,7 +2,7 @@
 
 - **Updated:** 2026-09-28 — Codex's quota is requested only when the last recorded `host-setup`
   evidence says Codex was found (Ruling R9 of
-  [the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)), never by
+  [the branch 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md)), never by
   probing: `readLimits` (`src/lib/quota.mjs`) reads `recordedHostPresence('codex', …)`
   (`src/lib/providers.mjs`), and `/api/limits` goes through it — its only caller
   (`dashboard-server.mjs:1142`); `ak status` does not import `quota.mjs`. `not-found` and

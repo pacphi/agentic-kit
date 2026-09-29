@@ -427,7 +427,7 @@ only for the owner running the CLI. `--actions` accepts exactly one id; more tha
 
 The fourteen invariants below describe the implemented management contract and its enforcement
 points. The broader acceptance gates remain tracked separately in
-[Maintenance acceptance](https://github.com/pacphi/agentic-kit/blob/main/docs/MAINTENANCE-ACCEPTANCE.md):
+[Maintenance acceptance](https://github.com/pacphi/agentic-kit/blob/main/docs/maintenance-acceptance.md):
 
 1. Every actionable row identifies one exact placement — `planner.mjs`/`coordinator.mjs`'s
    `ONE_ACTION_PER_PLAN` refusal before any provider call, lock, or journal write.

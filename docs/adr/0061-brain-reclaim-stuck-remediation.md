@@ -5,7 +5,7 @@
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (machine-footprint metrics; this
   record deliberately does not add a new footprint subsystem there — see §4),
-  the [issues 237–239 audit record](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)
+  the [issues 237–239 audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)
   (Decision 4, the Brain hook-contract warning this record does not touch), upstream
   [stuinfla/ruvnet-brain#335](https://github.com/stuinfla/ruvnet-brain/issues/335) (filed
   2026-09-27, with a follow-up comment recording the workaround verified here)
@@ -106,13 +106,13 @@ refusal forever.
   `--reclaim`/prune command, this record's remediation text should be revisited to prefer it
   (cheaper — no full re-download, and it can reason about directories this session could not
   prove safe by hand, like `kb.install-preserved-69VtSI`).
-- `docs/TROUBLESHOOTING.md`'s existing row for "`ruvnet-brain … retained; the refresh … was
+- `docs/troubleshooting.md`'s existing row for "`ruvnet-brain … retained; the refresh … was
   refused`" is updated in the same change to describe both the generic case and this specific
   one, so the docs-alignment gate stays honest.
 
 ## Implementation status
 
 Implemented in this branch: `BRAIN_RECLAIM_STUCK` export, `legacySnapshotBytes()`, the
-`brainReleaseRow()` branch, `docs/TROUBLESHOOTING.md` update, and tests covering classification,
+`brainReleaseRow()` branch, `docs/troubleshooting.md` update, and tests covering classification,
 the unchanged generic-refusal path, the post-uninstall install-routing behavior, and
 `legacySnapshotBytes()` against a fixture directory.

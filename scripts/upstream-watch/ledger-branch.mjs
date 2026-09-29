@@ -20,7 +20,7 @@ node scripts/upstream-watch.mjs ledger --since 2026-09-01
 git fetch origin upstream-watch-ledger && git show origin/upstream-watch-ledger:events.ndjson
 \`\`\`
 
-How it works: \`docs/UPSTREAM-WATCH.md\` on \`main\`.
+How it works: \`docs/upstream-watch.md\` on \`main\`.
 `;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;

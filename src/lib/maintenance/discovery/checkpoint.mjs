@@ -1,6 +1,6 @@
 // ADR-0048 scan checkpoints — the bounded, owner-private, integrity-sealed
 // continuation record a resumable discovery scan writes after every partition
-// or work slice (docs/MAINTENANCE.md
+// or work slice (docs/maintenance.md
 // "Work slices and safety ceilings"). It never persists a per-file index: only partition
 // ids, bounded cursors, and stamps small enough to stay well under the size
 // ceiling (MNT-PERF-005).

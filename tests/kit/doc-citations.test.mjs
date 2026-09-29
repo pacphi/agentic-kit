@@ -67,7 +67,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const DOCS = ['docs/USAGE-SCORECARD-METRICS.md', 'docs/TRANSCRIPTS.md'];
+const DOCS = ['docs/usage-scorecard-metrics.md', 'docs/transcripts.md'];
 // A citation is "fresh" if an anchor lands within the range widened by this
 // many lines each way — small drift stays readable; structural moves fail.
 const TOLERANCE = 10;

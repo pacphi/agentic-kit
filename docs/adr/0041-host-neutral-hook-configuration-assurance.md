@@ -39,7 +39,7 @@
   [ADR-0031](0031-capability-graduation-and-upstream-requests.md),
   [ADR-0032](0032-model-lifecycle-intelligence.md)
 - **DDD:** [Hook configuration assurance](../ddd/hook-configuration-assurance.md)
-- **Evidence:** [Host-neutral follow-up](../audits/host-neutral-hooks-follow-up-2026-09-01.md)
+- **Evidence:** [Host-neutral follow-up](../archive/2026-09-01-audit-host-neutral-hooks-follow-up.md)
 
 **Implementation note (2026-09-02):** Hook read-model v3 groups repeated diagnostics by finding
 identity across hosts and lifecycle points, keeps evidence and actions on physical placements, and
@@ -246,7 +246,7 @@ ledger commit as `github-actions[bot]`, mentioning them. Dispatch of a released 
 dependency's removal proof; a cloud routine does it when the workflow fires its API trigger, and
 each firing is recorded. It never merges. Publishing upstream
 keeps the `explicit-user-approval-required` rule. Operating detail:
-[UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
+[upstream-watch.md](../upstream-watch.md).
 
 **Ruflo support window (2026-09-27).** ak supports the newest six Ruflo minors, and never fewer
 than the minors first published in the last 30 days: the floor is the older of the sixth-newest

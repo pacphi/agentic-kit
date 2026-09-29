@@ -1,7 +1,7 @@
 // ADR-0048 repository identity — the ONE bounded, skipDir-based git-project
 // detector shared by preview.mjs (advisory) and orchestrator.mjs (the real
 // scan), so a source is never described differently depending on which of the
-// two walked it (docs/MAINTENANCE.md
+// two walked it (docs/maintenance.md
 // "Sources"). A linked worktree and an initialized submodule share
 // the identical `.git` FILE shape ("gitdir: <path>"); only the referenced path
 // tells them apart, and a submodule is never its own project by default.

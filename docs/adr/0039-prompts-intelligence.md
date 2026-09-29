@@ -149,8 +149,8 @@ cross-platform suites continue to validate the retained telemetry.
 
 ## References
 
-- [Usage scorecard metrics](../USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§22
-- [Dashboard guide](../DASHBOARD.md) — Prompts
+- [Usage scorecard metrics](../usage-scorecard-metrics.md) §2a, §2b, §20–§22
+- [Dashboard guide](../dashboard.md) — Prompts
 - [Archived documents index](../archive/README.md)
 - `src/lib/usage-parsers.mjs`, `src/lib/usage-provenance.mjs`
 - `src/lib/usage-aggregate.mjs`, `src/lib/usage-insights.mjs`

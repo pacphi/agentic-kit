@@ -96,7 +96,7 @@ the AQE initializer while preserving user-authored CLAUDE.md/AGENTS.md content
 and reconciling only sentinel-owned guidance. Before starting Ruflo's project
 daemon it writes the flat daemon keys the installed Ruflo needs in
 .claude-flow/config.json and turns Ruflo's start-on-use on (kit.json
-rufloDaemon.autoStart: false leaves it alone). Details: docs/SETUP.md
+rufloDaemon.autoStart: false leaves it alone). Details: docs/setup.md
 
 Usage: ak setup [options]
 

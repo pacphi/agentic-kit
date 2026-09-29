@@ -27,7 +27,7 @@ Every existing dashboard area assumes the user already knows what these things *
   **System** ([ADR-0025](0025-machine-footprint-metrics.md)) their machine cost — all operational
   views of components the user is presumed to recognize.
 - The only place that *introduces* the components is prose documentation
-  ([MANAGED-TOOLS.md](../MANAGED-TOOLS.md), [SETUP.md](../SETUP.md)) — maintainer-register
+  ([managed-tools.md](../managed-tools.md), [setup.md](../setup.md)) — maintainer-register
   reference material, not a new user's first five minutes.
 
 A new user's first honest question is prior to all of that: **"what did this thing just put on
@@ -184,12 +184,12 @@ All complete:
   and the theme narrative.
 - The registry↔directory parity test ships in `tests/kit/about-directory.test.mjs`, checked in
   both directions against the managed-tools registry, the heal/detection paths, and
-  [MANAGED-TOOLS.md](../MANAGED-TOOLS.md).
+  [managed-tools.md](../managed-tools.md).
 
 ## Amendment 2026-09-26 — agentdb is the copy Ruflo bundles
 
 ak no longer installs, repins or monitors a standalone global `agentdb` (decision A in the
-[2026-09-26 audit](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)). The
+[2026-09-26 audit](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)). The
 agentdb entry stays in Engine & memory, because Ruflo's memory runs on it, but its paragraph now
 says it ships inside Ruflo, and both chips read Ruflo's bundled `agentdb/package.json` (`ak
 about` and the dashboard's version fold), never a global that may lag or belong to another
@@ -201,7 +201,7 @@ superseded.
 ## Amendment 2026-09-26 — install-edit line
 
 When ak has an applied install-edit receipt inside Ruflo's install (Addendum 2, problem 3 of the
-[2026-09-26 audit](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md); the
+[2026-09-26 audit](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md); the
 native SQLite pin, ruvnet/ruflo#2219), the ruflo card carries one line beside its chip: "ak applied
 Ruflo's native SQLite pin (ruvnet/ruflo#2219)", followed by the package, field and values. `ak about`
 reads it from the receipt ledger and the manifests it names, the same read the `natives` status row
@@ -212,11 +212,11 @@ never a verdict: it does not change the chip's state or word, and it adds no pro
 ## References
 
 - [Component directory domain](../ddd/component-directory.md) — the domain model and invariants
-- [Design mock-up](../assets/about-tab-mock.html) — self-contained both-theme HTML mock with
+- [Design mock-up](../archive/2026-08-08-artifact-about-tab-mock.html) — self-contained both-theme HTML mock with
   the full card grid, category sections, per-section design rationale, and an annotated card
   anatomy
-- [Managed tools](../MANAGED-TOOLS.md) — the registry this directory must stay in parity with
-- [Dashboard guide](../DASHBOARD.md)
+- [Managed tools](../managed-tools.md) — the registry this directory must stay in parity with
+- [Dashboard guide](../dashboard.md)
 - `src/lib/dashboard/about-directory.mjs` — the directory module (pure data plus accessors)
 - `src/commands/about.mjs` — the CLI twin
 - `tests/kit/about-directory.test.mjs` — the parity gate and the register-contract checks

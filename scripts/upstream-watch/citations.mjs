@@ -13,13 +13,11 @@ export const CITATION_DIRS = ['src', 'bin', 'claude', 'tests'];
 
 // User-facing documentation whose upstream citations must be registered too:
 // README.md and the top-level docs/*.md guides. CLI help lives in src/, which
-// CITATION_DIRS already covers. ADRs, audits, plans and research sit in
-// subfolders and are history, never scanned; these top-level files are
-// history too, so they are exempt by name.
+// CITATION_DIRS already covers. Subfolders are records, plans, proposals or
+// history and are exempt by location; docs/ddd and docs/schemas cite through
+// the source they describe.
 export const USER_DOC_EXEMPT = new Map([
-  ['docs/MODEL-PRICING-AUDIT.md', 'dated audit'],
-  ['docs/METAHARNESS-COMPANION-PROPOSAL.md', 'proposal'],
-  ['docs/USAGE-SCORECARD-METRICS.md', 'research reference'],
+  ['docs/usage-scorecard-metrics.md', 'research reference'],
 ]);
 
 /** README.md plus every top-level docs/*.md guide, minus the named exemptions. */
