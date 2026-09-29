@@ -121,13 +121,19 @@ export function reconcileClaudeMessages(records) {
   }
   for (const list of groups.values()) {
     if (list.length < 2) continue;
-    list.sort(compareClaims);
-    const winner = list[0];
+    // The fixed acquisition pool decides charges for the displayed and
+    // comparison windows. A deeper explicit lookback may reveal an older
+    // copy, but that copy cannot steal or enlarge an eligible charge. If no
+    // copy is eligible, reconcile the historical observations among themselves.
+    const eligible = list.filter(({ rec }) => rec.claudeIdentityEligible === true);
+    const owners = eligible.length ? eligible : list;
+    owners.sort(compareClaims);
+    const winner = owners[0];
     // Progressive snapshots can be split across copied files. Their
     // component-wise maxima are the complete observed usage, charged once to
     // the deterministic winner. The 1h tier cannot exceed total writes.
     const richest = Object.fromEntries(COMPONENTS.map((key) =>
-      [key, list.reduce((max, { claim }) => Math.max(max, claim.usage[key] ?? 0), 0)]));
+      [key, owners.reduce((max, { claim }) => Math.max(max, claim.usage[key] ?? 0), 0)]));
     richest.cacheWrite1h = Math.min(richest.cacheWrite1h, richest.cacheWrite);
     for (const item of list) alter(item.rec, item.claim, -1);
     alter(winner.rec, winner.claim, 1, richest);

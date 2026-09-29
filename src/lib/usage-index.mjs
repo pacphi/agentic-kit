@@ -352,13 +352,6 @@ function claudeParseHealth(root, common) {
   return { ...root, status: 'degraded', reason: 'transcript-parse-incomplete' };
 }
 
-function reconcileWithinIdentityHorizon(records, cutoff) {
-  const selected = records.filter((rec) => rec?.provider === 'claude' && rec.end >= cutoff);
-  const accounted = reconcileClaudeMessages(selected);
-  const replacements = new Map(selected.map((rec, i) => [rec, accounted[i]]));
-  return records.map((rec) => replacements.get(rec) ?? rec);
-}
-
 function defaultRoots() {
   return {
     claude: path.join(claudeDir(), 'projects'),
@@ -801,6 +794,14 @@ function parseValidatedCandidate(c, failure, readLimits) {
     parseStats: parsed?.parseStats ?? null };
 }
 
+function withClaudeIdentityEligibility(session, candidate, cutoff) {
+  if (candidate.provider !== 'claude') return session;
+  return { ...session,
+    claudeSourceKey: createHash('sha256').update(candidate.file).digest('hex'),
+    claudeIdentityEligible: Number.isFinite(candidate.stat.mtimeMs) && candidate.stat.mtimeMs >= cutoff
+      && Number.isFinite(session.end) && session.end >= cutoff };
+}
+
 /** Parse (or reuse the cached parse of) one scan candidate, updating the
  *  common cross-host telemetry diagnostics and codex's extra per-file
  *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
@@ -987,9 +988,7 @@ async function scan(o = {}) {
         ...(parseStats ? { parseStats } : {}),
         ...(c.dbFile ? { dbFile: c.dbFile } : {}),
       };
-      if (!session.imported) records.push(c.provider === 'claude'
-        ? { ...session, claudeSourceKey: createHash('sha256').update(c.file).digest('hex') }
-        : session);
+      if (!session.imported) records.push(withClaudeIdentityEligibility(session, c, identityCutoff));
     }
     scanned++;
     if (scanned % 100 === 0) notify(onProgress, { scanned, total, phase: 'scan' });
@@ -1018,7 +1017,17 @@ async function scan(o = {}) {
   // `previous: true` caller would find its "current" totals silently
   // absorbing what should have been the previous window (the bug this fixes).
   const displayCutoff = now - days * DAY_MS;
-  const result = aggregate(reconcileWithinIdentityHorizon(applyCodexLedger(records, ledger), identityCutoff), {
+  const unknownEligibility = records.filter((rec) => rec?.provider === 'claude'
+    && typeof rec.claudeIdentityEligible !== 'boolean').length;
+  // A deeper historical request can reveal a Claude file whose mtime/end was
+  // outside the fixed identity pool. Keep its prior history, but do not let a
+  // newly discovered outside-pool session enter the displayed current window.
+  const outsideCurrent = (rec) => rec?.provider === 'claude'
+    && rec.claudeIdentityEligible !== true && rec.end >= displayCutoff;
+  const observed = applyCodexLedger(records, ledger);
+  const currentExcluded = observed.filter(outsideCurrent).length;
+  const reconciled = reconcileClaudeMessages(observed.filter((rec) => !outsideCurrent(rec)));
+  const result = aggregate(reconciled, {
     days, now, cutoff: displayCutoff, deps, previous, prompts,
   });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
@@ -1029,7 +1038,11 @@ async function scan(o = {}) {
     claude: {
       ...attachTelemetryHealth(claudeParseHealth(claudeHealth, commonDiagnostics.claude), commonDiagnostics.claude),
       identityCoverage: { horizonDays: identityDays,
-        horizonCoversComparison: 2 * requestedDays <= MAX_CLAUDE_IDENTITY_DAYS,
+        horizonCoversComparison: unknownEligibility === 0 && 2 * requestedDays <= MAX_CLAUDE_IDENTITY_DAYS,
+        horizonCoversRequestedHistory: unknownEligibility === 0 && Number(lookbackDays ?? days) <= identityDays,
+        outOfPoolRecords: records.filter((rec) => rec?.provider === 'claude' && rec.claudeIdentityEligible !== true).length,
+        unknownEligibilityRecords: unknownEligibility,
+        outsideCurrentExcluded: currentExcluded,
         basis: 'file-mtime-and-session-end' },
     },
     codex: attachTelemetryHealth(codexSourceHealth, commonDiagnostics.codex),

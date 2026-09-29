@@ -21,9 +21,13 @@ displayed window and its equal-length predecessor, regardless of the
 `previous` or `lookbackDays` options. One owner is elected per identity across
 that pool before either window is projected; a copied message therefore
 contributes to at most one of the two windows. Explicit deeper lookback can
-support other history views but cannot change the elected owner. Claude reads
-may reach twice the displayed window (capped at 730 days for the dashboard's
-365-day maximum), with the cap reported in source health for wider callers.
+support other history views but cannot change an eligible owner's charge.
+Eligibility requires both the file mtime and transcript session end to reach
+the fixed horizon; older-mtime copies discovered by a deeper lookback cannot
+steal or enlarge it. Distinct historical messages remain visible under that
+explicit request, with out-of-pool coverage reported in source health. Claude
+reads may reach twice the displayed window (capped at 730 days for the
+dashboard's 365-day maximum), with the cap reported for wider callers.
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin

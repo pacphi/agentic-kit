@@ -239,6 +239,15 @@ test('partial copied snapshots reconcile component maxima once', () => {
   assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 1);
 });
 
+test('copies entirely outside the fixed pool still have one historical charge', () => {
+  const a = parse([asst({ id: 'msg_old', s: 5, block: text(), usage: { ...USAGE, output_tokens: 12 } })]);
+  const b = parse([asst({ id: 'msg_old', s: 6, block: text(), usage: USAGE })]);
+  a.claudeIdentityEligible = false; b.claudeIdentityEligible = false;
+  const rows = reconcileClaudeMessages([a, b]);
+  assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 1);
+  assert.equal(rows.reduce((n, r) => n + r.usage[0].output, 0), 200);
+});
+
 test('equal claims have a stable accounting owner when sidechain and source differ', () => {
   const main = parse([asst({ id: 'msg_tie', s: 5, block: text() })]);
   const side = parse([asst({ id: 'msg_tie', s: 5, block: text() })]);
@@ -283,7 +292,9 @@ test('one identity is charged once across current, previous and combined windows
   assert.equal(plain.totals.responses, 0);
   assert.equal(plain.totals.cost, 0);
   assert.deepEqual(plain.sourceHealth.claude.identityCoverage,
-    { horizonDays: 2, horizonCoversComparison: true, basis: 'file-mtime-and-session-end' });
+    { horizonDays: 2, horizonCoversComparison: true, horizonCoversRequestedHistory: true,
+      outOfPoolRecords: 0, unknownEligibilityRecords: 0, outsideCurrentExcluded: 0,
+      basis: 'file-mtime-and-session-end' });
   _resetForTest();
   const widenedCurrent = await buildIndex({ ...o, lookbackDays: 2 });
   assert.equal(widenedCurrent.totals.output, plain.totals.output);
@@ -318,7 +329,9 @@ test('one identity is charged once across current, previous and combined windows
   _resetForTest();
   const capped = await buildIndex({ ...o, days: 400 });
   assert.deepEqual(capped.sourceHealth.claude.identityCoverage,
-    { horizonDays: 730, horizonCoversComparison: false, basis: 'file-mtime-and-session-end' },
+    { horizonDays: 730, horizonCoversComparison: false, horizonCoversRequestedHistory: true,
+      outOfPoolRecords: 0, unknownEligibilityRecords: 0, outsideCurrentExcluded: 0,
+      basis: 'file-mtime-and-session-end' },
     'a caller wider than the supported dashboard window sees the identity cap');
 });
 
@@ -347,6 +360,60 @@ test('equal copied usage still yields one charge across adjacent windows', async
   assert.equal(combined.totals.output, 200);
   assert.equal(combined.totals.responses, 1);
   assert.equal(split.totals.cost + split.previous.totals.cost, combined.totals.cost);
+});
+
+test('deeper lookback cannot promote a copy whose file mtime is outside the fixed identity pool', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-identity-mtime');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const olderMtime = path.join(proj, 'older-mtime.jsonl');
+  const newerMtime = path.join(proj, 'newer-mtime.jsonl');
+  const write = (file, seconds, output, mtimeSeconds, id = 'msg_same') => {
+    fs.writeFileSync(file, asst({ id, s: seconds, block: text(),
+      usage: { ...USAGE, output_tokens: output } }) + '\n');
+    fs.utimesSync(file, new Date(at(mtimeSeconds)), new Date(at(mtimeSeconds)));
+  };
+  write(olderMtime, 5, 200, -86_400); // transcript Aug 20, file mtime Aug 19
+  write(newerMtime, 86_405, 100, 86_405); // transcript and mtime Aug 21
+  const o = { days: 1, now: T0 + 2 * 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  const plain = await buildIndex(o);
+  assert.equal(plain.totals.output, 100);
+  _resetForTest();
+  const wider = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(wider.totals.output, 100);
+  assert.equal(wider.totals.cost, 1);
+  assert.equal(wider.totals.responses, 1);
+  assert.equal(wider.previous.totals.output, 0, 'the observed duplicate still charges only once');
+  assert.equal(wider.sourceHealth.claude.identityCoverage.horizonCoversRequestedHistory, false);
+  assert.equal(wider.sourceHealth.claude.identityCoverage.outOfPoolRecords, 1);
+  _resetForTest();
+  assert.equal((await buildIndex(o)).totals.output, 100, 'cached older history cannot promote it');
+
+  const distinctHistory = path.join(proj, 'distinct-history.jsonl');
+  write(distinctHistory, 6, 50, -86_400, 'msg_distinct_history');
+  _resetForTest();
+  const historical = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(historical.totals.output, 100);
+  assert.equal(historical.previous.totals.output, 50,
+    'a distinct outside-pool historical message remains visible when requested');
+  assert.equal(historical.sourceHealth.claude.identityCoverage.outOfPoolRecords, 2);
+
+  // Inclusive boundary: a file at the fixed mtime cutoff belongs to the
+  // identity pool even when its transcript timestamp is earlier.
+  fs.utimesSync(olderMtime, new Date(at(0)), new Date(at(0)));
+  _resetForTest();
+  const boundary = await buildIndex(o);
+  assert.equal(boundary.totals.output, 0, 'the richer boundary copy is eligible');
+  _resetForTest();
+  const boundaryWide = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(boundaryWide.totals.output, 0);
+  assert.equal(boundaryWide.previous.totals.output, 250);
 });
 
 test('malformed cached Claude claim is reparsed instead of crashing or trusted', async () => {
