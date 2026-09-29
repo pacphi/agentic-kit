@@ -389,27 +389,38 @@ async function resetRoutes({ flags, cwd }) {
   const cfg = loadKitConfig();
   const policy = cfg.routing?.routes ?? {};
   const diverged = divergedRoutes(policy);
-  if (!diverged.length) { ok('no seeded routes diverge from the current defaults'); return 0; }
+  const jsonDryRun = flags['dry-run'] && flags.json;
+  const previewJson = (activities) => console.log(JSON.stringify({ dryRun: true, activities }, null, 2));
+  if (!diverged.length) {
+    if (jsonDryRun) previewJson([]);
+    else ok('no seeded routes diverge from the current defaults');
+    return 0;
+  }
 
-  console.log(bold('seeded routes that diverge from current defaults'));
-  for (const d of diverged) {
-    const head = d.modelDiverged ? `${d.model} → ${d.defaultModel}` : d.model;
-    console.log(`  ${d.activity.padEnd(18)} ${d.host.padEnd(7)} ${head}`);
-    for (const e of d.escalation) console.log(`    ${dim('escalation:')} ${e.model} → ${e.defaultModel}`);
-    // The trade, not just the ids: choosing on a price axis while paying on a
-    // turns axis is the misreading this whole surface exists to prevent.
-    if (d.modelDiverged && d.currentNote) console.log(dim(`    now:     ${d.model} — ${d.currentNote}`));
-    if (d.modelDiverged && d.defaultNote) console.log(dim(`    default: ${d.defaultModel} — ${d.defaultNote}`));
-    for (const e of d.escalation) {
-      const note = modelNote(e.defaultModel);
-      if (note) console.log(dim(`    default: ${e.defaultModel} — ${note}`));
+  if (!jsonDryRun) {
+    console.log(bold('seeded routes that diverge from current defaults'));
+    for (const d of diverged) {
+      const head = d.modelDiverged ? `${d.model} → ${d.defaultModel}` : d.model;
+      console.log(`  ${d.activity.padEnd(18)} ${d.host.padEnd(7)} ${head}`);
+      for (const e of d.escalation) console.log(`    ${dim('escalation:')} ${e.model} → ${e.defaultModel}`);
+      // The trade, not just the ids: choosing on a price axis while paying on a
+      // turns axis is the misreading this whole surface exists to prevent.
+      if (d.modelDiverged && d.currentNote) console.log(dim(`    now:     ${d.model} — ${d.currentNote}`));
+      if (d.modelDiverged && d.defaultNote) console.log(dim(`    default: ${d.defaultModel} — ${d.defaultNote}`));
+      for (const e of d.escalation) {
+        const note = modelNote(e.defaultModel);
+        if (note) console.log(dim(`    default: ${e.defaultModel} — ${note}`));
+      }
     }
   }
 
   let picked;
   if (flags.activity !== undefined) {
     const want = flags.activity.split(',').map((s) => s.trim()).filter(Boolean);
-    for (const a of want.filter((a) => !ACTIVITIES.includes(a))) warn(`unknown activity '${a}' — ignored`);
+    for (const a of want.filter((a) => !ACTIVITIES.includes(a))) {
+      if (jsonDryRun) await humanOutputToStderr(() => warn(`unknown activity '${a}' — ignored`));
+      else warn(`unknown activity '${a}' — ignored`);
+    }
     picked = want.filter((a) => diverged.some((d) => d.activity === a));
   } else if (flags.yes || flags['dry-run']) {
     // --dry-run never prompts: with nothing else naming a subset, preview the
@@ -424,11 +435,18 @@ async function resetRoutes({ flags, cwd }) {
       ? diverged.map((d) => d.activity)
       : ans.split(',').map((s) => s.trim()).filter((a) => diverged.some((d) => d.activity === a));
   }
-  if (!picked.length) { info('no routes reset — routes left as they are'); return 0; }
+  if (!picked.length) {
+    if (jsonDryRun) previewJson([]);
+    else info('no routes reset — routes left as they are');
+    return 0;
+  }
 
   if (flags['dry-run']) {
-    info(`would reset ${picked.length} route(s) to the current defaults: ${picked.join(', ')}`);
-    info('dry run — nothing changed');
+    if (jsonDryRun) previewJson(picked);
+    else {
+      info(`would reset ${picked.length} route(s) to the current defaults: ${picked.join(', ')}`);
+      info('dry run — nothing changed');
+    }
     return 0;
   }
 
@@ -468,11 +486,30 @@ function printOffDryRunSummary(cfg, opts) {
   if (codexOwned) console.log('  would remove ak-managed Codex MCP wiring');
 }
 
-async function off({ cwd, pkgRoot, flags = {} }) {
+async function off({ cwd, pkgRoot, flags = /** @type {{ json?: boolean, 'dry-run'?: boolean }} */ ({}) }) {
   const cfg = loadKitConfig();
   if (flags['dry-run']) {
-    printOffDryRunSummary(cfg, { pkgRoot });
-    info('dry run — nothing changed');
+    if (flags.json) {
+      await humanOutputToStderr(() => {
+        printOffDryRunSummary(cfg, { pkgRoot });
+        info('dry run — nothing changed');
+      });
+      console.log(JSON.stringify({
+        dryRun: true,
+        wouldDisable: HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id),
+        primaryHost: DEFAULT_PRIMARY_HOST,
+        wouldClear: ['aqe provider/fallback', 'ruflo providers', 'activity routing'],
+        wouldStripManagedProviderEnv: true,
+        wouldRestoreOrRemoveManagedAqeConfig: true,
+        wouldReconcileOpencodeGuidance: !!pkgRoot,
+        wouldTeardownOpencode: !!(cfg.integrations.hosts.opencode || cfg.integrations?.ownership?.opencode),
+        wouldRemoveManagedCodexMcp: cfg.integrations?.ownership?.codex?.mcp === 'ak'
+          || cfg.integrations?.ownership?.codex?.reverseMcp === 'ak',
+      }, null, 2));
+    } else {
+      printOffDryRunSummary(cfg, { pkgRoot });
+      info('dry run — nothing changed');
+    }
     return 0;
   }
   const codexMcpManaged = cfg.integrations?.ownership?.codex?.mcp === 'ak';
@@ -726,8 +763,9 @@ async function resolvePickDecision(cfg, {
   const known = new Set([...MANAGED_HOSTS, ...EFFECTIVE_ROUTING]);
   const unknown = enabled.filter((h) => !known.has(h));
   if (unknown.length) {
-    fail(`unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`);
-    return { code: 2 };
+    const error = `unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`;
+    fail(error);
+    return { code: 2, error };
   }
   // The routing set needs at least one primary-capable member; OpenCode remains
   // routable but cannot satisfy that primary-host invariant on its own.
@@ -1069,7 +1107,7 @@ async function resolvePickIntentAndPreview({
     aqeProviderTypes,
     aqeChainProviderTypes,
   });
-  if (decision.code !== undefined) return { code: decision.code };
+  if (decision.code !== undefined) return decision;
   const {
     enabled, routing, primaryHost, aqeProvider, seed,
   } = decision;
@@ -1144,6 +1182,7 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   const outcome = jsonDryRun ? await humanOutputToStderr(resolve) : await resolve();
   if (outcome.code !== undefined) {
     if (outcome.json) console.log(JSON.stringify(outcome.json, null, 2));
+    else if (jsonDryRun) console.log(JSON.stringify({ error: outcome.error ?? 'host pick refused', exitCode: outcome.code }, null, 2));
     return outcome.code;
   }
   const {
