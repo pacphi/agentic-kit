@@ -51,8 +51,7 @@ test('maps every ADR-0060 OpenAI originator, including source-dependent MCP', ()
     assert.equal(actual.surface, surface, originator);
     assert.equal(actual.initiator, initiator, originator);
     assert.equal(actual.label, sessionSurfaceLabel(surface), originator);
-    assert.deepEqual(actual.rawEvidence, originator === 'future-client' ? { source } : source
-      ? { originator, source } : { originator }, originator);
+    assert.deepEqual(actual.rawEvidence, source ? { originator, source } : { originator }, originator);
   }
 });
 
@@ -88,11 +87,21 @@ test('unknown declarations remain bounded and do not become product claims', () 
   assert.ok(!JSON.stringify(unknown).includes('private prompt'));
   assert.deepEqual(classifySessionSurface({ host: 'codex', originator: 'user prompt' }).rawEvidence, {});
   for (const field of ['entrypoint', 'originator', 'source', 'threadSource', 'sessionKind']) {
-    const value = 'privateSingleTokenCanary';
+    const value = 'future_enum_v2';
     const candidate = classifySessionSurface({ host: field === 'entrypoint' || field === 'sessionKind' ? 'claude' : 'codex',
       [field]: value });
-    assert.ok(!JSON.stringify(candidate).includes(value), field);
+    assert.equal(candidate.rawEvidence[field], value, field);
   }
+  assert.deepEqual(classifySessionSurface({ host: 'claude', entrypoint: 'x'.repeat(80) }).rawEvidence,
+    { entrypoint: 'x'.repeat(80) });
+  assert.deepEqual(classifySessionSurface({ host: 'claude', entrypoint: 'x'.repeat(81) }).rawEvidence, {});
+  for (const value of ['a\nsecret', 'a secret', '', { text: 'secret' }, ['secret']]) {
+    assert.deepEqual(classifySessionSurface({ host: 'codex', originator: value }).rawEvidence, {});
+  }
+  assert.deepEqual(classifySessionSurface({ host: 'claude', entrypoint: 'future_enum_v2' }), {
+    surface: 'other-claude', initiator: 'unknown', label: 'Other Claude surface',
+    rawEvidence: { entrypoint: 'future_enum_v2' }, attributes: [], thirdPartyProvider: null,
+  });
   assert.equal(sessionSurfaceLabel('__proto__'), 'Unknown');
 });
 
@@ -120,4 +129,11 @@ test('footprint adapter keeps legacy origin/evidence and latches first declarati
   assert.deepEqual([claude.origin, claude.evidence, claude.surface],
     ['claude-desktop', 'entrypoint:claude-desktop', 'claude-desktop']);
   assert.equal(transcriptSessionOrigin(lines({ entrypoint: 'remote_desktop' }), 'claude').origin, 'unknown');
+  const future = transcriptSessionOrigin(lines(
+    { entrypoint: 'future_enum_v2', sessionKind: 'future_kind', message: { content: 'private prompt' } },
+    { entrypoint: 'claude-desktop' }), 'claude');
+  assert.deepEqual(future.rawEvidence, { entrypoint: 'future_enum_v2', sessionKind: 'future_kind' });
+  assert.equal(future.surface, 'other-claude');
+  assert.equal(future.origin, 'unknown');
+  assert.equal(JSON.stringify(future).includes('private prompt'), false);
 });

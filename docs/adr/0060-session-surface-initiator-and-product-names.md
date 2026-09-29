@@ -4,7 +4,8 @@
 - **Date:** 2026-09-26
 - **Updated:** 2026-09-27 — §3 implemented for project discovery and the System projects note:
   imported copies give no project, host or origin and are counted. The ledger-derived source labels
-  (Cursor, Cowork) and the other views remain proposed.
+  (Cursor, Cowork) and the other views remain proposed. 2026-09-29 — the maintainer approved bounded
+  unfamiliar raw origin tokens for local detail; the classifier and usage cache now retain them.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0050](0050-dashboard-project-identity-and-context-reporting.md) (session origin
   rule, superseded in part by this record once accepted),
@@ -190,9 +191,15 @@ fixture.
 
 ## Implementation status
 
+The bounded raw-evidence policy in §1 was approved and implemented on 2026-09-29 for named
+declaration fields: unfamiliar values that satisfy the 80-character token validation remain in
+`rawEvidence`. The classifier keeps their surface at Other or Unknown as appropriate and makes no
+product or provider inference. The usage parser, aggregate and schema 26 cache carry these values;
+local detail display is staged for Unit 22. This does not accept the rest of the ADR.
+
 §3 is implemented for project discovery and the System projects note (2026-09-27): an imported copy
 gives no project, host or origin, and discovery counts it in `importedExcluded`. The per-source
-labels from the imports ledger, Runtime attribution and §1, §2 and §4–§6 remain follow-on work
+labels from the imports ledger, Runtime attribution, the rest of §1, §2 and §4–§6 remain follow-on work
 (the audit record's Addendum 3).
 
 Three views already show the smaller project counts but do not yet say how many imported copies were

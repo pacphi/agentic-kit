@@ -57,7 +57,7 @@ export function observeUsageProject(cwd, { observedAt = Date.now(), cache = CACH
   return value;
 }
 
-/** Same bounded head and exact origin allowlists as footprint discovery. An
+/** Same bounded head and declared-origin token validation as footprint discovery. An
  *  imported Codex copy of a Claude Code transcript declares the ChatGPT desktop
  *  app as its originator but is not a session from it (ADR-0060 §3). */
 export function usageSessionOrigin(raw, host) {

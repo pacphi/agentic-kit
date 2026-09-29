@@ -65,13 +65,37 @@ test('a late import marker still removes copied Desktop classification', () => {
 });
 
 test('malformed declaration metadata cannot copy prompt text into classification', () => {
-  const privateText = 'synthetic-private-prompt-content';
+  const privateText = 'synthetic private prompt content';
   const raw = `${JSON.stringify({ type: 'session_meta', payload: {
     id: 'bad', originator: { text: privateText }, source: ['mcp'], thread_source: privateText,
   } })}\n`;
   const session = parseCodex(raw, { id: 'bad' }).session;
   assert.equal(JSON.stringify(session.sessionOrigin).includes(privateText), false);
   assert.deepEqual(session.sessionOrigin.rawEvidence, {});
+});
+
+test('unfamiliar bounded origin survives parser, aggregate and warm cache without a product guess', async () => {
+  _resetForTest();
+  const native = new Rollout({ id: 'future' }).meta({ originator: 'future_client_v2',
+    source: 'future_transport', thread_source: 'future_trigger' })
+    .turn().user().agent().tokenCount(usage({ input: 100, output: 20 }));
+  const sandbox = codexSandbox({ 'rollout-2026-07-24T09-00-00-future.jsonl': native.toString() });
+  const parsed = parseCodex(native.toString(), { id: 'future' }).session;
+  assert.equal(parsed.sessionOrigin.surface, 'other-openai');
+  assert.equal(parsed.sessionOrigin.initiator, 'unknown');
+  assert.deepEqual(parsed.sessionOrigin.rawEvidence, { originator: 'future_client_v2',
+    source: 'future_transport', threadSource: 'future_trigger' });
+  const cold = await buildIndex(options(sandbox));
+  assert.equal(cold.sessions[0].sessionOrigin.surface, 'other-openai');
+  assert.deepEqual(cold.sessions[0].sessionOrigin.rawEvidence, parsed.sessionOrigin.rawEvidence);
+  const cache = JSON.parse(fs.readFileSync(sandbox.cachePath, 'utf8'));
+  assert.deepEqual(Object.values(cache.entries)[0].session.sessionOrigin.rawEvidence,
+    parsed.sessionOrigin.rawEvidence);
+  _resetForTest();
+  const warm = await buildIndex(options(sandbox));
+  assert.equal(warm.sourceHealth.codex.diagnostics.cachedFiles, 1);
+  assert.deepEqual(warm.sessions[0].sessionOrigin.rawEvidence, parsed.sessionOrigin.rawEvidence);
+  assert.deepEqual(warm.totals, cold.totals);
 });
 
 test('schema 25 reparses unchanged files into schema 26 and warm cache preserves classification and accounting', async () => {

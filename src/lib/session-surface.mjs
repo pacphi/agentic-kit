@@ -60,24 +60,15 @@ const CLAUDE_ATTRIBUTES = new Map([
   ['remote_mobile', 'started from mobile'], ['remote_projects', 'started from a project'],
   ['remote', 'started from web'],
 ]);
-const RAW_VALUES = Object.freeze({
-  entrypoint: new Set([...CLAUDE.keys(), 'bench', 'claude-security', 'claude-coworker']),
-  originator: new Set([...CODEX.keys(), 'codex_cli_rs']),
-  source: new Set(['vscode', 'exec', 'mcp']),
-  threadSource: new Set(['user', 'chatgpt_handoff', 'subagent', 'guardian_review',
-    'agent_created_thread', 'automation']),
-  sessionKind: new Set(['bg', 'daemon', 'daemon-worker']),
-});
-
-// Raw values are internal enum-like tokens, not arbitrary transcript metadata.
-// Drop malformed or oversized values rather than retain prompt-like content.
+// Declared origin fields are internal enum-like tokens. Retain unfamiliar tokens
+// for local detail, but drop malformed or oversized prompt-like content.
 function bounded(value) {
   return typeof value === 'string' && value.length <= 80
     && (value === 'Codex Desktop' || /^[A-Za-z][A-Za-z0-9_.-]*$/u.test(value)) ? value : null;
 }
 
 function retain(rawEvidence, field, value) {
-  if (value !== null && RAW_VALUES[field].has(value)) rawEvidence[field] = value;
+  if (value !== null) rawEvidence[field] = value;
 }
 
 export function sessionSurfaceLabel(surface) {

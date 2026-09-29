@@ -9,12 +9,13 @@
 
 Active. Units 1, 20, 21 and 2 are implemented on this branch. Unit 2 is limited to
 the agreed classifier interface, parser fields and one usage-cache schema bump.
-Both pending unknown raw-origin retention options have the same classifier
-return shape, so known-value integration can proceed without deciding which
-unknown contents to retain. The classifier's raw-value policy and ADR-0060
-acceptance remain gated on that unanswered choice. Unit 2 must stop for
-independent review before Unit 3; later units still require separate dispatch,
-RED/GREEN evidence and capture commits.
+The maintainer approved retaining unfamiliar, bounded tokens from named origin
+fields as raw evidence for local detail. The classifier now retains those tokens
+without inferring a product or provider; malformed, oversized and non-string
+values remain excluded. This narrow policy follow-up does not accept all of
+ADR-0060 or add a UI. Unit 2 and this follow-up must stop for independent review
+before Unit 3; later units still require separate dispatch, RED/GREEN evidence
+and capture commits.
 
 ## Gates and ownership
 
