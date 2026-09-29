@@ -24,6 +24,7 @@ import { provenanceOf } from './usage-provenance.mjs';
 import { promptSemantics } from './usage-prompt-semantics.mjs';
 import { observeUsageProject, usageRecordOrigin, importedUsageRecordOrigin } from './usage-project-evidence.mjs';
 import { isCodexImportedLine } from './codex-import-marker.mjs';
+import { claudeProviderFromModelId } from './session-surface.mjs';
 
 export { promptSemantics } from './usage-prompt-semantics.mjs';
 
@@ -52,6 +53,12 @@ function punchKey(ms) {
 function clip(text, max = 100) {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+function boundedClaudeModel(model) {
+  if (typeof model !== 'string' || model.length > 100 || model.includes('://')) return 'unknown';
+  return /^[A-Za-z0-9._:/-]+$/u.test(model) || /^claude-[a-z0-9-]+@20[0-9]{6}$/u.test(model)
+    ? model : 'unknown';
 }
 
 /**
@@ -734,7 +741,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
     latState.pendingMs = null;
   }
 
-  const model = typeof decoded.model === 'string' ? decoded.model : 'unknown';
+  const model = boundedClaudeModel(decoded.model);
   if (!rec.models.includes(model)) rec.models.push(model);
 
   stageClaudeMessage(msgState, decoded, at, model);
@@ -756,6 +763,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
 export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = null }) {
   const rec = blankSession(id, 'claude');
   rec.sessionOrigin = usageRecordOrigin(raw, 'claude');
+  const observedProviders = new Set();
   const turns = [];
   const titleState = { firstPrompt: '', aiTitle: '' };
   // Open by the most recent human prompt, closed by the first real assistant
@@ -780,9 +788,17 @@ export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = n
     }
 
     if (decoded.role !== 'assistant' || !e.message) continue;
+    // A transcript's assistant model is tied to this session. Current global
+    // settings and process.env are not historical session evidence.
+    observedProviders.add(claudeProviderFromModelId(boundedClaudeModel(e.message.model)));
     recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns);
   }
   flushClaudeMessages(rec, msgState, windowLog);
+
+  if (observedProviders.size === 1 && !observedProviders.has(null)) {
+    rec.sessionOrigin.thirdPartyProvider = observedProviders.values().next().value;
+    rec.sessionOrigin.thirdPartyProviderBasis = 'assistant-model-id';
+  }
 
   rec.title = maskSecrets(titleState.aiTitle || clip(titleState.firstPrompt)) || '(untitled)';
   if (rec.project === 'unknown') applyProject(rec, projectLabel(null, dirName));

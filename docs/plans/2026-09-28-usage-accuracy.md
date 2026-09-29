@@ -7,7 +7,7 @@
 
 ## Status
 
-Active. Units 1, 20, 21 and 2 are implemented on this branch. Unit 2 is limited to
+Active. Units 1, 20, 21, 2 and 6 are implemented on this branch. Unit 2 is limited to
 the agreed classifier interface, parser fields and one usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin
 fields as raw evidence for local detail. The classifier now retains those tokens
@@ -16,6 +16,14 @@ values remain excluded. This narrow policy follow-up does not accept all of
 ADR-0060 or add a UI. Unit 2 and this follow-up must stop for independent review
 before Unit 3; later units still require separate dispatch, RED/GREEN evidence
 and capture commits.
+
+Unit 6 records Amazon Bedrock or Google Vertex AI only when a Claude assistant
+message carries a provider-specific model ID. Conflicting or ordinary IDs leave
+the provider unknown. Historical transcripts do not capture launch environment
+or settings, so current configuration cannot identify their serving provider;
+OpenRouter, other gateways and private endpoints remain unknown without bound
+session evidence. The detail stays under `sessionOrigin.thirdPartyProvider` with
+`thirdPartyProviderBasis: assistant-model-id` when known. Units 22/23 own display.
 
 ## Gates and ownership
 

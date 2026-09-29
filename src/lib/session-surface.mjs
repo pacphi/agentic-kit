@@ -75,6 +75,22 @@ export function sessionSurfaceLabel(surface) {
   return Object.hasOwn(LABELS, surface) ? LABELS[surface] : LABELS.unknown;
 }
 
+// Only provider-specific IDs recorded by this session qualify. Plain Claude
+// IDs occur across hosts; an OpenAI-compatible gateway may reuse any model
+// name. Never retain the raw ID here (it may contain account or route data).
+// https://code.claude.com/docs/en/amazon-bedrock#pin-model-versions
+// https://code.claude.com/docs/en/google-vertex-ai#pin-model-versions
+export function claudeProviderFromModelId(model) {
+  if (typeof model !== 'string' || model.length > 100) return null;
+  if (/^(?:(?:us|eu|apac|jp|au|ca|sa|us-gov|global)\.)?anthropic\.claude-(?:opus|sonnet|haiku)-[0-9][a-z0-9-]*(?:-v[0-9]+:[0-9]+)?$/u.test(model)) {
+    return 'amazon-bedrock';
+  }
+  if (/^claude-(?:opus|sonnet|haiku)-[0-9][a-z0-9-]*@20[0-9]{6}$/u.test(model)) {
+    return 'google-vertex-ai';
+  }
+  return null;
+}
+
 /** @returns {[string, string, string[]]} */
 function claudeClassification(entrypoint, sessionKind) {
   if (entrypoint === null) return ['unknown', 'unknown', []];
