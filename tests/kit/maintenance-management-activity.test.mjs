@@ -77,6 +77,51 @@ test('activity shows the latest scan per source and environment without changing
   assert.deepEqual(scanHistory, original);
 });
 
+test('a newer paused record is the latest state and retains its distinct recorded time', () => {
+  const base = { sourceId: 'claude', environmentId: 'local', label: 'Claude', visited: 12 };
+  const complete = { ...base, state: 'complete', completedAt: '2026-09-08T12:00:00.000Z' };
+  const paused = { ...base, state: 'paused', recordedAt: '2026-09-09T12:00:00.000Z', completedAt: null };
+  const result = buildActivity({ scanHistory: [paused, complete] });
+  assert.equal(result.scans[0].state, 'paused');
+  assert.equal(result.scans[0].recordedAt, paused.recordedAt);
+  assert.equal(result.scans[0].completedAt, null);
+  assert.equal(result.scanHistory[1].completedAt, complete.completedAt);
+});
+
+test('invalid recorded time falls back to completion without passing metadata through', () => {
+  const base = { sourceId: 'claude', environmentId: 'local', state: 'complete' };
+  const result = buildActivity({ scanHistory: [
+    { ...base, completedAt: '2026-09-09T12:00:00.000Z', recordedAt: '/private/path', privatePath: '/private/path' },
+    { ...base, completedAt: '2026-09-08T12:00:00.000Z' },
+  ] });
+  assert.equal(result.scans[0].completedAt, '2026-09-09T12:00:00.000Z');
+  assert.equal(result.scans[0].recordedAt, null);
+  assert.equal(buildActivity({ scanHistory: [{ ...base, completedAt: '/private/path' }] }).scanHistory[0].completedAt, null);
+  assert.equal(JSON.stringify(result).includes('/private/path'), false);
+});
+
+test('an impossible pause date cannot supersede a real completion or invent a calendar day', () => {
+  const base = { sourceId: 'claude', environmentId: 'local' };
+  const completed = { ...base, state: 'complete', completedAt: '2026-09-30T12:00:00.000Z' };
+  const paused = { ...base, state: 'paused', recordedAt: '2026-09-31T12:00:00Z', completedAt: null };
+  const result = buildActivity({ scanHistory: [paused, completed] });
+  assert.equal(result.scans[0].state, 'complete');
+  assert.equal(result.scanHistory[0].recordedAt, null);
+  assert.equal(result.scanHistory[0].completedAt, null);
+  const fallback = buildActivity({ scanHistory: [{ ...completed, recordedAt: paused.recordedAt }] });
+  assert.equal(fallback.scans[0].recordedAt, null);
+  assert.equal(fallback.scans[0].completedAt, completed.completedAt);
+});
+
+test('scan timestamps accept leap days, offsets, and fractional seconds', () => {
+  const recordedAt = '2024-02-29T23:59:59.125+05:30';
+  const completedAt = '2024-02-29T08:00:00Z';
+  const result = buildActivity({ scanHistory: [{ sourceId: 'a', environmentId: 'local', state: 'complete', recordedAt, completedAt }] });
+  assert.equal(result.scans[0].recordedAt, recordedAt);
+  assert.equal(result.scans[0].completedAt, completedAt);
+  assert.equal(buildActivity({ scanHistory: [{ sourceId: 'a', environmentId: 'local', state: 'complete', completedAt: '2025-02-29T08:00:00Z' }] }).scans[0].completedAt, null);
+});
+
 test('no label anywhere in buildActivity output is prohibited', () => {
   const activity = buildActivity({
     receipts: [INTERRUPTED_RECEIPT],

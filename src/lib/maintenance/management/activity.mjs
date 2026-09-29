@@ -71,14 +71,26 @@ function recipeEventSummary(event) {
   return { kind: event.kind, recipeId: event.recipeId ?? null, recipeVersion: event.recipeVersion ?? null, at: event.at, pendingIds: event.pendingIds ?? undefined };
 }
 
+export function validScanTime(value) {
+  if (typeof value !== 'string' || value.length > 40) return null;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!parts) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = parts;
+  const [year, month, day, hour, minute, second] = [yearText, monthText, dayText, hourText, minuteText, secondText].map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= monthDays[month - 1] && hour <= 23 && minute <= 59 && second <= 59
+    && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
 function scanSummary(entry) {
   if (!SCAN_STATES.includes(entry.state)) throw new TypeError(`unknown scan state: ${entry.state}`);
-  return { sourceId: entry.sourceId, environmentId: entry.environmentId, state: entry.state, label: entry.label, visited: entry.visited, limitingReason: entry.limitingReason ?? null, completedAt: entry.completedAt ?? null };
+  return { sourceId: entry.sourceId, environmentId: entry.environmentId, state: entry.state, label: entry.label, visited: entry.visited, limitingReason: entry.limitingReason ?? null, recordedAt: validScanTime(entry.recordedAt), completedAt: validScanTime(entry.completedAt) };
 }
 
 function latestScans(scanHistory) {
   const latest = new Map();
-  const timestamp = (entry) => Date.parse(entry.completedAt) || 0;
+  const timestamp = (entry) => Date.parse(entry.recordedAt ?? entry.completedAt) || 0;
   for (const entry of scanHistory.map(scanSummary)) {
     const key = JSON.stringify([entry.environmentId, entry.sourceId]);
     const previous = latest.get(key);

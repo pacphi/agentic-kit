@@ -2,7 +2,10 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-03
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-29 — the explicit provider scan now starts through
+  `POST /api/refresh`; `GET /api/maintenance` only reads, and the retired
+  `?refresh=scan` GET trigger is superseded by ADR-0063.
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-04 — proposed ADR-0048 retains physical artifact and consumer-binding
   identity, adds exact management placements, and plans configurable/resumable discovery; current
   explicit provider-scan behavior remains authoritative until implementation
@@ -24,9 +27,9 @@
 
 Artifact/consumer identity and the explicit provider-scan contract remain current.
 The **Browser refresh / Scan now** wording below describes the v1 view; current
-Maintenance uses the consolidated measurement toolbar and v2 scan routes under
-ADR-0048. Neither passive report/query reads nor filesystem discovery grant
-provider mutation authority. FootprintSnapshot is now v7; v6 below records the
+Maintenance uses the single Refresh control and explicit POST operation under
+ADR-0063, alongside ADR-0048's separate v2 scan routes. Neither passive report/query
+reads nor filesystem discovery grant provider mutation authority. FootprintSnapshot is now v7; v6 below records the
 Catalog v4 migration. The independent configurable Discovery scan does not replace
 the Footprint deep worker or the explicit provider scan.
 
@@ -93,15 +96,16 @@ a session. Those would require host-native runtime receipts.
 
 ### Make scanning explicit and browser refresh passive
 
-Maintenance has two read paths:
+Maintenance has one report read and one explicit refresh start:
 
 - <code>GET /api/maintenance</code> reads the latest private persisted report. It does not call a
   host CLI, provider, registry, network source, or version detector.
-- <code>GET /api/maintenance?refresh=scan</code> performs one explicit provider scan, persists the
-  resulting report atomically, and returns it. Unknown or duplicate query parameters fail closed.
+- `POST /api/refresh` explicitly runs the Maintenance evidence stage, persists its provider
+  scan report, and then rebuilds inventory. A GET with the retired `?refresh=scan`
+  query is rejected.
 
-The dashboard labels these controls **Browser refresh** and **Scan now**. The global poll clock uses
-the first path. **Scan now** uses the second. A successful persisted System deep rescan chains one
+The dashboard uses **Reload** to re-read a view and **Refresh** to start the staged POST
+operation. The global poll clock only reads. A successful persisted System deep rescan chains one
 Maintenance provider scan so inventory and provider evidence converge without double-scanning
 concurrent callers.
 

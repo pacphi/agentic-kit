@@ -10,9 +10,12 @@
 // real HTTP — this script only starts the server and reports where it is
 // listening; the parent marks ledger call boundaries itself by appending
 // directly to the same ndjson file between requests.
-import { startDashboard } from '../../src/lib/dashboard-server.mjs';
+// An optional test-only global root makes the Ruflo component path deterministic.
+import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
-const [, , cwd] = process.argv;
+const [, , cwd, fakeGlobalRoot] = process.argv;
+if (fakeGlobalRoot) _setGlobalRootForTest(fakeGlobalRoot);
+const { startDashboard } = await import('../../src/lib/dashboard-server.mjs');
 
 const { port, token } = await startDashboard({ port: 0, cwd });
 // Unbuffered, single line, parsed by the parent — printed only once the

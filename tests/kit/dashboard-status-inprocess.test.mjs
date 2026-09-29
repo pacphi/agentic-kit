@@ -14,12 +14,12 @@
 //    return, which the in-process path would otherwise silently drop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnEnv, sandboxProject, writeKitConfig, offlineKitConfig } from './helpers/home-sandbox.mjs';
+import { spawnEnv, sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot } from './helpers/home-sandbox.mjs';
 import {
   startGuardedDashboard, stopGuardedDashboard, getJson, markLedgerBoundary, readLedger, sliceByCallBoundary,
   isVersionDriftLookup,
@@ -137,5 +137,49 @@ test('GET /api/status (in-process) carries the same {overall, rows} `ak status -
   } finally {
     await stopGuardedDashboard(child);
     cleanup(home, project);
+  }
+});
+
+test('GET /api/status passes the server cwd through ruflo-components project-root discovery', async () => {
+  const { home, project, env } = sandbox('ak-dash-ruflo-cwd');
+  const decoy = sandboxProject('ak-dash-ruflo-decoy');
+  const fakeRoot = fakeGlobalRoot(home, { ruflo: '9.9.9' });
+  fs.mkdirSync(path.join(project, '.claude-flow'));
+  fs.mkdirSync(path.join(project, '.harness'));
+  fs.writeFileSync(path.join(project, '.harness', 'mcp-policy.json'), '{invalid');
+  fs.mkdirSync(path.join(decoy, '.claude-flow'));
+  writeKitConfig(home, offlineKitConfig({ rufloComponents: { mcpGovernance: { maxCallsPerMinute: 60 } } }));
+
+  let child;
+  try {
+    const ready = await new Promise((resolve, reject) => {
+      child = spawn(process.execPath, [path.join(PKG_ROOT, 'tests/fixtures/dashboard-status-child.mjs'), project, fakeRoot], {
+        cwd: decoy, env, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '', err = '';
+      child.stdout.on('data', chunk => {
+        out += chunk;
+        const match = out.match(/READY (\d+) (\S+)\n/);
+        if (match) resolve({ port: Number(match[1]), token: match[2] });
+      });
+      child.stderr.on('data', chunk => { err += chunk; });
+      child.once('error', reject);
+      child.once('exit', code => reject(new Error(`dashboard child exited ${code}: ${err || out}`)));
+    });
+    const response = await getJson(ready.port, '/api/status', ready.token);
+    assert.equal(response.status, 200);
+    assert.ok(response.json.rows.some(row => row.subsystem === 'ruflo-components'
+      && /ruflo components:.*ruflo 9\.9\.9/.test(row.message)),
+    'the status request must use the disposable fake Ruflo package');
+    const governance = response.json.rows.find(row => row.subsystem === 'ruflo-components'
+      && /MCP tool governance/.test(row.message));
+    assert.ok(governance, 'fake installed Ruflo must reach its component projection');
+    assert.equal(governance.state, 'blocked');
+    assert.match(governance.message, /policy file is invalid/,
+      'the server-supplied project cwd, not process.cwd(), must drive rufloProjectRoot');
+  } finally {
+    await stopGuardedDashboard(child);
+    cleanup(home, project);
+    fs.rmSync(decoy, { recursive: true, force: true });
   }
 });

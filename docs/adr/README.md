@@ -58,7 +58,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
 | [0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md) | Scan-local observation reuse and nonblocking deep scans | Implemented |
 | [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot and separate Discovery continuation implemented |
-| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; Focus browser implemented and focused checks pass; human/cross-platform gates pending |
+| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; two dashboard controls superseded by 0063; human usability, screen-reader and cross-platform gates deferred to v5 |
 | [0050](0050-dashboard-project-identity-and-context-reporting.md) | Dashboard project identity and context reporting | Implemented |
 | [0051](0051-supported-peer-delegation-and-host-realignment.md) | Supported peer delegation and scoped host realignment | Accepted; implemented locally |
 | [0052](0052-codex-usage-attribution.md) | Codex usage attribution: own usage, imports, segments, streaming | Accepted |
@@ -69,7 +69,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0060](0060-session-surface-initiator-and-product-names.md) | Session surface, initiator and official product names | Proposed; §3 implemented for project discovery (2026-09-27), the rest staged follow-on |
 | [0061](0061-brain-reclaim-stuck-remediation.md) | RuvNet Brain "unresolved rollback state" remediation | Accepted |
 | [0062](0062-aqe-project-store-integrity.md) | AQE project store integrity | Accepted |
-| [0063](0063-evidence-store-and-refresh-vocabulary.md) | One evidence store and the refresh vocabulary | Accepted |
+| [0063](0063-evidence-store-and-refresh-vocabulary.md) | One evidence store and the refresh vocabulary | Accepted; CLI and dashboard refresh operation delivered |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

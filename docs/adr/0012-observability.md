@@ -670,3 +670,15 @@ turns the dashboard into a fleet service nor makes telemetry collection continuo
 - **Exact-folder leases (#238 item 2).** A runtime lease no longer requires a Git repository when
   an exact-folder match joins the process to its transcript; see the 2026-08-03 runtime identity
   amendment above.
+
+### 2026-09-29 follow-up: bounded re-entry and structured-source evidence
+
+An idle stop retains active tailer offsets. A native transcript displaced from the newest-file
+window also retains its reader state in memory, up to twice the configured file bound (at least
+two dormant readers). Re-entry within that bound resumes without replaying accepted records.
+After dormant eviction, re-entry reads from the start; a new dashboard process has no persisted
+native offset and bootstraps existing-file metadata before following new appends. This does not
+create durable exactly-once delivery.
+
+The optional Ruflo and agentic-qe structured live-events input is experimental. Parser fixtures
+exist, but no real producer has been verified. An explicit source path does not prove activity.
