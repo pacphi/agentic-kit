@@ -5,14 +5,15 @@
 // partition is executed as one or more `observeWalkForest` calls.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileId, sameFileId, statMtimeMs } from '../../file-identity.mjs';
 
 const DEFAULT_MAX_FANOUT = 64;
 
 function stampFor(target, fsImpl) {
   try {
-    const stat = fsImpl.lstatSync(target);
+    const stat = fsImpl.lstatSync(target, { bigint: true });
     return {
-      target, mtimeMs: stat.mtimeMs, ino: Number(stat.ino) || null, size: stat.isFile() ? stat.size : null,
+      target, mtimeMs: statMtimeMs(stat), ino: fileId(stat.ino), size: stat.isFile() ? Number(stat.size) : null,
     };
   } catch (error) {
     return { target, mtimeMs: null, ino: null, size: null, reason: error?.code ?? 'io' };
@@ -110,6 +111,6 @@ export function mergeWalkResults(results) {
 export function partitionDrifted(partition, { fsImpl = fs } = {}) {
   return partition.sourceStamps.some((recorded) => {
     const current = stampFor(recorded.target, fsImpl);
-    return current.mtimeMs !== recorded.mtimeMs || current.ino !== recorded.ino || current.size !== recorded.size;
+    return current.mtimeMs !== recorded.mtimeMs || !sameFileId(current.ino, recorded.ino) || current.size !== recorded.size;
   });
 }

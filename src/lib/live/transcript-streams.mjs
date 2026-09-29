@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileId } from '../file-identity.mjs';
 import { JsonlTailer } from './jsonl-tailer.mjs';
 import { LiveReplayStream } from './replay-stream.mjs';
 import {
@@ -155,12 +156,13 @@ class TranscriptStream {
     this.#host = host;
     this.#sessionId = sessionId;
     this.#options = options;
-    const epoch = fs.statSync(file).ino;
+    const stat = fs.statSync(file, { bigint: true });
+    const epoch = fileId(stat.ino);
     this.#stream = new LiveReplayStream({
       capacity: options.replayCapacity,
       prefix: `tx-${host}-${sessionId}-${epoch}`,
     });
-    const offset = fs.statSync(file).size;
+    const offset = Number(stat.size);
     const history = tailLines(file, offset, options.maxHistoryBytes, options.maxHistoryRecords);
     const candidates = [];
     for (const raw of history.lines) {
