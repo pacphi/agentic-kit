@@ -837,12 +837,10 @@ function reconcileConfirmation({ receiptId, outcome, audit, now }) {
  *   now?: () => number,
  *   capabilities?: ReturnType<typeof createMaintenanceCapabilityStore>,
  *   scanAckMs?: number,
- *   afterScan?: () => any,
- * }} options `afterScan` runs (never awaited) after a successful `?refresh=scan`
- *   provider scan so the server can chain the inventory rebuild.
+ * }} options
  */
 export function createMaintenanceDashboardApi({
-  service, management = null, sessionToken, now = Date.now, capabilities, scanAckMs = 250, afterScan = null,
+  service, management = null, sessionToken, now = Date.now, capabilities, scanAckMs = 250,
 } = {}) {
   if (!service || typeof service.report !== 'function' || typeof service.scan !== 'function'
       || typeof service.plan !== 'function') {
@@ -860,11 +858,9 @@ export function createMaintenanceDashboardApi({
 
   const withActivity = (model) => ({ ...model, activity: typeof service.scanState === 'function' ? service.scanState() : null });
 
-  async function report(_req, res, { refresh = false } = {}) {
+  async function report(_req, res) {
     try {
-      const model = await (refresh ? service.scan() : service.report());
-      // The chained inventory rebuild is fire-and-forget: the scan response stands on its own.
-      if (refresh && typeof afterScan === 'function') { try { Promise.resolve(afterScan()).catch(() => {}); } catch { /* ignored */ } }
+      const model = await service.report();
       sendJson(res, 200, publicMaintenanceModel(withActivity(model)));
     }
     catch (error) {

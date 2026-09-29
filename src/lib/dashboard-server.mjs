@@ -1168,7 +1168,7 @@ export function startDashboard({
   const provideMaintenance = typeof maintenance === 'function'
     ? maintenance : maintenance ? async () => maintenance : async () => {
       if (refused) {
-        // Logged here because refreshMaintenanceAfterSystem swallows errors.
+        // Log once when the default Maintenance service is refused.
         if (!refusalLogged) { refusalLogged = true; console.error(HERMETIC_REFUSAL); }
         throw new TypeError(HERMETIC_REFUSAL);
       }
@@ -1223,24 +1223,6 @@ export function startDashboard({
     getHostReadiness, statusCollect: inProcessStatus(cwd, { refresh: true, timeoutMs: REFRESH_LOCAL_TIMEOUT_MS }),
     loadConfig: loadKitConfig,
   }) });
-  let maintenanceRefreshSource = null;
-  let maintenanceRefreshPromise = null;
-  function refreshMaintenanceAfterSystem(deepScan) {
-    if (maintenanceRefreshSource === deepScan) return maintenanceRefreshPromise;
-    maintenanceRefreshSource = deepScan;
-    maintenanceRefreshPromise = Promise.resolve(deepScan).then(async (result) => {
-      if (result?.ok !== true || result?.persisted?.ok === false) return null;
-      const model = await (await getMaintenance()).scan({ deep: false });
-      refreshInventoryAfterProviderScan({ measured: true });
-      return model;
-    }).catch(() => null).finally(() => {
-      if (maintenanceRefreshSource === deepScan) {
-        maintenanceRefreshSource = null;
-        maintenanceRefreshPromise = null;
-      }
-    });
-    return maintenanceRefreshPromise;
-  }
   let transcriptServicePromise;
   const provideTranscripts = typeof transcripts === 'function'
     ? transcripts : transcripts ? async () => transcripts : async () => {
@@ -1410,7 +1392,7 @@ export function startDashboard({
   let maintenanceApiPromise;
   const getMaintenanceApi = async () => (maintenanceApiPromise ||= getMaintenance()
     .then((service) => createMaintenanceDashboardApi({
-      service, management: getManagement, sessionToken: token, afterScan: refreshInventoryAfterProviderScan,
+      service, management: getManagement, sessionToken: token,
     })));
 
   const server = http.createServer(async (req, res) => {
@@ -1466,7 +1448,7 @@ export function startDashboard({
         res.end(mutationRejection);
         return;
       }
-      if (healthMutation) { await handleHostHealthPost(url, req, res, getHostReadiness); return; }
+      if (healthMutation) { await handleHostHealthPost(req, res, getHostReadiness); return; }
       if (refreshMutation) { await handleRefreshPost(req, res, refreshOperation); return; }
       try { await (await getMaintenanceApi()).mutate(url, req, res); }
       catch { sendJson(res, 503, { error: 'maintenance operation unavailable' }); }
@@ -1996,35 +1978,13 @@ export function startDashboard({
     // `project` shapes the answer for a route: identity for /api/system (the
     // documented `ak system --json` shape), systemSummaryPayload for the page.
     async function handleSystem(req, res, query, project = (payload) => payload) {
+      if (query.has('refresh') || query.has('trees')) {
+        sendJson(res, 400, { error: 'start a refresh with POST /api/refresh' });
+        return;
+      }
       try {
         const collector = await getSystem();
-        // ORDER IS LOAD-BEARING: assemble the payload BEFORE starting a scan.
-        // The deep collectors are synchronous, so the first phase occupies the
-        // event loop the moment it gets a turn — and `read()` awaits, which
-        // hands it that turn. Starting first therefore made the *initiating*
-        // request wait out the phase it had just kicked off (measured: 9s),
-        // which is precisely the hang the progress state exists to avoid.
         const payload = await collector.read();
-        if (query.get('refresh') === 'deep') {
-          // Start-or-attach and answer NOW. The collector's single flight means
-          // a second refresh joins the running scan rather than racing it, and
-          // it never rejects — the catch guards an injected collector that does
-          // not honour that contract, so a bad one cannot take the process down
-          // with an unhandled rejection.
-          // `trees` is a MEASUREMENT parameter, not a view filter: project
-          // working trees are only walked when it is set, and one large
-          // repository outweighs every shared cache combined — so the ranking
-          // has to be re-measured, not re-sorted. Absent means "keep whatever
-          // the collector already defaults to".
-          const trees = query.get('trees');
-          const deepScan = Promise.resolve(collector.refreshDeep(
-            trees == null ? undefined : { includeProjectTrees: trees === '1' },
-          ));
-          refreshMaintenanceAfterSystem(deepScan);
-          // The payload predates the start by microseconds; re-stamp the live
-          // scan block so this response reads "running", not "idle".
-          if (typeof collector.scanState === 'function') payload.scan = collector.scanState();
-        }
         sendJson(res, 200, project(payload));
       } catch (e) {
         sendJson(res, 503, { error: 'system footprint unavailable', reason: String(e && e.message || e) });
@@ -2033,13 +1993,11 @@ export function startDashboard({
     }
 
     async function handleMaintenance(req, res, query) {
-      const refresh = query.getAll('refresh');
-      if ([...query.keys()].some((key) => key !== 'refresh')
-          || refresh.length > 1 || (refresh.length === 1 && refresh[0] !== 'scan')) {
-        sendJson(res, 400, { error: 'invalid maintenance scan request' });
+      if (query.size > 0) {
+        sendJson(res, 400, { error: 'start a refresh with POST /api/refresh' });
         return;
       }
-      try { await (await getMaintenanceApi()).report(req, res, { refresh: query.get('refresh') === 'scan' }); }
+      try { await (await getMaintenanceApi()).report(req, res); }
       catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
       return;
     }

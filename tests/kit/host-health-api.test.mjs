@@ -37,9 +37,9 @@ test('connection route requires same-origin header auth, explicit consent, and b
   assert.equal((await request(server, 'POST', '/api/host-health/connection', [])).status, 400);
   assert.equal((await request(server, 'POST', '/api/host-health/connection', body)).status, 200);
   assert.equal(connections, 1);
-  assert.equal((await request(server, 'POST', '/api/host-health/local', { host: 'codex' })).status, 200);
+  assert.equal((await request(server, 'POST', '/api/host-health/local', { host: 'codex' })).status, 405);
   assert.equal(connections, 1);
-  assert.ok(reads >= 3);
+  assert.equal(reads, 2, 'retired local POST does not run another host check');
   await server.close();
   assert.equal(closed, true);
 });

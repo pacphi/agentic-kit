@@ -661,15 +661,14 @@ test('GET /api/system/summary serves the projection; GET /api/system stays compl
   assert.ok(complete.catalog.items[0].presence[0].itemPath);
 });
 
-test('GET /api/system/summary?refresh=deep starts the scan and answers with its running state', async (t) => {
+test('GET /api/system/summary rejects measurement queries before reading the collector', async (t) => {
   const collector = fakeCollector();
   const cwd = tempDir('ak-system-summary');
   const server = await startDashboard({ port: 0, cwd, system: collector, usage: {}, ...hermeticMaintenance() });
   t.after(() => server.close());
   const r = await request(server, '/api/system/summary?refresh=deep&trees=0');
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 400);
   const body = JSON.parse(r.body);
-  assert.deepEqual(collector.calls.refreshDeep, [{ includeProjectTrees: false }]);
-  assert.deepEqual(body.scan, { running: true, phase: 'catalog' });
-  assert.equal('artifacts' in body.catalog, false);
+  assert.deepEqual(body, { error: 'start a refresh with POST /api/refresh' });
+  assert.deepEqual(collector.calls.refreshDeep, []);
 });

@@ -1127,44 +1127,20 @@ async function main() {
     await sysSrv.close();
   }
 
-  await test('?refresh=deep is single-flight — two concurrent refreshes share one scan', async () => {
-    let release;
-    const gate = new Promise((resolve) => { release = resolve; });
-    // Gate the CHEAP tier, not the deep one. Both requests then resume from the
-    // same promise in one microtask drain, and runDeep's first act is a
-    // setImmediate — so the second request PROVABLY reaches refreshDeep() while
-    // the first still holds the slot. Racing two bare HTTP requests would be
-    // testing the scheduler, not the single-flight rule.
-    const fx = systemFixture({ collectors: { runtime: async () => { await gate; return runtimeCensus(); } } });
-    let maintenanceScans = 0;
-    const maintenance = {
-      async report() { return {}; },
-      async scan() { maintenanceScans += 1; return {}; },
-      async plan() { return {}; },
-    };
+  await test('GET /api/system rejects scan queries before reading the collector', async () => {
+    const fx = systemFixture();
     const srv = await startDashboard({
       port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
-      system: fx.collector, maintenance,
+      system: fx.collector,
     });
     try {
-      const both = Promise.all([
-        get(srv.url + 'api/system?refresh=deep', srv.token),
-        get(srv.url + 'api/system?refresh=deep', srv.token),
-      ]);
-      await eventually(() => fx.calls.runtime === 2, 'both refreshes must reach the collector');
-      release();
-      const [a, b] = await both;
-      assert(a.status === 200 && b.status === 200, 'both refreshes must answer 200');
-      const scanA = JSON.parse(a.body).scan;
-      assert(scanA.running === true && scanA.phase !== 'idle',
-        'a refresh must report the scan it started, got ' + JSON.stringify(scanA));
-      await eventually(() => fx.calls.persist === 1, 'the shared scan must run to completion');
-      await eventually(() => maintenanceScans === 1, 'the completed scan must refresh Maintenance evidence once');
-      assert(fx.calls.install === 1 && fx.calls.storage === 1
-        && fx.calls.catalog === 1 && fx.calls.projects === 1,
-      'the deep collectors ran twice — the single-flight slot did not hold: ' + JSON.stringify(fx.calls));
-      assert(fx.calls.persist === 1, 'a shared scan must write exactly one snapshot');
-      assert(maintenanceScans === 1, 'two attached System requests must not double-run Maintenance providers');
+      for (const query of ['refresh=deep', 'refresh=deep&refresh=scan', 'trees=1']) {
+        const response = await get(srv.url + 'api/system?' + query, srv.token);
+        assert(response.status === 400, 'scan query must be rejected: ' + query);
+        contains(response.body, 'start a refresh with POST /api/refresh');
+      }
+      assert(fx.calls.runtime === 0 && fx.calls.persist === 0,
+        'rejected GET queries must not run collectors or persist measurements');
     } finally {
       await srv.close();
     }
@@ -1411,13 +1387,14 @@ async function main() {
       contains(r.body, 'POLL_COOLDOWN_MS=3000');
     });
 
-    await test('every refresh path is single-flight + cooldown guarded', async () => {
+    await test('Refresh control guards duplicate POSTs and status polling retains its cooldown', async () => {
       const r = await get(uiSrv.url);
-      const fn = r.body.slice(r.body.indexOf('function refreshAll('));
-      const body = fn.slice(0, fn.indexOf('\n  function '));
-      assert(/inflight/.test(body), 'refreshAll must consult the single-flight flag');
-      assert(/POLL_COOLDOWN_MS/.test(body), 'refreshAll must consult the cooldown');
-      assert(/setInterval\(refreshAll/.test(r.body), 'the automatic poll must go through the SAME guarded path');
+      const fn = r.body.slice(r.body.indexOf('function startRefresh('));
+      const body = fn.slice(0, fn.indexOf('function refreshProjectTrees'));
+      contains(body, 'if(refreshBusy)return Promise.resolve(false)');
+      contains(body, "fetch('/api/refresh',{method:'POST'");
+      contains(r.body, 'POLL_COOLDOWN_MS=3000');
+      assert(!/setInterval\(refreshAll/.test(r.body), 'retired automatic refresh path remains');
     });
 
     await test('the Usage tab is lazy — the shared status poll never fetches /api/usage', async () => {

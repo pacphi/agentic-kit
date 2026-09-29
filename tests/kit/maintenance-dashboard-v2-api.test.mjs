@@ -748,26 +748,18 @@ test('v2 inventory projection carries row kind and opaque-id facet labels over e
   assert.doesNotMatch(JSON.stringify(hostile), /Users\/alice|leak/);
 });
 
-test('report({ refresh:true }) fires afterScan once after a successful provider scan and never lets it fail the response', async () => {
+test('report reads persisted evidence and ignores retired refresh arguments', async () => {
   const events = [];
-  const service = { async report() { return {}; }, async scan() { events.push('scan'); return {}; }, async plan() { return {}; } };
+  const service = { async report() { events.push('report'); return {}; }, async scan() { events.push('scan'); return {}; }, async plan() { return {}; } };
   const api = createMaintenanceDashboardApi({
     service, sessionToken: SESSION, afterScan: () => { events.push('afterScan'); throw new Error('rebuild failed'); },
   });
   const plain = fakeRes();
   await api.report({}, plain, { refresh: false });
-  assert.deepEqual([plain.out.status, events], [200, []]);
+  assert.deepEqual([plain.out.status, events], [200, ['report']]);
   const refreshed = fakeRes();
   await api.report({}, refreshed, { refresh: true });
-  assert.deepEqual([refreshed.out.status, events], [200, ['scan', 'afterScan']]);
-  const failing = createMaintenanceDashboardApi({
-    service: { ...service, async scan() { throw new Error('provider check failed'); } }, sessionToken: SESSION,
-    afterScan: () => { events.push('never'); },
-  });
-  const failed = fakeRes();
-  await failing.report({}, failed, { refresh: true });
-  assert.equal(failed.out.status, 503);
-  assert.equal(events.includes('never'), false, 'afterScan only follows a successful scan');
+  assert.deepEqual([refreshed.out.status, events], [200, ['report', 'report']]);
 });
 
 test('lastRefresh is allowlisted on the report, inventory, and guidance envelopes with a guarded, label-safe message (QE D6b)', async () => {
