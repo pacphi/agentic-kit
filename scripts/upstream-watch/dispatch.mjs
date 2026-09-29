@@ -18,7 +18,8 @@ export const FIRE_TIMEOUT_MS = 30_000;
 // Sessions start gradually: a few per run, spaced apart; the rest wait for the next run.
 export const MAX_FIRES_PER_RUN = 3;
 export const FIRE_SPACING_MS = 15_000;
-// A 5xx answer means no session was started, so the call is safe to repeat.
+// The endpoint documents retries for HTTP 500/503, but has no idempotency key.
+// These bounded retries do not guarantee that only one server-side session exists.
 export const FIRE_ATTEMPTS = 3;
 export const FIRE_BACKOFF_MS = 2_000;
 // `gh pr list --head` matches the branch name in any fork; only a pull request
@@ -27,6 +28,12 @@ export const SAME_REPO_PR = '[.[] | select(.isCrossRepository | not)][0].number 
 const ROUTINE = /^trig_[A-Za-z0-9]+$/;
 const DISPATCH_BRANCH = /^upstream\/[a-z0-9._-]+$/;
 const DAY = 86_400_000;
+
+function diagnostic(value, token) {
+  if (typeof value !== 'string') return '';
+  // Redact before bounding, so truncation cannot expose the start of a token.
+  return value.split(token).join('[REDACTED]').replace(/[\p{Cc}\p{Cf}]/gu, ' ').slice(0, 200);
+}
 
 export function sessionList(sessions) {
   if (sessions.length < 3) return sessions.join(' and ');
@@ -65,11 +72,11 @@ export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env
         const body = await response.json().catch(() => null);
         const session = body?.claude_code_session_url;
         if (response.status === 200 && typeof session === 'string') return session;
-        const requestId = response.headers?.get?.('request-id');
-        const detail = body?.error?.message ?? (typeof body?.error === 'string' ? body.error : '');
+        const requestId = diagnostic(response.headers?.get?.('request-id'), token);
+        const detail = diagnostic(body?.error?.message ?? (typeof body?.error === 'string' ? body.error : ''), token);
         failure = `the routine trigger answered HTTP ${response.status}${typeof session === 'string' ? '' : ' without a session'}`
-          + `${requestId ? ` (request-id ${requestId})` : ''}${detail ? `: ${String(detail).slice(0, 200)}` : ''}`;
-        if (response.status < 500) break;
+          + `${requestId ? ` (request-id ${requestId})` : ''}${detail ? `: ${detail}` : ''}`;
+        if (typeof session === 'string' || ![500, 503].includes(response.status)) break;
       }
       throw new Error(failure);
     },

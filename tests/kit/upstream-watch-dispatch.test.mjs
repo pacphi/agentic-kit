@@ -179,7 +179,7 @@ test('the trigger call sends the payload with the documented headers and never p
   await assert.rejects(createDispatcher({ fetchImpl: empty, env }).fire('x'), /without a session/);
 });
 
-test('the trigger call retries a 5xx answer, then reports the request id and body', async () => {
+test('the trigger call retries HTTP 503, then reports the request id and body', async () => {
   const env = { UPSTREAM_DISPATCH_ROUTINE: 'trig_01LmNVKJ4K86joHPvvPtc7yx', UPSTREAM_DISPATCH_TOKEN: 'sk-secret-token' };
   const ok = { status: 200, json: async () => ({ claude_code_session_url: 'https://claude.ai/code/session_r' }) };
   const busy = { status: 503, headers: new Headers({ 'request-id': 'req_1' }), json: async () => ({ error: { message: 'overloaded' } }) };
@@ -232,4 +232,87 @@ test('a pull request from a fork is never taken for the dispatch pull request', 
   const forkOnly = async (command, args) => { calls.push([command, ...args]); return { status: 0, stdout: '\n', stderr: '' }; };
   assert.equal(await createDispatcher({ exec: forkOnly }).openPullRequest('pacphi/agentic-kit', BRANCH), null);
   assert.deepEqual(calls[0].slice(-4), ['--json', 'number,isCrossRepository', '--jq', SAME_REPO_PR]);
+});
+
+// These cases catch retrying an ambiguous or undocumented outcome.
+for (const status of [200, 400, 401, 403, 404, 429, 502, 504, 529]) {
+  test(`HTTP ${status} without a session is not retried`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return { status, json: async () => ({}) }; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status}`));
+    assert.equal(calls, 1);
+    assert.deepEqual(waits, []);
+  });
+}
+
+for (const status of [500, 503]) {
+  test(`HTTP ${status} retries exactly twice with bounded waits`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return { status, json: async () => ({}) }; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status}`));
+    assert.equal(calls, 3);
+    assert.deepEqual(waits, [2000, 4000]);
+  });
+  test(`HTTP ${status} with a session URL never repeats the request`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return { status, json: async () => ({ claude_code_session_url: 'https://claude.ai/code/session_seen' }) }; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status}`));
+    assert.equal(calls, 1);
+    assert.deepEqual(waits, []);
+  });
+}
+
+for (const failure of [new Error('connection reset'), new DOMException('timed out', 'TimeoutError')]) {
+  test(`a thrown ${failure.name} is not retried`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; throw failure; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), { message: failure.message });
+    assert.equal(calls, 1);
+    assert.deepEqual(waits, []);
+  });
+}
+
+test('error metadata redacts the configured token before truncation and removes control characters', async () => {
+  const token = 'synthetic-secret-longer-than-the-remaining-space';
+  const dispatcher = createDispatcher({
+    env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: token },
+    fetchImpl: async () => ({
+      status: 401,
+      headers: { get: () => `req\n\x1b${token} ${'r'.repeat(190)}${token}` },
+      json: async () => ({ error: { message: `message\r\n${token} ${'m'.repeat(170)}${token}` } }),
+    }),
+  });
+  const error = await dispatcher.fire('x').catch((failure) => failure);
+  assert.doesNotMatch(error.message, /synthetic|secret|\p{Cc}/u);
+  assert.match(error.message, /request-id req.*\[REDACTED\]/);
+  assert.match(error.message, /message.*\[REDACTED\]/);
+  assert.ok(error.message.length < 500, 'both metadata fields are bounded');
+});
+
+test('non-string error metadata is ignored without coercing objects', async () => {
+  const dispatcher = createDispatcher({
+    env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+    fetchImpl: async () => ({ status: 401, headers: { get: () => ({ invalid: true }) }, json: async () => ({ error: { message: { invalid: true } } }) }),
+  });
+  await assert.rejects(dispatcher.fire('x'), { message: 'the routine trigger answered HTTP 401 without a session' });
 });
