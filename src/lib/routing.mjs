@@ -77,7 +77,7 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // WITHOUT saying "per-token" gets read as cost-per-task, which is the axis users
 // actually pay on. No workload benchmark is embedded in this catalog; notes
 // describe curated roles, not measured superiority.
-export const MODEL_CATALOG_VERIFIED = '2026-09-28';
+export const MODEL_CATALOG_VERIFIED = '2026-09-29';
 export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — compare total tokens, cache use and agentic turns on representative tasks';
 // Tier names are the pairing key for swapHostModel(): a codex tier only mirrors
 // to a claude model (and back) when BOTH catalogs use the same tier string.
@@ -114,7 +114,8 @@ export const MODEL_CATALOG = {
     // GPT-6 class (Sol/Luna released 2026-09-22; Astra 2026-09-03). Codex's own
     // catalog ranks these first and labels every GPT-5.6 model "Older", and
     // OpenAI's Codex docs make Sol the default preset
-    // (learn.chatgpt.com/docs/models, verified 2026-09-23). Tier pairing with the
+    // (learn.chatgpt.com/docs/models, verified 2026-09-23; GPT-6.1 Sol took that
+    // role on 2026-09-29). Tier pairing with the
     // claude catalog follows role: Sol ↔ Sonnet 5.5 (balanced, $2/$10 both),
     // Luna ↔ Haiku (fast), and Astra ↔ Opus 5.5 (reasoning). Astra is the
     // reasoning tier so a Codex-driven seed gets what a Claude-driven one does:
@@ -123,7 +124,16 @@ export const MODEL_CATALOG = {
     // Astra is priced above Opus 5.5 ($10/$50 vs $4/$20); OpenAI positions it for
     // the hardest end-to-end work, and Anthropic reports Opus 5.5 at Fable 5.1
     // level, which is Astra's class. It also answers for claude's `flagship`.
-    { id: 'gpt-6-sol', tier: 'balanced', note: 'workhorse preset for coding, testing and everyday work' },
+    // GPT-6.1 Sol succeeds GPT-6 Sol as the balanced preset: the same $2/$10
+    // per-token list price, cache reads at half the GPT-6 Sol rate ($0.10), and
+    // OpenAI-reported results near Astra on agentic coding and computer use
+    // (developers.openai.com/api/docs/models/gpt-6.1-sol, learn.chatgpt.com/docs/models,
+    // verified 2026-09-29). Those are OpenAI's own benchmarks, not ak-measured.
+    // It must stay FIRST among the balanced entries: swapHostModel() takes the
+    // first tier match. It has no `none` reasoning effort (GPT-6 Sol does), and
+    // OpenAI lists no withdrawal for GPT-6 Sol, so that stays a pinnable prior.
+    { id: 'gpt-6.1-sol', tier: 'balanced', note: 'workhorse preset for coding, testing and everyday work; near-Astra on OpenAI-reported agentic coding' },
+    { id: 'gpt-6-sol', tier: 'prior', note: 'prior workhorse preset retained for user pins; compare measured per-task results before switching' },
     { id: 'gpt-6-luna', tier: 'fast', note: 'fast-tier preset for mechanical work, documentation and packaging' },
     { id: 'gpt-6-astra', tier: 'reasoning', pairs: ['flagship'], note: 'reasoning preset for the hardest end-to-end work; compare per-task cost before selection' },
     // Still served, retained for user pins. Codex labels them "Older".
@@ -270,10 +280,10 @@ export const DEFAULT_ROUTES = {
   specification:       R('claude', 'claude-sonnet-5-5'),
   architecture:        R('claude', 'claude-opus-5-5'),
   design:              R('claude', 'claude-opus-5-5'),
-  implementation:      R('codex',  'gpt-6-sol', [{ host: 'claude', model: 'claude-opus-5-5' }]),
-  testing:             R('codex',  'gpt-6-sol', [{ host: 'claude', model: 'claude-opus-5-5' }]),
+  implementation:      R('codex',  'gpt-6.1-sol', [{ host: 'claude', model: 'claude-opus-5-5' }]),
+  testing:             R('codex',  'gpt-6.1-sol', [{ host: 'claude', model: 'claude-opus-5-5' }]),
   review:              R('claude', 'claude-sonnet-5-5'),
-  'security-scan':     R('codex',  'gpt-6-sol'),
+  'security-scan':     R('codex',  'gpt-6.1-sol'),
   'security-analysis': R('claude', 'claude-opus-5-5'),
   documentation:       R('codex',  'gpt-6-luna'),
   debugging:           R('claude', 'claude-opus-5-5'),
