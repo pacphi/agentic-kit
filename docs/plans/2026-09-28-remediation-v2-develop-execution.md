@@ -119,6 +119,11 @@ V4's temporary busy-rule/memory-routing CI probe is sandboxed and removed before
 V6 reads the actual cache schema before making exactly one migration; the old plan's 25 → 26
 number must not overwrite a schema bump that has already landed.
 
+V6 Unit 21 implements static `statusLine` command classification for direct helper
+invocations and treats shell wrappers, inline programs, and chains as `custom`.
+Its focused and unit gates passed; the unit commit is pending independent review.
+V6's UI copy remains with V3 until that stream integrates.
+
 ### Scheduling and team shape
 
 The session has four slots total: controller plus at most three workers. Ruflo or AQE

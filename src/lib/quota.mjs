@@ -127,22 +127,26 @@ export function readClaudeLimits({ file = claudeLimitsFile() } = {}) {
 export const CLAUDE_TEE_CHANNELS = Object.freeze(['none', 'kit-footer', 'project-helper', 'custom', 'unknown']);
 const KIT_FOOTER_MARKER = 'ruflo-seg:BEGIN';
 const MAX_STATUSLINE_SCRIPT_BYTES = 4 * 1024 * 1024;
-const MAX_STATUSLINE_SCRIPTS = 8;
-// A script the command names: double-quoted, single-quoted (both may hold
-// spaces), or a bare token. Only the JavaScript family, since the tee is JS.
-const STATUSLINE_SCRIPT_TOKEN = /"([^"]*?\.[cm]?js)"|'([^']*?\.[cm]?js)'|([^\s"'`;|&()=,]+?\.[cm]?js)(?![\w.])/g;
 const HOME_PREFIX = /^(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|%HOME%)(?=[\\/]|$)/;
 // The one project-relative script the kit injects into (fixStatusline).
 const PROJECT_HELPER_SUFFIX = '.claude/helpers/statusline.cjs';
+// The two generated project-helper commands already supported by the classifier.
+// They are known templates, not evidence that arbitrary shell text runs a helper.
+const PROJECT_HELPER_COMMANDS = new Set([
+  'sh -c \'D="${CLAUDE_PROJECT_DIR:-.}"; [ -f "$D/.claude/helpers/statusline.cjs" ] || D="${HOME}"; exec node "$D/.claude/helpers/statusline.cjs"\'',
+  'node -e "const fs=require(\'fs\'),p=require(\'path\');const d=process.env.CLAUDE_PROJECT_DIR||\'.\';const f=p.join(d,\'.claude/helpers/statusline.cjs\');const h=p.join(process.env.USERPROFILE||process.env.HOME||\'.\', \'.claude/helpers/statusline.cjs\');require(fs.existsSync(f)?f:h);"',
+]);
 
-function statusLineScripts(command) {
-  const out = [];
-  for (const m of command.matchAll(STATUSLINE_SCRIPT_TOKEN)) {
-    const token = (m[1] ?? m[2] ?? m[3] ?? '').trim();
-    if (token && !out.includes(token)) out.push(token);
-    if (out.length >= MAX_STATUSLINE_SCRIPTS) break;
-  }
-  return out;
+function directStatusLineScript(command) {
+  // Only a direct Node script (or a directly executable JS script) proves
+  // which file runs. Do not scan arguments, inline programs, shell chains, or
+  // wrapper bodies for plausible paths; none establishes the executed target.
+  const direct = command.trim().match(/^(?:(?:node|node\.exe)(?:\s+--no-warnings)?\s+)?("[^"]+"|'[^']+'|[^\s"']+\.([cm]?js))$/i);
+  if (!direct) return null;
+  const token = direct[1].replace(/^(?:"([^"]*)"|'([^']*)')$/, (_, double, single) => double ?? single);
+  if (!/\.[cm]?js$/i.test(token) || /[`;|&()<>{}]/.test(token.replace(/^\$\{HOME\}/, '$HOME'))
+    || token.includes('$(')) return null;
+  return token;
 }
 
 function scriptCarriesFooter(file, fsImpl) {
@@ -211,9 +215,9 @@ export function classifyClaudeTeeChannel({
   }
   const command = settings?.statusLine?.command;
   if (typeof command !== 'string' || !command.trim()) return 'none';
-  const classes = statusLineScripts(command).map((token) => scriptChannel(token, { fsImpl, home }));
-  if (classes.includes('kit-footer')) return 'kit-footer';
-  return classes.includes('project-helper') ? 'project-helper' : 'custom';
+  if (PROJECT_HELPER_COMMANDS.has(command.trim())) return 'project-helper';
+  const script = directStatusLineScript(command);
+  return script ? scriptChannel(script, { fsImpl, home }) : 'custom';
 }
 
 // ── Codex (app-server) ──────────────────────────────────────────────────────

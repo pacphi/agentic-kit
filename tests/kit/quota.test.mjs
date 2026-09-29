@@ -197,7 +197,7 @@ test('managed default path selection is platform-specific and unsupported platfo
   assert.deepEqual(reads, [fx.settingsFile]);
 });
 
-test('classification reads settings and bounded script only without running settings commands', () => {
+test('a shell chain is custom without reading or running its footer script', () => {
   const settingsFile = '/synthetic/user.json';
   const managedSettingsFile = '/synthetic/managed.json';
   const script = '/synthetic/footer.cjs';
@@ -218,8 +218,65 @@ test('classification reads settings and bounded script only without running sett
   };
   assert.equal(rawClassifyClaudeTeeChannel({
     settingsFile, managedSettingsFile, fsImpl, home: '/synthetic',
-  }), 'kit-footer');
-  assert.deepEqual(reads, [managedSettingsFile, script]);
+  }), 'custom');
+  assert.deepEqual(reads, [managedSettingsFile]);
+});
+
+test('shell wrappers around a footer helper are custom', () => {
+  const fx = teeFixture({ scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, '.claude/helpers/statusline.cjs');
+  const wrapped = [
+    `sh -c 'node "${script}"'`,
+    `bash -c 'node "${script}"'`,
+    `zsh -c 'node "${script}"'`,
+    `cmd /c node "${script}"`,
+    `powershell -Command "node '${script}'"`,
+    'sh -c \'node "$D/.claude/helpers/statusline.cjs"\'',
+  ];
+  for (const command of wrapped) {
+    fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(command) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'custom', command);
+  }
+});
+
+test('a JavaScript path in an argument or inline program does not prove the footer runs', () => {
+  const fx = teeFixture({ scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, '.claude/helpers/statusline.cjs');
+  for (const command of [
+    `echo "${script}"`,
+    `node -e "console.log('${script}')"`,
+    `node -p "'${script}'"`,
+    `node -r "${script}" -e '0'`,
+  ]) {
+    fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(command) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'custom', command);
+  }
+});
+
+test('direct quoted helper invocation remains a footer with a Node option', () => {
+  const fx = teeFixture({ scripts: { 'My Tools/status line.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, 'My Tools/status line.cjs');
+  for (const command of [`node --no-warnings "${script}"`, `node '${script}'`]) {
+    fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(command) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'kit-footer', command);
+  }
+});
+
+test('direct Windows Node invocation can read a quoted footer path', () => {
+  const settingsFile = '/synthetic/settings.json';
+  const script = 'C:\\Users\\Example User\\statusline.cjs';
+  const fsImpl = {
+    readFileSync(file) {
+      if (file === settingsFile) return JSON.stringify({ statusLine: cmd(`node.exe "${script}"`) });
+      if (file === script) return FOOTER_SCRIPT;
+      throw new Error('unexpected read');
+    },
+    statSync(file) {
+      assert.equal(file, script);
+      return { isFile: () => true, size: FOOTER_SCRIPT.length };
+    },
+  };
+  assert.equal(classifyClaudeTeeChannel({ settingsFile, fsImpl, home: '/synthetic' }), 'kit-footer');
 });
 
 test('classifyClaudeTeeChannel: no settings file or no statusLine is "none"', () => {
