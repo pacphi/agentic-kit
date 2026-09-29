@@ -2,18 +2,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from './helpers/temp-dir.mjs';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RUNNER = path.join(ROOT, 'scripts', 'run-tests.mjs');
 
 function sandbox(t) {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-runner-')));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const home = tempDir('ak-runner', t);
   const repo = path.join(home, 'repo');
   fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
   const env = spawnEnv(home, { APPDATA: path.join(home, 'AppData', 'Roaming'), CI: 'true' });
@@ -129,4 +128,78 @@ test('the suite runs without the shell FORCE_COLOR', (t) => {
   const probe = stub(home, 'colour.mjs', `process.exit(process.env.FORCE_COLOR === undefined ? 0 : 7);`);
   const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', probe], { env: { ...env, FORCE_COLOR: '3' }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+test('home temp base is refused before creating a run root', (t) => {
+  const { home, repo, env } = sandbox(t);
+  const before = fs.readdirSync(home);
+  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', '-e', ''], {
+    env: { ...env, TMPDIR: home, TMP: home, TEMP: home }, encoding: 'utf8',
+  });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /unsafe temp base/);
+  assert.deepEqual(fs.readdirSync(home), before);
+});
+
+test('completed runners retain sibling roots and ignore their own owner metadata', async (t) => {
+  const { ownerRecord, writeOwner } = await import('../../scripts/run-roots.mjs');
+  const { home, repo, env } = sandbox(t);
+  const parent = env.TMPDIR;
+  const sibling = fs.mkdtempSync(path.join(parent, 'ak-suite-'));
+  writeOwner(sibling, ownerRecord({ pid: process.pid }));
+  fs.writeFileSync(path.join(sibling, 'sentinel'), 'preserve');
+  for (const exit of [0, 7]) {
+    const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', '-e', `process.exit(${exit})`], { env, encoding: 'utf8' });
+    assert.equal(r.status, exit, r.stderr);
+    assert.match(r.stderr, /kept run root.*cannot prove complete descendant exit/);
+    assert.doesNotMatch(r.stderr, /temp folders left behind/);
+    assert.equal(fs.readFileSync(path.join(sibling, 'sentinel'), 'utf8'), 'preserve');
+    assert.deepEqual(fs.readdirSync(parent), [path.basename(sibling)]);
+  }
+  assert.ok(home);
+});
+
+test('a reaped owner does not authorize sibling deletion after a completed run', async (t) => {
+  const { ownerRecord, writeOwner } = await import('../../scripts/run-roots.mjs');
+  const { repo, env } = sandbox(t);
+  const startedAt = Date.now();
+  const child = spawnSync(process.execPath, ['-e', ''], { env });
+  assert.equal(child.status, 0);
+  const sibling = fs.mkdtempSync(path.join(env.TMPDIR, 'ak-suite-'));
+  writeOwner(sibling, ownerRecord({ pid: child.pid, now: startedAt }));
+  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', '-e', ''], { env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /cannot prove complete descendant exit/);
+  assert.ok(fs.existsSync(sibling));
+});
+
+test('a signalled command retains its run root and performs no sibling collection', (t) => {
+  const { repo, env } = sandbox(t);
+  const sibling = fs.mkdtempSync(path.join(env.TMPDIR, 'ak-suite-'));
+  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', '-e',
+    "process.kill(process.pid, 'SIGTERM')"], { env, encoding: 'utf8' });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /interrupted run/);
+  assert.doesNotMatch(r.stderr, /^kept run root/m);
+  assert.equal(fs.readdirSync(env.TMPDIR).length, 2);
+  assert.ok(fs.existsSync(sibling));
+});
+
+test('own-root listing and removal failures preserve the suite exit code', (t) => {
+  const { home, repo, env } = sandbox(t);
+  const probe = stub(home, 'cleanup-errors.mjs', `import fs from 'node:fs';
+    import { runGuarded } from ${JSON.stringify(new URL('../../scripts/run-tests.mjs', import.meta.url).href)};
+    const readdir = fs.readdirSync;
+    fs.readdirSync = (p, ...args) => {
+      if (String(p).includes('ak-suite-') && !String(p).includes('/repo')) throw Error('listing denied');
+      return readdir(p, ...args);
+    };
+    fs.rmSync = () => { throw Error('EBUSY'); };
+    process.exitCode = runGuarded([['-e', 'process.exit(' + process.argv[3] + ')']], { repoRoot: process.argv[2] });`);
+  for (const code of [0, 7]) {
+    const r = spawnSync(process.execPath, [probe, repo, String(code)], { env, encoding: 'utf8' });
+    assert.equal(r.status, code, r.stderr);
+    assert.match(r.stderr, /could not list own run root/);
+    assert.match(r.stderr, /may be partially removed/);
+  }
 });

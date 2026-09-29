@@ -332,8 +332,15 @@ them, and `sandboxHome()` and `redirectToolState()` do the same for in-process c
 Code's own `~/.claude.json`) are listed as "concurrent writers" and do not fail a local run; CI
 (or `AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with
 `TMPDIR`/`TEMP`/`TMP` pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is
-listed, and the runner refuses to start when that folder sits inside a git repository (point
-`TMPDIR` elsewhere). The runner also drops `FORCE_COLOR` (Claude Code shells set it), because
+listed (excluding its private atomic `.ak-suite-owner.json` and Node compile cache). The runner
+refuses home/filesystem-root temp bases before allocation and refuses roots inside a git
+repository (point `TMPDIR` elsewhere). A completed run removes only its own validated direct,
+canonical, nonsymlink, current-owner root. It then lists sibling suite roots: missing, invalid,
+foreign or uncertain owner metadata means keep. Sibling handling is list-only on macOS, Linux
+and Windows because no installed probe proves all descendants have exited; even a dead owner
+is insufficient. Interrupted runs remove and collect nothing. Listing/removal errors preserve
+the suite's exit code; removal errors may leave a partially removed own root. The runner also
+drops `FORCE_COLOR` (Claude Code shells set it), because
 tests read plain text from pipes. Tests make temporary folders with `tempDir()` from
 `tests/kit/helpers/temp-dir.mjs`, and spawned children get their environment from `spawnEnv()` in
 `tests/kit/helpers/home-sandbox.mjs`. UI tests launch Chrome with `launchChrome()` from

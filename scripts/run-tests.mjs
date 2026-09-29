@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ownerRecord, writeOwner, unsafeTempBase, removableRunRoot, collectAbandonedRoots, IGNORED_IN_ROOT } from './run-roots.mjs';
 import { realStateRoots, snapshotRoots, compareSnapshots, isStrict, formatReport } from './real-state-tripwire.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -54,10 +55,27 @@ export function runGuarded(commands, {
 } = {}) {
   // Every command runs with this run's own templated temp root: leftovers are then
   // attributable to the run, and they fail it.
-  const tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-suite-')));
+  const tmpdir = fs.realpathSync(os.tmpdir());
+  const unsafe = unsafeTempBase(tmpdir, fs.realpathSync(homedir));
+  if (unsafe) { log(`unsafe temp base ${tmpdir}: ${unsafe}`); return 2; }
+  const tempRoot = fs.mkdtempSync(path.join(tmpdir, 'ak-suite-'));
+  try { writeOwner(tempRoot, ownerRecord()); }
+  catch (error) { log(`could not record run owner; kept run root ${tempRoot}: ${error.message}`); return 2; }
+  const identity = fs.lstatSync(tempRoot);
+  const removeOwnRoot = () => {
+    const safe = removableRunRoot(tempRoot, { tmpdir, homedir, requireOwner: false });
+    if (!safe.ok) { log(`kept own run root ${tempRoot}: ${safe.reason}`); return; }
+    try {
+      const current = fs.lstatSync(tempRoot);
+      if (current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeMs !== identity.birthtimeMs) {
+        log(`kept own run root ${tempRoot}: directory identity changed`); return;
+      }
+      fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });
+    } catch (error) { log(`own run root removal failed; may be partially removed ${tempRoot}: ${error.message}`); }
+  };
   const enclosing = enclosingRepository(tempRoot);
   if (enclosing) {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
+    removeOwnRoot();
     log(`the suite temp root ${tempRoot} is inside the git repository ${enclosing}; tests that probe "outside a `
       + 'git repository" would write into it. Point TMPDIR outside any repository.');
     return 2;
@@ -74,11 +92,16 @@ export function runGuarded(commands, {
   let code = 0;
   for (const args of commands) {
     const r = spawnSync(process.execPath, args, { cwd: repoRoot, env: childEnv, stdio: 'inherit' });
+    if (r.signal) { log(`interrupted run; kept run root ${tempRoot}: ${r.signal}`); return 1; }
     if (r.error) { log(`could not run node ${args.join(' ')}: ${r.error.message}`); code = 1; break; }
     if (r.status !== 0) { code = r.status ?? 1; break; }
   }
-  const leftovers = fs.readdirSync(tempRoot).filter((name) => name !== 'node-compile-cache');
-  fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });
+  let leftovers = [];
+  try { leftovers = fs.readdirSync(tempRoot).filter((name) => !IGNORED_IN_ROOT.has(name)); }
+  catch (error) { log(`could not list own run root ${tempRoot}: ${error.message}`); }
+  removeOwnRoot();
+  try { collectAbandonedRoots({ tmpdir, selfRoot: tempRoot, homedir, log }); }
+  catch (error) { log(`could not list sibling run roots: ${error.message}`); }
   if (leftovers.length) log(`temp folders left behind by the run (${leftovers.length}):\n  ${leftovers.join('\n  ')}`);
   const result = compareSnapshots(before, snapshotRoots(roots), { strict: isStrict(env) });
   const report = formatReport(result);

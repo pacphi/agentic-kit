@@ -2,7 +2,7 @@
 
 ## Status
 
-Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Only Task 10 research and this plan are authorized in this pass. No implementation, backlog removal, push, PR or merge has occurred. The creator census is complete: 647 sites classified, zero unresolved current lifecycles. Native Windows/Linux behavioral proof remains open. Default sibling handling is list-only on every platform.
+Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Tasks 10/5/7 were independently accepted. Task 11 now implements private owner records, guarded own-root removal and list-only sibling handling; focused refusal/race/error tests and helper coverage are recorded in the ignored Task 11 report. No backlog removal, push, PR or merge has occurred. Task 12 focus implementation has not started. The creator census is complete: 647 sites classified, zero unresolved current lifecycles. Native Windows/Linux behavioral proof remains open. Default sibling handling is list-only on every platform.
 
 ## Contract and dependencies
 
