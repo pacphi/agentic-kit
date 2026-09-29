@@ -5,6 +5,9 @@
 // autolinks to this repository and `owner/repo#n` mentions the upstream thread.
 const code = (value) => `\`${value}\``;
 
+/** Event names accepted by the ledger query and rendered below. */
+export const LEDGER_EVENTS = ['reply', 'acknowledged', 'closed', 'merged', 'released', 'reopened', 'stale', 'retire-proposed', 'retest-due', 'idle', 'fired', 'dispatch-pr'];
+
 export const isoSeconds = (date) => new Date(date).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /**

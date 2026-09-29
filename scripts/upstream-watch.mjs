@@ -17,7 +17,7 @@ import {
 import { createDispatcher, dispatch } from './upstream-watch/dispatch.mjs';
 import { createFetcher, mapLimit, retrying } from './upstream-watch/fetch.mjs';
 import { createLedgerStore, toRecord } from './upstream-watch/ledger-branch.mjs';
-import { commitSafe, isoSeconds, renderNotice, sentence } from './upstream-watch/ledger.mjs';
+import { LEDGER_EVENTS, commitSafe, isoSeconds, renderNotice, sentence } from './upstream-watch/ledger.mjs';
 import { renderEvents, renderReport } from './upstream-watch/render.mjs';
 
 const USAGE = `usage: node scripts/upstream-watch.mjs report [--json] [--concurrency <1-16>] [--registry <file>]
@@ -28,7 +28,6 @@ const USAGE = `usage: node scripts/upstream-watch.mjs report [--json] [--concurr
 const PENDING = new Set(['watching', 'fixed-unreleased']);
 // record exits BLIND when gh, the registry, the ledger branch or every upstream thread is unreadable.
 const BLIND = 3;
-const LEDGER_EVENTS = ['reply', 'acknowledged', 'closed', 'merged', 'released', 'reopened', 'stale', 'retire-proposed', 'retest-due', 'idle', 'fired', 'dispatch-pr'];
 
 class UsageError extends Error {}
 
