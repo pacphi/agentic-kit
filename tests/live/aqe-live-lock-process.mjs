@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { acquireRunRootHold, releaseRunRootHold } from '../../scripts/run-roots.mjs';
 
 const CLOSE_LIMIT_MS = 10_000;
 
@@ -13,15 +14,33 @@ function closedWithin(run, ms) {
   ]).finally(() => clearTimeout(timer));
 }
 
-export function createProcessScope(signal) {
+export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS } = {}) {
+  // Register uncertainty with the enclosing guarded runner before any child starts.
+  const hold = acquireRunRootHold();
   const runs = new Set();
+  let closed = false;
+  let closing = false;
   const killLive = () => {
     for (const run of runs) if (!run.closed) run.child.kill('SIGKILL');
   };
   signal.addEventListener('abort', killLive, { once: true });
 
   function launch(command, args, options) {
-    const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (closing || signal.aborted) throw Error('cannot launch after process scope closing or aborted');
+    if (!options?.env || typeof options.env !== 'object' || Array.isArray(options.env)) {
+      throw Error('call-owned child requires an explicit sandbox env');
+    }
+    const env = options.env;
+    const required = ['HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'XDG_CONFIG_HOME',
+      'XDG_STATE_HOME', 'APPDATA', 'LOCALAPPDATA'];
+    if (required.some((key) => typeof env[key] !== 'string' || !env[key])) {
+      throw Error('call-owned child requires sandbox home, temp, and state env');
+    }
+    if (process.platform === 'win32' && ['SystemRoot', 'ComSpec', 'PATHEXT']
+      .some((key) => typeof env[key] !== 'string' || !env[key])) {
+      throw Error('call-owned child requires Windows process env');
+    }
+    const child = spawn(command, args, { ...options, env, stdio: ['ignore', 'pipe', 'pipe'] });
     const run = { child, closed: false, error: null, stdout: '', stderr: '', done: null, result: null };
     runs.add(run);
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
@@ -70,9 +89,13 @@ export function createProcessScope(signal) {
   }
 
   async function closeAll() {
+    if (closed) return;
+    closing = true;
     killLive();
     // A failed close keeps the caller's temporary root intact for diagnosis.
-    await Promise.all([...runs].map((run) => closedWithin(run, CLOSE_LIMIT_MS)));
+    await Promise.all([...runs].map((run) => closedWithin(run, closeLimitMs)));
+    releaseRunRootHold(hold);
+    closed = true;
     signal.removeEventListener('abort', killLive);
   }
 
