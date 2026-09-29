@@ -453,8 +453,9 @@ Catalog schema v4 is still refreshed with `ak system --refresh=machine`. `ak syn
 nor executes Maintenance findings.
 
 Browser **Reload** reads the saved Maintenance report without polling providers. Use the header's
-**Refresh** control with its Local choice, or `ak maintain --refresh`, for current provider/version
-evidence. A successful Machine refresh persists a new System snapshot before updating Maintenance.
+**Refresh** control with **Refresh** selected, or `ak maintain --refresh`, for current provider/version
+evidence. A successful **Refresh machine** operation persists a new System snapshot before
+updating Maintenance.
 
 The first provider set is intentionally narrower than the inventory. Claude plugin disable,
 update, and remove; exact Codex plugin/MCP removal; exact receipt-owned skill archive; one bounded

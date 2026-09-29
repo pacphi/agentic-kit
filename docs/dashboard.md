@@ -592,10 +592,12 @@ walk rather than being treated as equivalent.
 Measurement views read `GET /api/system/summary`, which carries only what the page draws;
 `GET /api/system` and `ak system --json` keep the complete payload. Opening Maintenance reads
 the last complete inventory and starts no provider or machine check. The header has one
-**Refresh** control with Local, Live, and Machine choices. Local refreshes Maintenance evidence,
-rebuilds the inventory, and re-checks local evidence and versions. Live adds bounded live checks.
-Machine first measures the machine, then refreshes Maintenance evidence and rebuilds the inventory
-from that measurement. A failed machine measurement skips those two dependent stages.
+**Refresh** button. Its selector shows **Refresh** (local strength), **Refresh live** (live
+strength), and **Refresh machine** (machine strength). The local strength refreshes Maintenance
+evidence, rebuilds the inventory, and re-checks local evidence and versions. The live strength
+adds bounded live checks. The machine strength first measures the machine, then refreshes
+Maintenance evidence; its inventory stage walks the discovery sources and rebuilds from the new
+measurement. A failed machine measurement skips those two dependent stages.
 The control starts an operation with `POST /api/refresh` and reads its progress with
 `GET /api/refresh`. The System and Maintenance GET routes remain read-only.
 `ak maintain --refresh` and `ak maintain --refresh=machine` offer the CLI equivalents.
@@ -667,11 +669,13 @@ Guidance and Activity tabs carry a count only when something is admitted or need
 
 A fresh installation shows an empty Inventory and every installed automatic source as **Not
 scanned yet**; a host that is not installed reads **Not installed**.
-The header's **Refresh** control builds the inventory when Local is selected. Live adds
-bounded live checks; Machine measures the machine and walks every discovery source first.
-`ak maintain --refresh` runs the Local stages from a terminal. The ordered progress labels are
-**Measuring the machine** (Machine only), **Refreshing Maintenance evidence**,
-**Rebuilding the inventory**, **Running live checks** (Live only), and
+Select **Refresh** in the header selector and press the **Refresh** button to build the inventory
+from saved measurement. **Refresh live** adds bounded live checks. **Refresh machine** measures
+the machine, then refreshes Maintenance evidence; the inventory stage walks the discovery sources
+and rebuilds the inventory. `ak maintain --refresh` runs the local stages from a terminal. The
+ordered progress labels are **Measuring the machine** (machine strength only),
+**Refreshing Maintenance evidence**, **Rebuilding the inventory** (including the discovery walk
+for machine strength), **Running live checks** (live strength only), and
 **Re-checking local evidence and versions**. While an operation runs, another cannot start,
 and Maintenance apply, undo, and record are refused. If work does not finish, the previous
 complete evidence is kept.
@@ -782,7 +786,7 @@ adds up to its parent. Roots that do not exist on this machine are listed as abs
 ranked at 0 B, and roots that could not be read say so with their reason.
 
 **Project trees** are excluded by default. The **Include project trees** option is
-available only when Machine is selected in Refresh; it changes the measurement scope.
+available only when **Refresh machine** is selected; it changes the measurement scope.
 One large repository can outweigh every shared cache combined, so the panel says when
 project trees were left out. Select that option and press Refresh to measure them.
 `ak system --refresh=machine` omits them unless `--project-trees` is added.
@@ -951,9 +955,9 @@ provider, model/default agent, and applicable credentials or local endpoint.
 Automatic checks do not invoke its config-debug command, which can install
 dependencies. Unresolved remote configuration and native overrides stay Unknown.
 
-The header's **Refresh** control with Local selected re-checks local evidence for any host.
-**Check connection**
-runs only for hosts managed by ak, and requires
+Select **Refresh** in the header selector and press the **Refresh** button to re-check local
+evidence for any host.
+**Check connection** runs only for hosts managed by ak, and requires
 checking a confirmation box first: it sends one small provider request, using
 normal billing and native context. Native startup may initialize dependencies
 and update local cache/session files. Agent tools are restricted, and no repair

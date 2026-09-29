@@ -62,12 +62,14 @@ Nothing scans on open. A fresh installation has no inventory yet; the empty stat
 use **Refresh** in the header, and every installed automatic source reads **Not scanned yet**
 (a host that is not installed reads **Not installed**).
 
-The header has one **Refresh** control with Local, Live, and Machine choices. Local runs
-provider probes on the saved measurement, rebuilds the inventory, and re-checks local evidence
-and versions. Live adds bounded live checks. Machine first re-measures installs, storage, projects,
-and every discovery source, then refreshes Maintenance evidence and rebuilds the inventory.
+The header has one **Refresh** button. Its selector shows **Refresh** (local strength),
+**Refresh live** (live strength), and **Refresh machine** (machine strength). The local strength
+runs provider probes on the saved measurement, rebuilds the inventory, and re-checks local
+evidence and versions. The live strength adds bounded live checks. The machine strength first
+re-measures installs, storage, and projects, then refreshes Maintenance evidence. Its inventory
+stage walks the discovery sources before rebuilding the inventory from the new measurement.
 The CLI equivalents are `ak maintain --refresh`, `ak maintain --refresh=live`, and
-`ak maintain --refresh=machine`. **Include project trees** applies only to Machine.
+`ak maintain --refresh=machine`. **Include project trees** applies only to **Refresh machine**.
 While an operation runs, another refresh cannot start; apply, undo, and record are refused.
 The prior complete evidence is retained if work does not finish. The empty state reads
 **Building the inventory…** while the inventory builds, or names the failure reason.
@@ -332,7 +334,7 @@ Scans are resumable and completion-oriented.
   run. A started root keeps running through its work slices until it completes, pauses, stops, or
   fails; you never have to resume it yourself. `ak maintain scans start --source ID` does the same
   from the CLI and waits for the final state. Automatic sources show instead whether they are
-  measured by choosing Machine in Refresh or covered by the last measurement.
+  measured by choosing **Refresh machine** or covered by the last measurement.
 
 Progress is factual: "Scanned N entries. X of Y sources are complete. N sources have not been
 scanned yet." Counts are visited work, never totals.
@@ -489,8 +491,8 @@ server registration and are not separate MCP installations.
 
 Measured user instruction files retain their resolved configuration location through
 **Reveal exact path**. Their paths remain private in ordinary inventory responses.
-Choose Local in the header's Refresh control after upgrading to populate locations missing
-from an older snapshot.
+Select **Refresh** in the header selector and press the **Refresh** button after upgrading to
+populate locations missing from an older snapshot.
 
 Inventory can relate a standalone skill and a plugin-contributed skill by exact name, bounded
 entrypoint digest, or bounded full-definition digest. Full-definition equality includes the
@@ -787,6 +789,6 @@ rows. Column headers stay pinned while dates and records scroll.
 Executable installations expose their measured launcher through **Reveal exact path**.
 Detection checks PATH (including Windows PATHEXT), resolves symlinks, and reads bounded npm
 `bin` metadata when a launcher is not on PATH. When only the installation root was measured,
-that root remains revealable. Paths stay out of the public inventory. Choose Machine in the
-header's Refresh control to collect new launcher evidence; discovery covers the environment
-running the scan.
+that root remains revealable. Paths stay out of the public inventory. Select **Refresh machine**
+in the header selector and press **Refresh** to collect new launcher evidence; discovery covers
+the environment running the scan.

@@ -706,7 +706,7 @@ token auth ([ADR-0014](../adr/0014-dashboard-auth-and-remediation.md)), `no-stor
 The response is the cheap tier computed fresh (TTL ~60s, shared-cache pattern like the
 project-snapshot cache) merged with the persisted deep snapshot and its `asOf`.
 The header's **Refresh** control starts an operation through `POST /api/refresh`.
-Choosing Machine runs the deep collector first; `GET /api/refresh` reads the operation's
+Choosing **Refresh machine** runs the deep collector first; `GET /api/refresh` reads the operation's
 stage progress. In production, `index.mjs` retains the single-flight promise and public
 activity state while `deep-scan-worker.mjs` runs the synchronous runner in one worker thread.
 Phase and Projects progress messages return to the main thread so ordinary reads remain
@@ -722,8 +722,8 @@ payload downloaded by the page and its Runtime poll while the collector output s
 unchanged.
 
 Opening System reads the saved snapshot and starts no measurement. A deep scan can cost
-minutes of I/O, so the user explicitly chooses Machine and presses Refresh. Every deep-tier
-figure renders with its snapshot's `asOf`; after `SNAPSHOT_STALE_AFTER_MS` (7 days),
+minutes of I/O, so the user explicitly chooses **Refresh machine** and presses **Refresh**.
+Every deep-tier figure renders with its snapshot's `asOf`; after `SNAPSHOT_STALE_AFTER_MS` (7 days),
 the freshness label turns amber. The client reads progress for the user-started operation
 and stops polling when it finishes. **Reload** re-reads the active view without starting
 machine or provider checks.
