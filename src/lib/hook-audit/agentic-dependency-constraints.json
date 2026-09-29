@@ -2749,6 +2749,24 @@
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 766; no release contains it yet" }
       ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#778",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/778",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "fix: repeated aqe init changes generated settings on an unchanged project",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["ak setup invokes aqe init and can inherit its repeat-run settings churn"], "files": [] },
+      "adjustment": "AQE 3.14.4 repeated init rewrites .claude/settings.json, changes domain and learning defaults on the second run, and creates a backup; CLAUDE.md and AGENTS.md hashes and mtimes stayed unchanged. Keep setup convergence claims bounded until a released fix is verified; 3.14.5 behavior has not been established.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-29", "event": "filed", "note": "approved exact draft posted; remote title and body match receipt" },
+        { "date": "2026-09-29", "event": "registered", "note": "3.14.4 disposable project repro: settings changed on all three runs; guidance hashes and mtimes did not" }
+      ]
     }
   ]
 }
