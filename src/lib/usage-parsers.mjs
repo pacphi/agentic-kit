@@ -229,6 +229,7 @@ export function blankSession(id, provider) {
     codexEffort: null, firstTokenMs: null, compactions: 0,
     compactionEvidence: { lowerBound: 0, upperBound: 0 },
     claudeCostState: null,
+    claudeMessageCoverage: null,
     // v11: cross-host permission posture (usage-modes.normalizeMode), a
     // response-latency histogram, THIS session's own engaged seconds, model
     // context-window detail, and codex's explicit-abort count. Every field
@@ -682,19 +683,26 @@ const hasClaudeUsage = (u) => u.input + u.output + u.cacheRead + u.cacheWrite > 
  * an unrelated line. Dedup is scoped to ONE transcript — the same id can
  * reappear in a subagent's file, and that cross-file overlap is not attempted.
  */
-function stageClaudeMessage(msgState, decoded, at, model) {
+function stageClaudeMessage(msgState, decoded, at, model, recordedAtMs) {
   const key = decoded.messageId ?? `line:${msgState.seq++}`;
   const prior = msgState.groups.get(key);
   if (prior && hasClaudeUsage(prior.usage) && !hasClaudeUsage(decoded.usage)) return;
   // Re-set keeps the Map's first-seen insertion order, so flush order is stable.
-  msgState.groups.set(key, { at, model, usage: decoded.usage });
+  msgState.groups.set(key, { at, model, usage: decoded.usage, recordedAtMs });
 }
 
 /** Account every staged message exactly once: response count, punchcard,
  *  the per-day/model usage row and the context sample — all from the message's
  *  last line. Runs after the whole transcript has been read. */
 function flushClaudeMessages(rec, msgState, windowLog) {
-  for (const { at, model, usage } of msgState.groups.values()) {
+  for (const { at, model, usage, recordedAtMs } of msgState.groups.values()) {
+    if (hasClaudeUsage(usage)) {
+      if (recordedAtMs === null) rec.claudeMessageCoverage.missingTimestampMessages++;
+      else {
+        rec.claudeMessageCoverage.firstAtMs = Math.min(rec.claudeMessageCoverage.firstAtMs ?? recordedAtMs, recordedAtMs);
+        rec.claudeMessageCoverage.lastAtMs = Math.max(rec.claudeMessageCoverage.lastAtMs ?? recordedAtMs, recordedAtMs);
+      }
+    }
     rec.responses++;
     const pk = punchKey(at);
     rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
@@ -758,7 +766,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
   const model = boundedClaudeModel(decoded.model);
   if (!rec.models.includes(model)) rec.models.push(model);
 
-  stageClaudeMessage(msgState, decoded, at, model);
+  stageClaudeMessage(msgState, decoded, at, model, Number.isFinite(ms) ? ms : null);
 
   const tools = collectClaudeToolNames(rec, decoded.toolUses);
   if (withTurns) {
@@ -776,6 +784,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
  */
 export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = null }) {
   const rec = blankSession(id, 'claude');
+  rec.claudeMessageCoverage = { firstAtMs: null, lastAtMs: null, missingTimestampMessages: 0 };
   rec.sessionOrigin = usageRecordOrigin(raw, 'claude');
   const observedProviders = new Set();
   const turns = [];

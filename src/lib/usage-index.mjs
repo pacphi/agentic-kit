@@ -765,7 +765,9 @@ function withWindowLedger(entry, windowConfigDir) {
 }
 
 function compatibleCostStateCache(c, hit) {
-  return c.provider !== 'claude' || Object.hasOwn(hit.session ?? {}, 'claudeCostState');
+  return c.provider !== 'claude' || (Object.hasOwn(hit.session ?? {}, 'claudeCostState')
+    && Object.hasOwn(hit.session ?? {}, 'claudeMessageCoverage')
+    && (!hit.session.claudeCostState || Object.hasOwn(hit.session.claudeCostState, 'startMs')));
 }
 
 /** Parse (or reuse the cached parse of) one scan candidate, updating the

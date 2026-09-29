@@ -9,8 +9,10 @@
 
 Active. Units 1–10, 20 and 21 are accepted. Unit 11 captures Claude Code's
 latest valid cumulative `cost-state` checkpoint as a separate reconciliation
-signal. It compares only matching model and token populations, preserves
-message-derived cost totals, and awaits independent review before Unit 12.
+signal. It reports provable time or token scope differences while preserving
+message-derived cost totals. The observed checkpoint has no end time or serving
+provider attestation, so equal counters remain unverified. Unit 11 awaits
+independent review before Unit 12.
 Unit 2 is limited to the agreed classifier interface, parser fields and one
 usage-cache schema bump.
 The maintainer approved retaining unfamiliar, bounded tokens from named origin
