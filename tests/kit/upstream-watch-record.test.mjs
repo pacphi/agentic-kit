@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { retrying } from '../../scripts/upstream-watch/fetch.mjs';
+import { PermanentFetchError, retrying } from '../../scripts/upstream-watch/fetch.mjs';
 import { isActionRecord } from '../../scripts/upstream-watch/ledger.mjs';
 import { main } from '../../scripts/upstream-watch.mjs';
 import {
@@ -17,15 +17,22 @@ async function record(file, argv, { fetcher = fixtureFetcher(), ledgerStore = me
   return { code, result: out.text() ? JSON.parse(out.text()) : null, err: err.text(), ledgerStore, dispatcher };
 }
 
-test('retrying retries every method but auth, then gives up', async () => {
+test('retrying handles transient failures within the budget, but never retries auth or deterministic failures', async () => {
   let calls = 0;
   const waits = [];
   const fetcher = retrying({ auth: async () => { throw new Error('auth is not retried'); }, thread: async () => { calls += 1; if (calls < 3) throw new Error('HTTP 502'); return 'ok'; } }, { sleep: async (ms) => { waits.push(ms); } });
   assert.equal(await fetcher.thread('a/b#1'), 'ok');
   assert.deepEqual(waits, [2000, 10000]);
   await assert.rejects(fetcher.auth(), /auth is not retried/);
-  const always = retrying({ thread: async () => { throw new Error('HTTP 404'); } }, { sleep: noSleep });
-  await assert.rejects(always.thread('a/b#1'), /HTTP 404/);
+  let exhausted = 0;
+  const always = retrying({ thread: async () => { exhausted++; throw new Error('HTTP 502'); } }, { delays: [1, 2], sleep: async (ms) => { waits.push(ms); } });
+  await assert.rejects(always.thread('a/b#1'), /HTTP 502/);
+  assert.equal(exhausted, 3);
+  assert.deepEqual(waits, [2000, 10000, 1, 2]);
+  let deterministic = 0;
+  const invalid = retrying({ thread: async () => { deterministic++; throw new PermanentFetchError('no fixture'); } }, { sleep: async () => { assert.fail('deterministic failure slept'); } });
+  await assert.rejects(invalid.thread('a/b#1'), /no fixture/);
+  assert.equal(deterministic, 1);
 });
 
 test('record on an absent ledger starts from --since, commits every record and prints the notice', async () => {
