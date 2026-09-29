@@ -3,7 +3,259 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { run, have, resolveShim } from '../../src/lib/exec.mjs';
+import { run, have, resolveShim, withAbortSignal } from '../../src/lib/exec.mjs';
+
+const isAlive = (pid) => {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+};
+async function waitUntil(predicate) {
+  for (let n = 0; n < 60; n += 1) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return predicate();
+}
+
+for (const [name, options] of [
+  ['no input with explicit signal', { input: undefined, inherited: false }],
+  ['input with explicit signal', { input: '', inherited: false }],
+  ['no input with inherited signal', { input: undefined, inherited: true }],
+  ['input with inherited signal', { input: '', inherited: true }],
+]) {
+  test(`run() abort reaps owned grandchild: ${name}`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-abort-tree-'));
+    const pidFile = path.join(dir, 'pids.json');
+    const controller = new AbortController();
+    const code = `const {spawn}=require('node:child_process');
+      const gc=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
+      setInterval(()=>{},1000);`;
+    let pids = [];
+    let pending;
+    try {
+      const launch = () => run(process.execPath, ['-e', code], {
+        input: options.input, timeout: 5_000,
+        ...(options.inherited ? {} : { signal: controller.signal }),
+      });
+      pending = options.inherited ? withAbortSignal(controller.signal, launch) : launch();
+      assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true, 'owned children started');
+      pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+      assert.equal(isAlive(pids[1]), true, 'grandchild alive before abort');
+      controller.abort();
+      const result = await pending;
+      assert.notEqual(result.code, 0);
+      assert.equal(await waitUntil(() => !isAlive(pids[1])), true,
+        'abort must terminate the grandchild, not only its parent');
+    } finally {
+      controller.abort();
+      for (const pid of pids) {
+        if (isAlive(pid)) {
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+        }
+      }
+      await pending;
+      assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true, 'fixture children exited');
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('run() does not spawn for a pre-aborted signal, including inherited abort', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-preabort-'));
+  const marker = path.join(dir, 'spawned');
+  const aborted = new AbortController();
+  aborted.abort();
+  const args = ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)},'yes')`];
+  try {
+    for (const input of [undefined, '']) {
+      const explicit = await run(process.execPath, args, { signal: aborted.signal, input });
+      const inherited = await withAbortSignal(aborted.signal,
+        () => run(process.execPath, args, { input }));
+      assert.notEqual(explicit.code, 0);
+      assert.notEqual(inherited.code, 0);
+      assert.equal(fs.existsSync(marker), false);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an explicit live signal takes precedence over an aborted inherited signal', async () => {
+  const inherited = new AbortController();
+  inherited.abort();
+  const explicit = new AbortController();
+  for (const input of [undefined, '']) {
+    const result = await withAbortSignal(inherited.signal, () => run(
+      process.execPath, ['-e', 'process.stdout.write("ok")'],
+      { signal: explicit.signal, input },
+    ));
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, 'ok');
+  }
+});
+
+for (const stop of ['abort', 'timeout']) {
+  test(`Windows ${stop} after direct-child exit reports incomplete tree cleanup`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-exited-root-'));
+    const pidFile = path.join(dir, 'pids.json');
+    const exitFile = path.join(dir, 'parent-exit');
+    const readyFile = path.join(dir, 'descendant-ready');
+    const controller = new AbortController();
+    // libuv's Windows Job Object kills non-detached children when their
+    // parent exits. unref() alone only releases the event-loop reference.
+    // Deliberately escape that job while retaining the real output handles.
+    const descendant = `require('node:fs').writeFileSync(${JSON.stringify(readyFile)},'ready');
+      setTimeout(()=>{},10000);`;
+    const code = `const {spawn}=require('node:child_process');
+      const fs=require('node:fs');
+      const gc=spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{
+        detached:process.platform==='win32',stdio:['ignore','inherit','inherit']});
+      gc.unref();
+      fs.writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
+      const ready=setInterval(()=>{
+        if(fs.existsSync(${JSON.stringify(readyFile)})) clearInterval(ready);
+      },10);
+      setTimeout(()=>process.exit(2),4000).unref();
+      process.on('exit',()=>fs.writeFileSync(${JSON.stringify(exitFile)},'yes'));`;
+    let pids = [];
+    let pending;
+    try {
+      const started = Date.now();
+      pending = run(process.execPath, ['-e', code], {
+        windows: true, signal: controller.signal, timeout: stop === 'timeout' ? 1_200 : 5_000,
+      });
+      assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true);
+      pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+      assert.equal(await waitUntil(() => fs.existsSync(readyFile)), true, 'descendant initialized');
+      assert.equal(await waitUntil(() => fs.existsSync(exitFile)), true, 'direct child exited');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(isAlive(pids[1]), true, 'descendant still owns the output pipe');
+      const stoppedAt = Date.now();
+      if (stop === 'abort') controller.abort();
+      const result = await pending;
+      assert.notEqual(result.code, 0, 'an incomplete run cannot report success');
+      assert.match(result.stderr, /incomplete.*tree cleanup/i);
+      assert.ok(Date.now() - (stop === 'abort' ? stoppedAt : started)
+        < (stop === 'abort' ? 1_400 : 2_600), 'return is bounded by abort or timeout');
+    } finally {
+      controller.abort();
+      for (const pid of pids) {
+        if (isAlive(pid)) {
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+        }
+      }
+      await pending;
+      assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true, 'fixture children exited');
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('Windows taskkill stall has a bounded cleanup wait and reports uncertainty', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-taskkill-stall-'));
+  const killer = path.join(dir, 'taskkill.exe');
+  const oldPath = process.env.PATH;
+  fs.writeFileSync(killer, `#!${process.execPath}\nsetTimeout(() => process.exit(1), 1500);\n`, { mode: 0o755 });
+  process.env.PATH = `${dir}${path.delimiter}${oldPath}`;
+  try {
+    const started = Date.now();
+    const result = await run(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+      windows: true, timeout: 100,
+    });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /incomplete.*tree cleanup/i);
+    assert.ok(Date.now() - started < 1400, 'does not wait for the stalled taskkill process');
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('run() enforces maxBuffer in UTF-8 bytes', async () => {
+  const result = await run(process.execPath, ['-e', 'process.stdout.write("ééé")'], {
+    maxBuffer: 4,
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /maxBuffer/i);
+});
+
+function recordShimChildren(reported, observedShimPid, cleanupPids) {
+  // The reported parent is assertion evidence, never kill authority.
+  cleanupPids.push(reported[0], reported[1], observedShimPid);
+  assert.equal(reported[2], observedShimPid, 'Node is a child of the observed PowerShell shim');
+}
+
+test('a mismatched reported parent never becomes a fixture cleanup kill target', () => {
+  const cleanupPids = [];
+  const killTargets = [];
+  const unexpectedParent = 990003;
+  // Synthetic PIDs and an injected recording function: no real process signal.
+  const kill = (pid) => { killTargets.push(pid); };
+  try {
+    assert.throws(() => recordShimChildren([990001, 990002, unexpectedParent], 990004, cleanupPids),
+      /Node is a child of the observed PowerShell shim/);
+  } finally {
+    for (const pid of cleanupPids) kill(pid);
+  }
+  assert.equal(killTargets.includes(unexpectedParent), false, 'unowned reported parent must never be signalled');
+  assert.deepEqual(killTargets, [990001, 990002, 990004]);
+});
+
+test('Windows abort reaps the Node child behind a PowerShell shim and its grandchild', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-abort-shim-'));
+  const pidFile = path.join(dir, 'pids.json');
+  const shimEntry = path.join(dir, 'powershell-pid');
+  const controller = new AbortController();
+  const quotedNode = process.execPath.replaceAll("'", "''");
+  const pids = [];
+  let pending;
+  let outcome;
+  try {
+    fs.writeFileSync(path.join(dir, 'codex.cmd'), '@echo off\r\n');
+    const code = `const {spawn}=require('node:child_process');
+      const gc=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid,process.ppid]));
+      setInterval(()=>{},1000);`;
+    // npm shims forward a script filename; PowerShell 5.1 reserializes
+    // native arguments, so multiline node -e source is not that interface.
+    const script = path.join(dir, 'fixture.cjs');
+    fs.writeFileSync(script, code);
+    fs.writeFileSync(path.join(dir, 'codex.ps1'),
+      `[System.IO.File]::WriteAllText('${shimEntry.replaceAll("'", "''")}',[string]$PID)\n`
+      + `& '${quotedNode}' '${script.replaceAll("'", "''")}' $args\nexit $LASTEXITCODE\n`);
+    pending = run('codex', [], {
+      // PowerShell checks PATHEXT even for the absolute Node.exe path.
+      // Excluding .EXE changes native execution into document activation.
+      env: { PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, signal: controller.signal, timeout: 10_000,
+    });
+    pending.then((result) => { outcome = result; });
+    assert.equal(await waitUntil(() => fs.existsSync(pidFile) || outcome), true, 'PowerShell launch settled or ready');
+    assert.equal(fs.existsSync(shimEntry), true, `PowerShell entered owned shim: ${JSON.stringify(outcome)}`);
+    assert.equal(fs.existsSync(pidFile), true, `PowerShell launched Node: ${JSON.stringify(outcome)}`);
+    const reported = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+    recordShimChildren(reported, Number(fs.readFileSync(shimEntry, 'utf8')), pids);
+    assert.equal(isAlive(pids[1]), true);
+    controller.abort();
+    const result = await pending;
+    assert.notEqual(result.code, 0);
+    assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true,
+      'taskkill must remove the Node process and its grandchild');
+  } finally {
+    controller.abort();
+    for (const pid of pids) {
+      if (isAlive(pid)) {
+        try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+    }
+    await pending;
+    assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true, 'fixture children exited');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // code-quality Finding 2: exec.mjs used to set shell:true for a fixed set of
 // Windows .cmd shims (npm/npx/claude/ruflo/aqe/claude-flow), which handed

@@ -501,14 +501,15 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane C: live-lock busy rule", "pacphi/agentic-kit#240"], "files": ["docs/host-support.md"] },
-      "adjustment": "agentic-qe 3.14.4 reports the real LockHeld instead of FsyncFailed after a live lock (Windows confirmation 2026-09-28). Re-run the live-owner fixture on macOS and Linux against 3.14.4; if no FsyncFailed follows the live-lock warning, remove the temporary busy rule in src/lib/aqe-readiness.mjs and close pacphi/agentic-kit#240.",
-      "status": "watching",
+      "adjustment": "Released agentic-qe 3.14.4 passed disposable live-owner conformance on macOS and Linux: status and the shipped adapter emitted LockHeld without FsyncFailed, and RVF/lock bytes were unchanged. ak retired the exact FsyncFailed-as-busy exception; old 3.14.3 output now fails closed. Ordinary live-lock SQLite fallback remains busy. This is a verified artifact baseline for this rule, not a universal AQE minimum or native Windows conformance. Upstream issue state remains separate from this kit retirement.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "commented" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-27", "event": "commented", "note": "#719 fixed FsyncFailed; a small fall-through remains (issuecomment-5863219357)" },
-        { "date": "2026-09-28", "event": "commented", "note": "thanked fedor-drmanovic for the Windows 3.14.4 results; ak re-runs its live-owner fixture on macOS and Linux next (issuecomment-5878041570)" }
+        { "date": "2026-09-28", "event": "commented", "note": "thanked fedor-drmanovic for the Windows 3.14.4 results; ak re-runs its live-owner fixture on macOS and Linux next (issuecomment-5878041570)" },
+        { "date": "2026-09-29", "event": "retired", "note": "ak retired its exact FsyncFailed-as-busy exception after released 3.14.4 passed native macOS and Linux live-owner probes; ordinary LockHeld fallback remains busy; no native Windows AQE proof or upstream closure claimed" }
       ]
     },
     {
@@ -749,7 +750,7 @@
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-27", "event": "retired", "note": "merged and released in 3.14.4; context only: agentic-qe#574, tracked by pacphi/agentic-kit#240, drives removing the busy rule" }
       ],
-      "note": "Context only: a partial fix for agentic-qe#574 (rethrows LockHeld). Its release alone does not prove a live lock no longer surfaces FsyncFailed, so agentic-qe#574 drives removing the busy rule and closing pacphi/agentic-kit#240."
+      "note": "Context only: a partial fix for agentic-qe#574 (rethrows LockHeld), released in 3.14.4. Native macOS and Linux conformance against that artifact later showed no FsyncFailed under a live lock; ak retired the exact exception on 2026-09-29. Native Windows AQE conformance and pacphi/agentic-kit#240 closure remain separate."
     },
     {
       "id": "proffesor-for-testing/agentic-qe#734",
@@ -1128,7 +1129,8 @@
         { "date": "2026-09-26", "event": "commented", "note": "tested the single-threaded ONNX Runtime mitigation on Apple Silicon: inconclusive, the abort does not reproduce locally (issuecomment-5850382245)" },
         { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" },
         { "date": "2026-09-27", "event": "commented", "note": "3.47.0 status, transformers 3.x / ONNX Runtime 1.21 lead, fix approaches; 11/11 nightly aborts in the continue-on-error step (issuecomment-5863246672)" },
-        { "date": "2026-09-28", "event": "commented", "note": "thanked vidaunited for the trace hook; 12 of 12 macOS nightly aborts on 3.47.0, with a new WASM backend line before the abort (issuecomment-5878044230)" }
+        { "date": "2026-09-28", "event": "commented", "note": "thanked vidaunited for the trace hook; 12 of 12 macOS nightly aborts on 3.47.0, with a new WASM backend line before the abort (issuecomment-5878044230)" },
+        { "date": "2026-09-29", "event": "commented", "note": "posted the approved source-bound native trace on #2885 (issuecomment-5891510508); the failure occurred after heal, the outer command exited 1, and its learning step remained nonblocking for the job; the trace does not establish a cause or released fix" }
       ]
     },
     {
@@ -1524,7 +1526,8 @@
       "history": [
         { "date": "2026-09-24", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "commented", "note": "answered from the Codex CLI source (issuecomment-5863289657)" }
+        { "date": "2026-09-27", "event": "commented", "note": "answered from the Codex CLI source (issuecomment-5863289657)" },
+        { "date": "2026-09-29", "event": "reviewed", "note": "still open with only ak's source-analysis comment; no maintainer-supported guidance or live hook proof, so the conditional Codex fix line remains deferred" }
       ]
     },
     {
@@ -2024,15 +2027,16 @@
       "dependency": null,
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": ["src/lib/aqe-readiness.mjs"] },
-      "adjustment": "Close #240 when a released agentic-qe no longer falls through to create after a live RVF lock (agentic-qe#574) and ak removes the temporary busy rule. agentic-qe#719 (partial fix: rethrows LockHeld) was released in 3.14.4 on 2026-09-27; whether that release alone clears FsyncFailed under a live lock is not yet verified.",
+      "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": ["docs/troubleshooting.md"] },
+      "adjustment": "After the final main PR merges, the controller can close #240 with the released 3.14.4 native macOS/Linux live-owner evidence and ak's exact exception retirement for agentic-qe#574. The old 3.14.3 FsyncFailed sequence now fails closed; ordinary LockHeld fallback remains busy. No native Windows AQE conformance or upstream issue closure is claimed.",
       "status": "watching",
       "constraintIds": [],
       "tracks": ["proffesor-for-testing/agentic-qe#574", "proffesor-for-testing/agentic-qe#719"],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "commented", "note": "moved the upstream part of this tracker to the watch registry; agentic-qe 3.14.4 carries PR 719, not yet verified to stop FsyncFailed under a live lock (issuecomment-5858567140)" }
+        { "date": "2026-09-27", "event": "commented", "note": "moved the upstream part of this tracker to the watch registry; agentic-qe 3.14.4 carries PR 719, not yet verified to stop FsyncFailed under a live lock (issuecomment-5858567140)" },
+        { "date": "2026-09-29", "event": "reviewed", "note": "released 3.14.4 passed native macOS and Linux live-owner conformance and ak retired the exact exception; issue closure waits for final main PR" }
       ]
     },
     {
@@ -2129,10 +2133,10 @@
       "kind": "issue",
       "title": "`agentic-qe mcp` double-spawns the server (stdio:'inherit') and drops stdin → premature shutdown",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.4" } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
-      "adjustment": "Once a released agentic-qe mcp stops double-spawning the server, drop the host-support.md risk link.",
+      "adjustment": "The 3.14.4 MCP entry runs in-process; host-support.md records adoption from that version. Keep watching the still-open upstream issue until its closed-completed condition is met.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -2147,10 +2151,10 @@
       "kind": "issue",
       "title": "init: platform installs are additive, not exclusive — always installs Claude Code surface; need per-platform/only mode",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.4" } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
-      "adjustment": "Once a released agentic-qe init offers an exclusive per-platform mode, drop the host-support.md risk link.",
+      "adjustment": "The 3.14.4 aqe init --no-claude option supports exclusive platform initialization; host-support.md records adoption from that version. Keep watching the still-open upstream issue until its closed-completed condition is met.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -2168,7 +2172,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
-      "adjustment": "Once a released agentic-qe fixes the listed MCP tool bugs, drop the host-support.md risk link.",
+      "adjustment": "Keep the host-support.md risk link limited to the remaining 3.14.4 GOAP maxSteps/world-state, test-generation quality, and coherence recommendation-text gaps. memory_delete and cross-phase stats were fixed; goap_execute was not re-exercised.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -2702,8 +2706,8 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row's manual fix names aqe platform setup codex (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
-      "adjustment": "none: ak does not run platform setup; once fixed, the codex-mcp status row's manual fix (aqe platform setup codex --overwrite --with-ruflo) works as written.",
+      "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row formerly named the broken platform setup command (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
+      "adjustment": "The codex-mcp status row now points to AQE's supported aqe init --auto --with-codex --codex-guidance compact flow and notes the separate 3.14.4 Codex asset gap (agentic-qe#755). ak does not run platform setup or write AQE's Codex registration.",
       "status": "fixed-unreleased",
       "constraintIds": [],
       "history": [
@@ -2748,6 +2752,24 @@
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 766; no release contains it yet" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#778",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/778",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "fix: repeated aqe init changes generated settings on an unchanged project",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["ak setup invokes aqe init and can inherit its repeat-run settings churn"], "files": [] },
+      "adjustment": "AQE 3.14.4 repeated init rewrites .claude/settings.json, changes domain and learning defaults on the second run, and creates a backup; CLAUDE.md and AGENTS.md hashes and mtimes stayed unchanged. Keep setup convergence claims bounded until a released fix is verified; 3.14.5 behavior has not been established.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-29", "event": "filed", "note": "approved exact draft posted; remote title and body match receipt" },
+        { "date": "2026-09-29", "event": "registered", "note": "3.14.4 disposable project repro: settings changed on all three runs; guidance hashes and mtimes did not" }
       ]
     }
   ]

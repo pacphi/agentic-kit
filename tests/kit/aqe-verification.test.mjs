@@ -6,38 +6,39 @@ import { aqeVerificationPassed } from '../../src/lib/aqe-verification.mjs';
 test('a live lock does not hide an independent storage error', () => {
   assert.equal(classifyAqeStartup({ code: 0, stderr: 'locked by a live process; FsyncFailed' }).status, 'failed');
 });
-// TEMPORARY (remove with the rule in classifyAqeStartup, pacphi/agentic-kit#240): the
-// exact stderr agentic-qe 3.14.3 emits when a healthy patterns.rvf is held by a live
-// owner (captured from a fixture; store and lock bytes were unchanged). The FsyncFailed
-// comes from a create attempt AQE should not make (agentic-qe#574). Remove this test
-// when a released agentic-qe fixes agentic-qe#574 and that release is the kit's floor;
-// agentic-qe#719 (in 3.14.4) is a partial fix and does not remove it.
-const LIVE_OWNER_CONTENTION = [
+// AQE 3.14.3 emitted this exact sequence under a live lock. The released 3.14.4
+// artifact omits FsyncFailed in macOS and Linux conformance probes; old output fails closed.
+const OLD_LIVE_OWNER_CONTENTION = [
   '[RVF] /p/.agentic-qe/patterns.rvf is locked by a live process (pid 70149) — not breaking the lock; degrading to SQLite for this run.',
   '[RVF] /p/.agentic-qe/patterns.rvf is unusable but its lock is held by a live process — leaving it alone and degrading to SQLite for this run.',
   '[RVF] Shared adapter init failed: RVF error 0x0303: FsyncFailed',
 ].join('\n');
 
-test('live-owner lock contention reads as busy, not a storage failure (agentic-qe#574)', () => {
-  const startup = classifyAqeStartup({ code: 0, stdout: '', stderr: LIVE_OWNER_CONTENTION });
-  assert.equal(startup.status, 'busy');
-  assert.match(startup.reason, /another live process/);
-  assert.match(startup.reason, /integrity unverified/);
-  assert.equal(aqeVerificationPassed(startup, { status: 'passed', corpus: { status: 'healthy' } }), true);
+test('old live-owner FsyncFailed sequence fails closed and blocks verification', () => {
+  const startup = classifyAqeStartup({ code: 0, stdout: '', stderr: OLD_LIVE_OWNER_CONTENTION });
+  assert.deepEqual(startup, { status: 'failed', reason: 'RVF backend failed' });
+  assert.equal(aqeVerificationPassed(startup, { status: 'passed', corpus: { status: 'healthy' } }), false);
 });
-test('the contention rule needs all three lines; a partial match still fails', () => {
-  const [locked, unusable, fsync] = LIVE_OWNER_CONTENTION.split('\n');
+test('FsyncFailed fails with or without partial live-lock lines', () => {
+  const [locked, unusable, fsync] = OLD_LIVE_OWNER_CONTENTION.split('\n');
   for (const stderr of [fsync, `${locked}\n${fsync}`, `${unusable}\n${fsync}`]) {
     assert.equal(classifyAqeStartup({ code: 0, stderr }).status, 'failed', stderr);
   }
-  assert.equal(classifyAqeStartup({ code: 1, stderr: LIVE_OWNER_CONTENTION }).status, 'failed');
+  assert.equal(classifyAqeStartup({ code: 1, stderr: OLD_LIVE_OWNER_CONTENTION }).status, 'failed');
 });
-test('live-owner contention does not hide failed embedding initialization', () => {
-  const stderr = `${LIVE_OWNER_CONTENTION}\nReasoningBank prewarm failed`;
-  assert.equal(classifyAqeStartup({ code: 0, stderr }).status, 'degraded');
+test('FsyncFailed takes precedence over failed embedding initialization', () => {
+  const stderr = `${OLD_LIVE_OWNER_CONTENTION}\nReasoningBank prewarm failed`;
+  assert.equal(classifyAqeStartup({ code: 0, stderr }).status, 'failed');
 });
 test('a live lock does not hide failed embedding initialization', () => {
   assert.equal(classifyAqeStartup({ code: 0, stderr: 'locked by a live process; prewarm failed' }).status, 'degraded');
+});
+test('ordinary live lock remains busy with owner health and RVF integrity unknown', () => {
+  const startup = classifyAqeStartup({ code: 0, stderr: '[RVF] locked by a live process; 0x0300: LockHeld; degrading to SQLite' });
+  assert.equal(startup.status, 'busy');
+  assert.match(startup.reason, /SQLite fallback observed/);
+  assert.match(startup.reason, /owner health and RVF integrity unverified/);
+  assert.equal(aqeVerificationPassed(startup, { status: 'passed', corpus: { status: 'healthy' } }), true);
 });
 test('busy RVF permits qualified semantic proof when corpus is verified', () => {
   assert.equal(aqeVerificationPassed({ status: 'busy' }, { status: 'passed', corpus: { status: 'healthy' } }), true);

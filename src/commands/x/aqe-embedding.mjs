@@ -3,6 +3,7 @@ import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../../lib/aq
 import { prepareAqeEmbedding, AQE_EMBEDDING_COACHING } from '../../lib/aqe-embedding-lifecycle.mjs';
 import { inspectAqeEmbeddingProjections, reconcileAqeEmbeddingProjections } from '../../lib/aqe-embedding-projection.mjs';
 import { reconcileOpencodeAqeEmbedding } from '../../lib/opencode-core.mjs';
+import { reportFailure } from '../../lib/output.mjs';
 
 export const options = {
   'aqe-embedding-mode': { type: 'string' }, 'aqe-embedding-endpoint': { type: 'string' },
@@ -43,11 +44,19 @@ export async function run({ flags = {}, positionals = [],
   reconcileOpenCode = reconcileOpencodeAqeEmbedding,
 }) {
   const action = positionals[0] ?? 'status';
-  if (!['status', 'configure', 'prepare', 'verify'].includes(action) || positionals.length > 1) return 2;
+  if (!['status', 'configure', 'prepare', 'verify'].includes(action) || positionals.length > 1) {
+    const error = 'usage: ak x aqe-embedding [status|configure|prepare|verify]';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => console.error(error) });
+    return 2;
+  }
   const cfg = load();
   if (action === 'configure') {
     try { cfg.aqeEmbedding = embeddingIntentFromFlags(cfg, flags); }
-    catch { console.error('Invalid embedding selection; run ak x aqe-embedding --help.'); return 2; }
+    catch {
+      const error = 'Invalid embedding selection; run ak x aqe-embedding --help.';
+      reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => console.error(error) });
+      return 2;
+    }
   }
   const emit = value => console.log(flags.json ? JSON.stringify(value) : value.detail);
   const openCodeReady = (dryRun) => {

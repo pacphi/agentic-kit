@@ -10,6 +10,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { verifyProjectMemoryWrite } from '../../src/commands/setup.mjs';
 import { captureLog } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 function store(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -108,4 +109,115 @@ test('the setup probe leaves nothing in a redirected memory root', async (t) => 
   assert.match(out, /memory write VERIFIED/);
   assert.deepEqual(keys(path.join(redirected, 'agentdb-memory.db')), ['user-row'], 'the redirected MCP store kept a setup probe');
   for (const name of ['memory.db', 'agentdb-memory.db']) assert.deepEqual(keys(path.join(root, '.swarm', name)), ['user-row']);
+});
+
+// Ruflo 3.48 writes its native mirror under CLAUDE_FLOW_MEMORY_PATH even when
+// CLAUDE_FLOW_DB_PATH points elsewhere. The fake follows those two routes.
+function routedProject(t) {
+  const root = tempDir('ak-setup-route', t);
+  const primary = path.join(root, '.swarm', 'memory.db');
+  const canonical = path.join(root, '.swarm', 'agentdb-memory.db');
+  const redirected = path.join(root, 'data', 'memory', 'agentdb-memory.db');
+  for (const file of [primary, canonical, redirected]) {
+    const db = store(file);
+    db.prepare("INSERT INTO memory_entries VALUES ('real', 'user-row', 'active')").run();
+    db.close();
+  }
+  const mirrors = [];
+  const runner = async (_cmd, args, { env }) => {
+    const key = args[args.indexOf('-k') + 1];
+    assert.equal(env.RUFLO_DAEMON_AUTOSTART, '0');
+    assert.equal(env.CLAUDE_FLOW_DB_PATH, primary);
+    const mirror = path.join(env.CLAUDE_FLOW_MEMORY_PATH, 'agentdb-memory.db');
+    mirrors.push(mirror);
+    for (const file of [env.CLAUDE_FLOW_DB_PATH, mirror]) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const db = new DatabaseSync(file);
+      db.exec('CREATE TABLE IF NOT EXISTS memory_entries (namespace TEXT, key TEXT, status TEXT)');
+      db.prepare("INSERT INTO memory_entries VALUES ('_setup', ?, 'active')").run(key);
+      db.close();
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  return { root, primary, canonical, redirected, mirrors, runner };
+}
+
+test('setup verifies the primary while removing its private mirror and preserving native corpora', async (t) => {
+  const p = routedProject(t);
+  const { out } = await captureLog(() => verifyProjectMemoryWrite(p.root, { CLAUDE_FLOW_DB_PATH: p.primary,
+    CLAUDE_FLOW_MEMORY_PATH: path.dirname(p.redirected) }, { runner: p.runner }));
+  assert.match(out, /memory write VERIFIED/);
+  assert.deepEqual(keys(p.primary), ['user-row']);
+  assert.deepEqual(keys(p.canonical), ['user-row']);
+  assert.deepEqual(keys(p.redirected), ['user-row']);
+  assert.equal(p.mirrors.length, 1);
+  assert.equal(fs.existsSync(path.dirname(p.mirrors[0])), false);
+});
+
+test('setup pins the primary when caller env is absent and removes the mirror on a failed store', async (t) => {
+  const p = routedProject(t);
+  const { out } = await captureLog(() => verifyProjectMemoryWrite(p.root, undefined, {
+    runner: async (cmd, args, options) => {
+      await p.runner(cmd, args, options);
+      return { code: 1, stdout: '', stderr: 'failed after write' };
+    },
+  }));
+  assert.match(out, /memory write verification FAILED/);
+  assert.doesNotMatch(out, /memory write VERIFIED/);
+  assert.deepEqual(keys(p.canonical), ['user-row']);
+  assert.deepEqual(keys(p.redirected), ['user-row']);
+  assert.equal(fs.existsSync(path.dirname(p.mirrors[0])), false);
+});
+
+test('setup removes its private mirror after a runner throws', async (t) => {
+  const p = routedProject(t);
+  const { out } = await captureLog(() => verifyProjectMemoryWrite(p.root, {}, {
+    runner: async (cmd, args, options) => {
+      await p.runner(cmd, args, options);
+      throw new Error('runner failed');
+    },
+  }));
+  assert.match(out, /memory write verification FAILED/);
+  assert.equal(fs.existsSync(path.dirname(p.mirrors[0])), false);
+  assert.deepEqual(keys(p.canonical), ['user-row']);
+});
+
+test('setup reports a missing primary row and removes the private mirror', async (t) => {
+  const p = routedProject(t);
+  let mirror;
+  const { out } = await captureLog(() => verifyProjectMemoryWrite(p.root, {}, {
+    runner: async (_cmd, _args, { env }) => {
+      mirror = env.CLAUDE_FLOW_MEMORY_PATH;
+      const db = store(path.join(mirror, 'agentdb-memory.db'));
+      db.close();
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  }));
+  assert.match(out, /memory write verification FAILED/);
+  assert.doesNotMatch(out, /memory write VERIFIED/);
+  assert.equal(fs.existsSync(mirror), false);
+  assert.deepEqual(keys(p.primary), ['user-row']);
+});
+
+test('setup does not claim complete verification when private mirror removal fails', { skip: process.platform === 'win32' }, async (t) => {
+  const p = routedProject(t);
+  let mirror;
+  t.after(() => {
+    if (mirror && fs.existsSync(mirror)) {
+      fs.chmodSync(mirror, 0o700);
+      fs.rmSync(mirror, { recursive: true, force: true });
+    }
+  });
+  const { out } = await captureLog(() => verifyProjectMemoryWrite(p.root, {}, {
+    runner: async (cmd, args, options) => {
+      await p.runner(cmd, args, options);
+      mirror = options.env.CLAUDE_FLOW_MEMORY_PATH;
+      fs.chmodSync(mirror, 0o000);
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  }));
+  assert.match(out, /temporary mirror cleanup failed/);
+  assert.match(out, /memory write verification FAILED/);
+  assert.doesNotMatch(out, /memory write VERIFIED/);
+  assert.deepEqual(keys(p.primary), ['user-row']);
 });

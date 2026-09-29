@@ -87,6 +87,15 @@ const flatKeys = (entries, pick) => entries.map((e) => `"${e.key}": ${JSON.strin
 export function heldRow(held) {
   const file = DAEMON_CONFIG_RELATIVE.split(path.sep).join('/');
   const want = flatKeys(held.entries, (e) => e.want);
+  if (held.reason === 'yaml-shadow') return row('daemons', 'warn',
+    `${file} is not ak-managed: creating it would hide existing .claude-flow/config.yaml or config.yml daemon values`,
+    `review the YAML daemon values and set ${want} in the active config yourself, ${RESTART}`, { repair: 'manual' });
+  if (held.reason === 'higher-priority-json') return row('daemons', 'warn',
+    `${file} is not ak-managed: Ruflo reads claude-flow.config.json first`,
+    `review claude-flow.config.json and set ${want} there yourself, ${RESTART}`, { repair: 'manual' });
+  if (held.reason === 'explicit-config') return row('daemons', 'warn',
+    `${file} is not ak-managed: Ruflo currently reads CLAUDE_FLOW_CONFIG before YAML`,
+    `review the CLAUDE_FLOW_CONFIG file and set ${want} there yourself, ${RESTART}`, { repair: 'manual' });
   return held.invalid
     ? row('daemons', 'warn', `${file} is not ak-managed: it is unreadable or not a JSON object, so ak leaves it untouched`,
       `fix ${file} so it is a JSON object holding ${want} (flat keys), ${RESTART}`, { repair: 'manual' })
@@ -96,16 +105,16 @@ export function heldRow(held) {
 
 /** The Ruflo repository around `cwd`, kit.json, and the keys its config.json
  *  keeps from ak (read once for the deferral and drift rows). */
-function rufloContext(cwd, { loadConfig, rufloVersion, platform }) {
+function rufloContext(cwd, { loadConfig, rufloVersion, platform, env }) {
   const root = rufloDaemonProjectRoot(cwd);
   if (!root) return { root: null, cfg: null, held: null };
   const cfg = loadConfig();
-  return { root, cfg, held: daemonConfigHeld(root, { cfg, rufloVersion, platform }) };
+  return { root, cfg, held: daemonConfigHeld(root, { cfg, rufloVersion, platform, env }) };
 }
 
-function driftRows({ root, cfg, held }, { rufloVersion, platform }) {
+function driftRows({ root, cfg, held }, { rufloVersion, platform, env }) {
   if (!root) return [];
-  const parts = daemonDrift(root, { cfg, rufloVersion, platform });
+  const parts = daemonDrift(root, { cfg, rufloVersion, platform, env });
   return [held && heldRow(held), parts && row('daemons', 'warn', `ak-managed daemon settings differ from what Ruflo ${rufloVersion ?? '(version unknown)'} `
     + `needs: ${parts.join('; ')}`, "sync applies ak's Ruflo daemon settings")].filter(Boolean);
 }
@@ -134,10 +143,10 @@ export default {
         rows.push(row('daemons', 'ok',
           daemons.length ? `${daemons.length} running (one per active project is expected)` : 'none running'));
       }
-      const ruflo = rufloContext(cwd, { loadConfig, rufloVersion, platform });
+      const ruflo = rufloContext(cwd, { loadConfig, rufloVersion, platform, env });
       const deferral = deferralRow(root, { now, platform, ruflo });
       if (deferral) rows.push(deferral);
-      rows.push(...driftRows(ruflo, { rufloVersion, platform }));
+      rows.push(...driftRows(ruflo, { rufloVersion, platform, env }));
     } catch (e) {
       rows.push(row('daemons', 'warn', `daemon check unavailable: ${e.message}`));
     }

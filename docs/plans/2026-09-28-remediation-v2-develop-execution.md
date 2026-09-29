@@ -12,6 +12,16 @@ unit commits, feature PRs into `develop`, and conditional squash integration; th
 `develop` → `main` PR remains open for human review. Releases, installation, real-data
 operations and cleanup remain separately gated. Baseline inspected: `main@94890a00`.
 
+**2026-09-29 execution update:** Bootstrap, V3 #276, V5 #274, V4 B1 #273,
+V4 C3 #277, and V4 C4 #278 have merged to `develop@989c5e56`; their relevant
+CI receipts passed. Remaining V4 implementation units are accepted on the
+isolated branch, and its temporary C1 CI job has been removed. V4's ADR/C6
+alignment is underway. The final V4 full gates, whole-branch review, feature
+PR CI including Windows, and integration are still pending. V6 and V7 remain
+separate work. The final `develop` → `main` PR and operational gates have not
+occurred. Historical baseline rows below describe planning-time state, not
+current completion.
+
 **Goal:** Complete all remaining v2 remediation through feature PRs into `develop`, then
 open one aggregate `develop` → `main` PR for human review.
 
@@ -68,9 +78,10 @@ Appendix A/B row and its referenced v1 plans, rulings and evidence.
 The original program's "not yet started" status and main-only flow are stale. Reconcile
 them in the bootstrap PR, retaining historical evidence rather than replaying completed work.
 
-ADR-0063 is **Accepted**, updated 2026-09-28, with CLI delivery recorded; V3 completes its
-dashboard changes and V4 its offline retry limitation. ADR-0048 is **Accepted**, updated
-2026-09-28, with human evaluation gates outstanding; V3 records their approved v5 deferral.
+ADR-0063 is **Accepted**, updated 2026-09-29, with CLI and V3 dashboard delivery
+recorded; V4 A3 refines its offline retry limitation on the feature branch.
+ADR-0048 is **Accepted**, updated 2026-09-28, with human evaluation gates
+outstanding; V3 records their approved v5 deferral.
 ADR-0060 is **Proposed**, updated 2026-09-27, with discovery partly implemented; V6 implements
 its approved remaining scope and records acceptance and the actual delivered subset.
 

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { sameFileId } from '../file-identity.mjs';
 
 import {
   assertHookHealingPlanIntegrity, buildHookHealingPlan,
@@ -27,8 +28,8 @@ function sameOwnerAndParent(snapshot, expected) {
     && snapshot.gid === (expected.gid ?? snapshot.gid)
     && snapshot.specialMode === (expected.specialMode ?? 0)
     && snapshot.parent.realPath === (expected.parent?.realPath ?? snapshot.parent.realPath)
-    && snapshot.parent.dev === (expected.parent?.dev ?? snapshot.parent.dev)
-    && snapshot.parent.ino === (expected.parent?.ino ?? snapshot.parent.ino);
+    && sameFileId(snapshot.parent.dev, expected.parent?.dev ?? snapshot.parent.dev)
+    && sameFileId(snapshot.parent.ino, expected.parent?.ino ?? snapshot.parent.ino);
 }
 
 function preflight(plan, actionIds, expectedPlanDigest, options) {

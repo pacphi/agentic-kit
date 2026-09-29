@@ -59,6 +59,23 @@ function ak(sb, ...args) {
 
 const readKit = (home) => fs.readFileSync(path.join(home, '.config', 'agentic-kit', 'kit.json'), 'utf8');
 
+for (const args of [
+  ['host', 'status'], ['host'], ['x', 'host'],
+]) {
+  test(`ak ${args.join(' ')} --dry-run --json reports status without recording evidence`, (t) => {
+    const sb = sandbox(t);
+    const beforeHome = snapshot(sb.home);
+    const beforeProject = snapshot(sb.project);
+    const r = ak(sb, ...args, '--dry-run', '--json');
+    assert.equal(r.status, 0, r.all);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(Object.keys(out), ['scope', 'config', 'hosts', 'providers']);
+    assert.ok(out.hosts.claude);
+    assertUnchanged(beforeHome, sb.home, 'status preview must not write host evidence or config');
+    assertUnchanged(beforeProject, sb.project, 'status preview must not write project files');
+  });
+}
+
 test('ak host pick --dry-run previews and writes nothing', (t) => {
   const sb = sandbox(t);
   const beforeHome = snapshot(sb.home);
@@ -117,6 +134,74 @@ test('ak host pick --dry-run --json carries previewOfCurrent, true only with no 
   assert.equal(explicit.status, 0, explicit.all);
   const explicitJson = JSON.parse(explicit.stdout);
   assert.equal(explicitJson.previewOfCurrent, false);
+});
+
+test('host pick refusal and x host alias dry-run emit one JSON object without writes', (t) => {
+  const sb = sandbox(t);
+  const beforeHome = snapshot(sb.home);
+  const beforeProject = snapshot(sb.project);
+  for (const command of ['host', 'x']) {
+    const args = command === 'x' ? ['x', 'host'] : ['host'];
+    const r = ak(sb, ...args, 'pick', '--host', 'claude,opencdoe', '--dry-run', '--json');
+    assert.equal(r.status, 2, r.all);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(Object.keys(out), ['error', 'exitCode']);
+    assert.equal(out.exitCode, 2);
+    assert.match(out.error, /unknown host\(s\): opencdoe/);
+    assert.match(r.stderr, /unknown host\(s\): opencdoe/);
+  }
+  assertUnchanged(beforeHome, sb.home, 'refused picks must not touch HOME');
+  assertUnchanged(beforeProject, sb.project, 'refused picks must not touch the project');
+});
+
+test('host off dry-run JSON previews teardown and preserves configuration', (t) => {
+  const sb = sandbox(t, divergedConfig());
+  const beforeHome = snapshot(sb.home);
+  const beforeProject = snapshot(sb.project);
+  const r = ak(sb, 'host', 'off', '--dry-run', '--json');
+  assert.equal(r.status, 0, r.all);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.dryRun, true);
+  assert.deepEqual(out.wouldDisable, ['claude', 'codex']);
+  assert.equal(out.primaryHost, 'claude');
+  assert.deepEqual(out.wouldClear, ['aqe provider/fallback', 'ruflo providers', 'activity routing']);
+  assert.equal(out.wouldStripManagedProviderEnv, true);
+  assert.equal(out.wouldRestoreOrRemoveManagedAqeConfig, true);
+  assert.equal(out.wouldReconcileOpencodeGuidance, true);
+  assert.equal(out.wouldTeardownOpencode, false);
+  assert.equal(out.wouldRemoveManagedCodexMcp, false);
+  assert.match(r.stderr, /dry run/i);
+  assertUnchanged(beforeHome, sb.home, 'off preview must not touch HOME');
+  assertUnchanged(beforeProject, sb.project, 'off preview must not touch the project');
+});
+
+test('host reset-routes dry-run JSON reports selected and empty routes without writes', (t) => {
+  const sb = sandbox(t, divergedConfig());
+  const beforeHome = snapshot(sb.home);
+  const beforeProject = snapshot(sb.project);
+  const selected = ak(sb, 'host', 'reset-routes', '--activity', 'architecture', '--dry-run', '--json');
+  assert.equal(selected.status, 0, selected.all);
+  assert.deepEqual(JSON.parse(selected.stdout), { dryRun: true, activities: ['architecture'] });
+  const empty = ak(sb, 'host', 'reset-routes', '--activity', 'design', '--dry-run', '--json');
+  assert.equal(empty.status, 0, empty.all);
+  assert.deepEqual(JSON.parse(empty.stdout), { dryRun: true, activities: [] });
+  const invalid = ak(sb, 'host', 'reset-routes', '--activity', 'not-an-activity', '--dry-run', '--json');
+  assert.equal(invalid.status, 0, invalid.all);
+  assert.deepEqual(JSON.parse(invalid.stdout), { dryRun: true, activities: [] });
+  assert.match(invalid.stderr, /unknown activity 'not-an-activity'/);
+  assertUnchanged(beforeHome, sb.home, 'route previews must not touch HOME');
+  assertUnchanged(beforeProject, sb.project, 'route previews must not touch the project');
+});
+
+test('host reset-routes dry-run JSON reports no divergence as an empty preview', (t) => {
+  const sb = sandbox(t);
+  const beforeHome = snapshot(sb.home);
+  const beforeProject = snapshot(sb.project);
+  const r = ak(sb, 'host', 'reset-routes', '--dry-run', '--json');
+  assert.equal(r.status, 0, r.all);
+  assert.deepEqual(JSON.parse(r.stdout), { dryRun: true, activities: [] });
+  assertUnchanged(beforeHome, sb.home, 'no-op route preview must not touch HOME');
+  assertUnchanged(beforeProject, sb.project, 'no-op route preview must not touch the project');
 });
 
 test('ak host off --dry-run previews and writes nothing', (t) => {

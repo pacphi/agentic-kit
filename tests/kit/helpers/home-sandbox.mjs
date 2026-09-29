@@ -287,7 +287,9 @@ export function offlineKitConfig(extra = {}) {
       ttlHours: 24,
       last: Date.now(),
       seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' },
-      self: { last: Date.now(), best: { version: '0.0.1', tag: 'latest' } },
+      // This fixture runs against the prerelease kit, whose self check uses
+      // both channels. A legacy latest-only record must retry under A3.
+      self: { last: Date.now(), best: { version: '0.0.1', tag: 'latest' }, lastTags: ['latest', 'next'] },
     },
     ...extra,
   };

@@ -145,6 +145,99 @@ test('pause and resume: a paused source keeps its checkpoint and completes once 
   assert.equal(published.scanState, 'published');
 });
 
+test('a paused scan survives restart without publishing partial evidence, then resumes', async (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  buildLargeTree(root, { dirs: 5, filesPerDir: 4 });
+  const first = control(root, dir);
+  const [checkpointed] = await first.orchestrator.start({ sourceIds: [SOURCE.sourceId], maxSlices: 1 });
+  assert.equal(checkpointed.scanState, 'checkpointed');
+  const paused = first.orchestrator.pause({ sourceId: SOURCE.sourceId });
+  assert.equal(paused.state, 'paused');
+  assert.ok(paused.visited > 0);
+  const [summary] = first.historyStore.list();
+  assert.equal(summary.state, 'paused');
+  assert.equal(summary.visited, paused.visited);
+  assert.equal(summary.completedPartitions, paused.completedPartitions);
+  assert.equal(summary.pendingPartitions, paused.pendingPartitions);
+  assert.equal(summary.completedAt, null);
+  assert.ok(summary.recordedAt);
+  assert.equal(first.lastGoodStore.current().length, 0);
+
+  const restarted = control(root, dir);
+  const [row] = restarted.orchestrator.coverage();
+  assert.equal(row.state, 'paused');
+  assert.equal(row.visited, paused.visited);
+  assert.equal(row.completedPartitions, paused.completedPartitions);
+  assert.equal(row.pendingPartitions, paused.pendingPartitions);
+  assert.equal(row.lastCompletedAt, null);
+  assert.equal(restarted.checkpointStore.list().length, 1);
+  const [published] = await restarted.orchestrator.resume({ sourceIds: [SOURCE.sourceId] });
+  assert.equal(published.scanState, 'published');
+  assert.equal(restarted.orchestrator.coverage()[0].state, 'complete');
+  assert.equal(restarted.checkpointStore.list().length, 0);
+  assert.equal(restarted.lastGoodStore.current().length, 1);
+  assert.equal(control(root, dir).orchestrator.coverage()[0].state, 'complete');
+});
+
+test('a confirmed stop after pause prevents old paused state from returning', async (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  buildLargeTree(root);
+  const first = control(root, dir);
+  await first.orchestrator.start({ sourceIds: [SOURCE.sourceId], maxSlices: 1 });
+  first.orchestrator.pause({ sourceId: SOURCE.sourceId });
+  first.orchestrator.stop({ sourceId: SOURCE.sourceId, confirmed: true });
+  assert.equal(first.checkpointStore.list().length, 0);
+  assert.equal(control(root, dir).orchestrator.coverage()[0].state, 'not-scanned');
+});
+
+test('pause does not claim durable state when its summary write fails', async (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  buildLargeTree(root);
+  const first = control(root, dir);
+  await first.orchestrator.start({ sourceIds: [SOURCE.sourceId], maxSlices: 1 });
+  const historyStore = { ...first.historyStore, recordSummary: () => { throw new Error('history unavailable'); } };
+  const second = control(root, dir, { historyStore });
+  assert.throws(() => second.orchestrator.pause({ sourceId: SOURCE.sourceId }), /history unavailable/);
+  assert.equal(second.orchestrator.coverage()[0].state, 'scanning');
+  assert.equal(second.historyStore.list().length, 0);
+  assert.equal(second.checkpointStore.list().length, 1);
+});
+
+test('pause refuses when no history store can record the boundary', async (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  buildLargeTree(root);
+  const first = control(root, dir);
+  await first.orchestrator.start({ sourceIds: [SOURCE.sourceId], maxSlices: 1 });
+  const restarted = control(root, dir, { historyStore: null });
+  assert.throws(() => restarted.orchestrator.pause({ sourceId: SOURCE.sourceId }), /history unavailable/);
+  assert.equal(restarted.orchestrator.coverage()[0].state, 'scanning');
+});
+
+test('paused history restores only its matching environment and loses to a later failure at the same millisecond', (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  const fixed = Date.parse('2026-09-08T12:00:00.000Z');
+  const first = control(root, dir, { now: () => fixed });
+  first.historyStore.recordSummary({ scanId: 'one', sourceId: SOURCE.sourceId,
+    environmentId: 'other', state: 'paused', completedAt: null,
+    recordedAt: new Date(fixed).toISOString(), visited: 7 });
+  assert.equal(control(root, dir).orchestrator.coverage()[0].state, 'not-scanned');
+  first.historyStore.recordSummary({ scanId: 'two', sourceId: SOURCE.sourceId,
+    environmentId: SOURCE.environmentId, state: 'paused', completedAt: null,
+    recordedAt: new Date(fixed).toISOString(), visited: 8 });
+  assert.equal(control(root, dir).orchestrator.coverage()[0].state, 'paused');
+  first.historyStore.recordSummary({ scanId: 'two', sourceId: SOURCE.sourceId,
+    environmentId: SOURCE.environmentId, state: 'failed', completedAt: new Date(fixed).toISOString(),
+    visited: 9, limitingReason: 'io-failure' });
+  const [row] = control(root, dir).orchestrator.coverage();
+  assert.equal(row.state, 'failed');
+  assert.equal(row.visited, 9);
+});
+
 test('MNT-DSC-018: stop previews affected work before confirming, then removes the active scan and retains history', async (t) => {
   const controlDir = fixture(t);
   const root = fixture(t);
@@ -661,4 +754,19 @@ test('scan history rolls over independently at ten records per source and surviv
     assert.deepEqual(reopened.list().filter((row) => row.sourceId === sourceId).map((row) => row.visited),
       [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   }
+});
+
+test('clearHistory keeps a paused summary while its continuation is open', (t) => {
+  const dir = fixture(t);
+  const checkpoints = createCheckpointStore(path.join(dir, 'checkpoints'), { fsImpl: fs });
+  const history = createScanHistoryStore(dir, { fsImpl: fs });
+  const scanId = 'paused-scan';
+  checkpoints.write({ scanId, sourceId: SOURCE.sourceId, environmentId: SOURCE.environmentId,
+    scanEpoch: 1, completedPartitions: [], pendingPartitions: [], workCounts: { visited: 1 },
+    sourceStamps: [], createdAt: new Date().toISOString() });
+  history.recordSummary({ scanId, sourceId: SOURCE.sourceId, environmentId: SOURCE.environmentId,
+    state: 'paused', completedAt: null, recordedAt: new Date().toISOString(), visited: 1 });
+  assert.deepEqual(history.clearHistory(), { removed: 0, kept: 1 });
+  checkpoints.remove(scanId);
+  assert.deepEqual(history.clearHistory(), { removed: 1, kept: 0 });
 });

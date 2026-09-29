@@ -2,6 +2,7 @@
 // repository content, environment values, or stderr are returned in receipts.
 import { spawn } from 'node:child_process';
 import { resolveShim, killProcessTree } from './exec.mjs';
+import { mergeWindowsEnv } from './windows-npm-shim.mjs';
 
 /** @param {{command:string,args?:string[],cwd?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number}} options */
 export function probeMcp({ command, args = [], cwd, env = {}, timeoutMs = 30_000 }) {
@@ -12,7 +13,7 @@ export function probeMcp({ command, args = [], cwd, env = {}, timeoutMs = 30_000
   }
   return new Promise((resolve) => {
     const started = performance.now();
-    const mergedEnv = { ...process.env, ...env };
+    const mergedEnv = process.platform === 'win32' ? mergeWindowsEnv(process.env, env) : { ...process.env, ...env };
     const invocation = resolveShim(command, args, { env: mergedEnv });
     const child = spawn(invocation.command, invocation.args, {
       cwd, env: mergedEnv, shell: false, detached: process.platform !== 'win32',

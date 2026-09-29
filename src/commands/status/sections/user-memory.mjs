@@ -5,6 +5,8 @@
 // that store when it exists, and the stray stores such sessions left before:
 // `~/.swarm` and `~/.codex/.chatgpt-projects/*/.swarm`. Everything here is
 // information only: ak never moves, merges or deletes a store.
+import fs from 'node:fs';
+import path from 'node:path';
 import * as paths from '../../../lib/paths.mjs';
 import { findUserStrayStores, memoryDirStatus } from '../../../lib/project-memory.mjs';
 import { homeRelative } from '../../../lib/ruflo-memory.mjs';
@@ -30,6 +32,23 @@ function strayRow(found, home, userDir) {
     + (found.complete ? '' : '; only the first 500 Codex project folders were checked'));
 }
 
+function homeAqeRow(home) {
+  const dir = path.join(home, '.agentic-qe');
+  let folder;
+  try { folder = fs.lstatSync(dir); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  if (!folder.isDirectory()) return row('aqe', 'info', `AQE home path ${dir} is not a directory; contents unverified`);
+  const db = path.join(dir, 'memory.db');
+  let file;
+  try { file = fs.lstatSync(db); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (!file?.isFile()) return row('aqe', 'info', `AQE home directory ${dir}: memory.db absent; contents and runtime health unverified`);
+  let walBytes = 0;
+  try {
+    const wal = fs.lstatSync(`${db}-wal`);
+    if (wal.isFile()) walBytes = wal.size;
+  } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  return row('aqe', 'info', `AQE home directory ${dir}: memory.db present (${formatBytes(file.size + walBytes)} with WAL); contents and runtime health unverified`);
+}
+
 export default {
   id: 'user-memory',
   /** @param {{ home?: string, env?: NodeJS.ProcessEnv, cfg?: any }} [ctx] */
@@ -47,6 +66,8 @@ export default {
       const found = findUserStrayStores({ home, codexHome: env.CODEX_HOME || undefined });
       const stray = strayRow(found, home, dir);
       if (stray) rows.push(stray);
+      const aqe = homeAqeRow(home);
+      if (aqe) rows.push(aqe);
     } catch (e) {
       rows.push(row('memory', 'warn', `user-level memory check unavailable: ${e.message}`));
     }

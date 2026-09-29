@@ -1,4 +1,4 @@
-import { heading, info, ok, warn, dim } from '../lib/output.mjs';
+import { heading, info, ok, warn, dim, reportFailure } from '../lib/output.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { aqeRouterFile } from '../lib/providers.mjs';
 import { readJson } from '../lib/settings.mjs';
@@ -129,10 +129,6 @@ async function runRefresh(ctx) {
 
 function runStatus(ctx) {
   const { flags, cacheFile, store, latest } = ctx;
-  if (flags.host && !ALL_OWNERS.includes(flags.host)) {
-    warn(`unsupported model host: ${flags.host}`);
-    return 2;
-  }
   const snapshot = visibleSnapshot(latest, flags.host);
   const since = flags.since ? Date.parse(flags.since) : null;
   const history = store.snapshots.filter((entry) => entry.scope.fingerprint === latest.scope.fingerprint
@@ -174,7 +170,7 @@ function runDiff(ctx) {
 function runExplain(ctx) {
   const { positionals, flags, latest } = ctx;
   const selector = positionals[1] ?? flags.to;
-  if (!selector) { warn('usage: ak models explain HOST:MODEL'); return 2; }
+  if (!selector) { modelUsageError(flags, 'usage: ak models explain HOST:MODEL'); return 2; }
   const result = explainModel(latest, selector);
   if (flags.json) printJson(result);
   else if (!result.found) warn(`Model not found: ${selector}`);
@@ -193,7 +189,7 @@ function runPlan(ctx) {
   const { flags, positionals, latest } = ctx;
   const activity = flags.activity;
   const to = flags.to ?? positionals[1];
-  if (!activity || !to) { warn('usage: ak models plan --activity ACTIVITY [--from HOST:MODEL] --to HOST:MODEL'); return 2; }
+  if (!activity || !to) { modelUsageError(flags, 'usage: ak models plan --activity ACTIVITY [--from HOST:MODEL] --to HOST:MODEL'); return 2; }
   const result = planModelChange(latest, { activity, from: flags.from, to });
   if (flags.json) printJson(result);
   else {
@@ -211,9 +207,34 @@ function runPlan(ctx) {
 // dispatched by name once that store/latest snapshot is in hand (below).
 const READ_ACTIONS = { status: runStatus, diff: runDiff, explain: runExplain, plan: runPlan };
 
+function modelUsageError(flags, message) {
+  reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => warn(message) });
+}
+
 /** @param {{flags: Record<string, any>, positionals: string[], deps?: Record<string, any>}} input */
 export async function run({ flags, positionals, deps = {} }) {
   const action = positionals[0] ?? 'status';
+  if (action !== 'refresh' && !Object.hasOwn(READ_ACTIONS, action)) {
+    modelUsageError(flags, 'usage: ak models status|refresh|diff|explain|plan');
+    return 2;
+  }
+  const maxPositionals = action === 'diff' ? 3 : action === 'explain' || action === 'plan' ? 2 : 1;
+  if (positionals.length > maxPositionals) {
+    modelUsageError(flags, `unexpected argument '${positionals[maxPositionals]}'`);
+    return 2;
+  }
+  if (action === 'explain' && !positionals[1] && !flags.to) {
+    modelUsageError(flags, 'usage: ak models explain HOST:MODEL');
+    return 2;
+  }
+  if (action === 'plan' && (!flags.activity || !(flags.to ?? positionals[1]))) {
+    modelUsageError(flags, 'usage: ak models plan --activity ACTIVITY [--from HOST:MODEL] --to HOST:MODEL');
+    return 2;
+  }
+  if (action === 'status' && flags.host && !ALL_OWNERS.includes(flags.host)) {
+    modelUsageError(flags, `unsupported model host: ${flags.host}`);
+    return 2;
+  }
   const cacheFile = deps.cacheFile ?? modelInventoryPath();
   const readStore = deps.readStore ?? readModelStore;
   const append = deps.append ?? appendModelSnapshot;
@@ -229,6 +250,5 @@ export async function run({ flags, positionals, deps = {} }) {
   if (!latest) return noSnapshot(flags, cacheFile);
 
   const handler = READ_ACTIONS[action];
-  if (!handler) { warn('usage: ak models status|refresh|diff|explain|plan'); return 2; }
   return handler({ ...ctx, store, latest });
 }

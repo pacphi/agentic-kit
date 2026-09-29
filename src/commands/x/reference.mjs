@@ -1,7 +1,7 @@
 // x reference — inspect (diff) or reconcile (sync) every managed host-guidance target.
 import { reconcileGuidance } from '../../lib/blocks.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
-import { ok, warn, dim } from '../../lib/output.mjs';
+import { ok, warn, dim, reportFailure } from '../../lib/output.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
 
@@ -20,6 +20,11 @@ Examples:
 
 export async function run({ flags, positionals, pkgRoot }) {
   const sub = positionals[0] ?? 'diff';
+  if (!['diff', 'sync'].includes(sub) || positionals.length > 1) {
+    const error = 'usage: ak x reference [diff|sync] [--json]';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(error) });
+    return 2;
+  }
   const cfg = loadKitConfig();
   const dryRun = sub !== 'sync';
   const res = await reconcileGuidance({

@@ -25,7 +25,7 @@ import { HOST_REGISTRY } from '../../lib/adapters/registries.mjs';
 import * as consentStore from '../../lib/adapters/consent.mjs';
 import { runTieredConformance as defaultRunTieredConformance } from '../../lib/adapters/conformance.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
-import { ok, warn, fail, info, dim, bold } from '../../lib/output.mjs';
+import { ok, warn, fail, info, dim, bold, reportFailure } from '../../lib/output.mjs';
 import {
   grant as grantCap, gate as gateTier, status as statusReport, revokeGrant,
 } from './host-adapters-grants.mjs';
@@ -298,8 +298,12 @@ async function trust({ name, cfg, consent, reader, ask, isTTY, yes, expectHash }
   return 0;
 }
 
-function revoke({ name, consent }) {
-  if (typeof name !== 'string' || !name) { fail('usage: ak host adapters revoke <name>'); return 2; }
+function revoke({ name, consent, flags = /** @type {{json?: boolean}} */ ({}) }) {
+  if (typeof name !== 'string' || !name) {
+    const error = 'usage: ak host adapters revoke <name>';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
+    return 2;
+  }
   const existed = consent.revokeConsent(name);
   if (existed) { ok(`revoked consent for '${name}'`); return 0; }
   info(`no recorded consent for '${name}'`);
@@ -437,9 +441,9 @@ async function conformance({
 // standing consent or grant record, or it silently reactivates the next time
 // the flag is turned back on.
 const FAIL_SAFE_HANDLERS = {
-  revoke: (ctx) => revoke({ name: ctx.name, consent: ctx.consent }),
+  revoke: (ctx) => revoke({ name: ctx.name, consent: ctx.consent, flags: ctx.flags }),
   'revoke-grant': (ctx) => revokeGrant({
-    name: ctx.name, capability: ctx.positionals[2], grantsFile: ctx.grantsFile, cfg: ctx.cfg, env: ctx.env, cwd: ctx.cwd,
+    name: ctx.name, capability: ctx.positionals[2], grantsFile: ctx.grantsFile, cfg: ctx.cfg, env: ctx.env, cwd: ctx.cwd, flags: ctx.flags,
     ...(ctx.saveConfig ? { saveConfig: ctx.saveConfig } : {}),
     ...(ctx.bootstrapAdapters ? { bootstrapAdapters: ctx.bootstrapAdapters } : {}),
     ...(ctx.applyRouter ? { applyRouter: ctx.applyRouter } : {}),
@@ -505,7 +509,8 @@ export async function run({
   if (failSafe) return failSafe(ctx);
 
   if (!flagEnabled(env)) {
-    fail(`experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`);
+    const error = `experimental host-adapter surface is disabled — set ${FLAG_ENV_VAR}=1`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
     return 2;
   }
 
@@ -514,6 +519,7 @@ export async function run({
   const gated = GATED_HANDLERS[sub];
   if (gated) return gated(ctx);
 
-  fail(`unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance|grant|bless|gate|status|revoke-grant)`);
+  const error = `unknown host adapters subcommand: ${sub} (list|trust|revoke|conformance|grant|bless|gate|status|revoke-grant)`;
+  reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
   return 2;
 }

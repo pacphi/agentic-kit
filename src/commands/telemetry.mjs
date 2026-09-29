@@ -98,7 +98,9 @@ export async function run({ flags, positionals, pkgRoot, deps = {} }) {
     return 0;
   } catch {
     // Source failures and hostile input must not echo filenames or parser details.
-    console.error('Telemetry failed: check command options, schema/digest, compatible snapshots, private identity, and readable input/new output files.');
+    const error = 'Telemetry failed: check command options, schema/digest, compatible snapshots, private identity, and readable input/new output files.';
+    console.error(error);
+    console.log(JSON.stringify({ error, exitCode: 2 }));
     return 2;
   }
 }

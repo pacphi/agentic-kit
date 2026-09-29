@@ -29,7 +29,10 @@ export function rufloComponentRows(snapshot) {
   const rows = [row('ruflo-components', snapshot.summary.active === snapshot.summary.total ? 'ok' : 'info',
     `ruflo components: ${snapshot.summary.active} of ${snapshot.summary.total} active (ruflo ${snapshot.rufloVersion ?? 'not installed'})`)];
   for (const c of snapshot.components) {
-    const text = `${c.label} — ${c.state.label}: ${c.state.meaning}${c.state.action ? ` ${c.state.action}` : ''}`;
+    // The applied-unverified action is carried by its manual fix below; repeating it
+    // in the message renders the same host restart instruction twice.
+    const action = c.state.id === 'applied-unverified' ? '' : c.state.action;
+    const text = `${c.label} — ${c.state.label}: ${c.state.meaning}${action ? ` ${action}` : ''}`;
     rows.push({
       ...(FIXABLE.has(c.state.id)
         ? row('ruflo-components', LEVEL(c.state.id), text, `sync applies ${c.label} (${c.state.action || 'reconcile'})`)

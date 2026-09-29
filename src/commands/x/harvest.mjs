@@ -7,7 +7,7 @@
 // memory root. It NEVER starts a daemon and NEVER backgrounds anything.
 import { loadKitConfig } from '../../lib/config.mjs';
 import { planHarvest, runHarvest } from '../../lib/harvest.mjs';
-import { ok, fail, warn, info, dim, heading } from '../../lib/output.mjs';
+import { ok, fail, warn, info, dim, heading, reportFailure } from '../../lib/output.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -45,7 +45,12 @@ Examples:
   ak x harvest                       record the outcome (only when opted in)
   ak x harvest --distill             record, then distill the project store`;
 
-export async function run({ flags }) {
+export async function run({ flags, positionals = [] }) {
+  if (positionals.length) {
+    const error = `unexpected argument '${positionals[0]}'`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(error) });
+    return 2;
+  }
   const cwd = process.cwd();
   const cfg = loadKitConfig();
   const enabled = cfg.harvest === true;
