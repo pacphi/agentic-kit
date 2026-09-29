@@ -118,8 +118,8 @@ Official extension references: [Claude hooks](https://code.claude.com/docs/en/ho
 | Upgrade convergence | `ak sync` heals managed assets | `ak sync` heals Ruflo/AQE access and retires owned legacy MCP | `ak sync` regenerates the embedded catalogue and repairs exact-receipted plugins/config |
 | Teardown | Managed blocks and registrations | Receipt-based managed teardown | Value- and hash-receipt teardown; user-owned values survive |
 
-Ruflo MCP access and Ruflo-backed inference are different contracts. In
-Ruflo 3.48.0's shipped `agent_execute` path, execution uses a separately
+Ruflo MCP access and Ruflo-backed inference are different contracts.
+In Ruflo 3.48.0's shipped `agent_execute` path, execution uses a separately
 configured inference provider; its no-provider branch still returns an error
 instead of delegating to the MCP host
 ([ruflo #2356](https://github.com/ruvnet/ruflo/issues/2356)). This is a source
