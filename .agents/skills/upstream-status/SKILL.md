@@ -39,20 +39,32 @@ is the daily workflow's command, so never run it without `--dry-run`.
    - "Reopened upstream after ak recorded a fix";
    - "Closed upstream as not planned";
    - "No upstream activity for the stale limit";
+   - "Waiting on upstream": every thread, never a count alone. Group them by repository,
+     largest first, and give each as `#number, title (relation, last upstream update)` with its
+     link. The relation is `filed`, `commented` or `referenced`, from the item's `relation`; the
+     date is `upstream.updatedAt`, which can include our own comments or bots, so say so and
+     offer to pull the latest comments when asked who replied last. The maintainer uses this
+     list to pick threads to fix in a fork and open a pull request against, or to prod;
    - "Ready to retire";
    - "Constraints past their retest date";
    - "Our tracking issues".
 
    For each item give the id, title, URL and a one-line reason: who replied and when, which
    release, or which ak change is pending. Give "Fixed upstream, not yet released",
-   "Released, waiting for the support window", "Waiting on upstream" and
-   "Unmapped (no ak change recorded)" as counts only, unless asked. A held item is not
+   "Released, waiting for the support window" and "Unmapped (no ak change recorded)" as counts
+   only, unless asked. A held item is not
    dispatched: the oldest Ruflo in the support window (`supportWindow.floor`) predates its fix.
 4. Offer the next actions that fit:
    - Draft a reply to an upstream thread. Show the draft; do not post it.
    - Dispatch a released item: branch `upstream/<id>` from `main`, make the entry's `adjustment`
      test-first, meet the dependency policy's `removalProof`, update the entry's `status` and
      `history`, and open a draft pull request.
+   - Fix an open "Waiting on upstream" or stale thread: fork the upstream repository, branch,
+     make the fix test-first there and prepare the pull request text. Show it; do not push or
+     open the pull request.
+   - Draft a friendly prod for a stale or unanswered thread that follows the upstream issue
+     standard (problem, system info, repro, proposed fixes, impact for upstream's users). Show
+     it; do not post it.
    - Update the registry for items the report proposes to retire or move.
 
 ## Rules
