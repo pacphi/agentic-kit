@@ -333,7 +333,7 @@ const STATUS_SECTIONS = [
 
 async function status({ flags, cwd }) {
   const cfg = loadKitConfig();
-  const facts = await collectIntegrationFacts({ cwd, cfg });
+  const facts = await collectIntegrationFacts({ cwd, cfg, record: !flags['dry-run'] });
   const hosts = facts.hosts;
   const providers = facts.providers;
   const { scope } = settingsTarget(cwd);

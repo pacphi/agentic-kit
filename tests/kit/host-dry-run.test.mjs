@@ -59,6 +59,23 @@ function ak(sb, ...args) {
 
 const readKit = (home) => fs.readFileSync(path.join(home, '.config', 'agentic-kit', 'kit.json'), 'utf8');
 
+for (const args of [
+  ['host', 'status'], ['host'], ['x', 'host'],
+]) {
+  test(`ak ${args.join(' ')} --dry-run --json reports status without recording evidence`, (t) => {
+    const sb = sandbox(t);
+    const beforeHome = snapshot(sb.home);
+    const beforeProject = snapshot(sb.project);
+    const r = ak(sb, ...args, '--dry-run', '--json');
+    assert.equal(r.status, 0, r.all);
+    const out = JSON.parse(r.stdout);
+    assert.deepEqual(Object.keys(out), ['scope', 'config', 'hosts', 'providers']);
+    assert.ok(out.hosts.claude);
+    assertUnchanged(beforeHome, sb.home, 'status preview must not write host evidence or config');
+    assertUnchanged(beforeProject, sb.project, 'status preview must not write project files');
+  });
+}
+
 test('ak host pick --dry-run previews and writes nothing', (t) => {
   const sb = sandbox(t);
   const beforeHome = snapshot(sb.home);
