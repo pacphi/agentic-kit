@@ -189,17 +189,25 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
   const controller = new AbortController();
   const quotedNode = process.execPath.replaceAll("'", "''");
   let pids = [];
+  let pending;
+  let outcome;
   try {
     fs.writeFileSync(path.join(dir, 'codex.cmd'), '@echo off\r\n');
-    fs.writeFileSync(path.join(dir, 'codex.ps1'), `& '${quotedNode}' -e $args[0]\n`);
+    fs.writeFileSync(path.join(dir, 'codex.ps1'), `& '${quotedNode}' $args[0]\nexit $LASTEXITCODE\n`);
     const code = `const {spawn}=require('node:child_process');
       const gc=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
       require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
       setInterval(()=>{},1000);`;
-    const pending = run('codex', [code], {
+    // npm shims forward a script filename; PowerShell 5.1 reserializes
+    // native arguments, so multiline node -e source is not that interface.
+    const script = path.join(dir, 'fixture.cjs');
+    fs.writeFileSync(script, code);
+    pending = run('codex', [script], {
       env: { PATH: dir, PATHEXT: '.CMD' }, signal: controller.signal, timeout: 10_000,
     });
-    assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true, 'PowerShell launched Node');
+    pending.then((result) => { outcome = result; });
+    assert.equal(await waitUntil(() => fs.existsSync(pidFile) || outcome), true, 'PowerShell launch settled or ready');
+    assert.equal(fs.existsSync(pidFile), true, `PowerShell launched Node: ${JSON.stringify(outcome)}`);
     pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
     assert.equal(isAlive(pids[1]), true);
     controller.abort();
@@ -214,6 +222,8 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
         try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
       }
     }
+    await pending;
+    assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true, 'fixture children exited');
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
