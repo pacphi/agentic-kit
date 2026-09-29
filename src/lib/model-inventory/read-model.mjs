@@ -182,6 +182,7 @@ const OFFICIAL_CLAUDE_IDS = new Set(ANTHROPIC_OFFICIAL_MODEL_IDS);
 const OPENAI_MODEL_DOCUMENTATION = new Map([
   ['gpt-5.6', 'https://developers.openai.com/api/docs/models/gpt-5.6-sol'],
   ['gpt-6-astra', 'https://developers.openai.com/api/docs/models/gpt-6-astra'],
+  ['gpt-6.1-sol', 'https://developers.openai.com/api/docs/models/gpt-6.1-sol'],
   ['gpt-6-sol', 'https://developers.openai.com/api/docs/models/gpt-6-sol'],
   ['gpt-6-luna', 'https://developers.openai.com/api/docs/models/gpt-6-luna'],
   ['gpt-5.6-sol', 'https://developers.openai.com/api/docs/models/gpt-5.6-sol'],

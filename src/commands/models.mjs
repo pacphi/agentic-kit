@@ -40,8 +40,8 @@ Examples:
   ak models refresh --all
   ak models status --host codex --json
   ak models diff models:before models:after
-  ak models explain codex:gpt-6-sol
-  ak models plan --activity testing --to codex:gpt-6-sol`;
+  ak models explain codex:gpt-6.1-sol
+  ak models plan --activity testing --to codex:gpt-6.1-sol`;
 
 const ALL_OWNERS = Object.freeze(['claude', 'codex', 'opencode', 'ollama']);
 
