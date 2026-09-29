@@ -88,6 +88,21 @@ test('refresh POST starts ordered local work once and GET exposes progress and c
   assert.ok(state.startedAt && state.finishedAt);
 });
 
+test('successive refreshes expose distinct stable operation identities', async t => {
+  const server = await serverWith(stages());
+  t.after(() => server.close());
+  const firstPost = await request(server, 'POST', '/api/refresh', { strength: 'local' });
+  const first = await finished(server);
+  const secondPost = await request(server, 'POST', '/api/refresh', { strength: 'local' });
+  const second = await finished(server);
+  assert.equal(firstPost.status, 202);
+  assert.equal(secondPost.status, 202);
+  assert.match(first.operationId, /^[0-9a-f-]{36}$/);
+  assert.equal(firstPost.json.state.operationId, first.operationId);
+  assert.equal(secondPost.json.state.operationId, second.operationId);
+  assert.notEqual(first.operationId, second.operationId);
+});
+
 test('a second POST cannot start work while the operation is in flight', async t => {
   let release;
   const held = new Promise(resolve => { release = resolve; });

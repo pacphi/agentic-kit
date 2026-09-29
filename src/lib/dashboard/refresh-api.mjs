@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { REFRESH_STRENGTHS, runRefresh as sharedRunRefresh } from '../refresh.mjs';
 import { sendJson } from '../loopback-server.mjs';
 import { readMaintenanceJson } from './maintenance-security.mjs';
@@ -12,7 +13,7 @@ export function createRefreshOperation({ stages, runRefresh = sharedRunRefresh }
     : { running: false, lastRun: null };
   function start({ strength, projectTrees = false }) {
     if (current?.running) return null;
-    current = { running: true, strength, projectTrees, startedAt: new Date().toISOString(),
+    current = { operationId: randomUUID(), running: true, strength, projectTrees, startedAt: new Date().toISOString(),
       finishedAt: null, ok: null, stages: [] };
     Promise.resolve().then(() => runRefresh({ strength, projectTrees, stages,
       onStage(event) {

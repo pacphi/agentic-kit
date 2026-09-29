@@ -1503,7 +1503,8 @@ async function main() {
     for (const entry of entries) { counts[entry.lane] += 1; lanes[entry.lane].push(entry); }
     return { lanes, counts, entries };
   }
-  await page.route(/\/api\/maintenance\/v2\//, async (route) => {
+  const maintenanceV2Route = /\/api\/maintenance\/v2\//;
+  const maintenanceV2Stub = async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const pathname = url.pathname;
@@ -1792,7 +1793,8 @@ async function main() {
       });
     }
     return reply(404, { code: 'NOT_FOUND' });
-  });
+  };
+  await page.route(maintenanceV2Route, maintenanceV2Stub);
   // ── Refresh evidence (MNT-DSC-010): the workspace's explicit control reuses
   // the v1 endpoint verbatim, `?refresh=scan` then polling until settled. ──
   let maintenanceProviderPollCount = 0;
@@ -5857,6 +5859,162 @@ async function main() {
       await page.locator('#refresh-run').isEnabled()
         && await page.locator('[data-mnt-plan-plc]').first().isEnabled());
     await page.unroute('**/api/refresh', rejectStatus);
+
+    // Two real dashboard pages can supersede a completed operation before its
+    // first polling GET. Test both a newer terminal state and a newer running
+    // state against the actual server operation, not a route-shaped fake.
+    activeMaintenanceInventory = structuredClone(SENTINEL_FIXTURES.base());
+    const supersessionUpdate = activeMaintenanceInventory.guidanceEntries.find(entry => entry.lane === 'apply');
+    Object.assign(supersessionUpdate, { verb: 'update', outcome: 'Update Claude plugin',
+      providerCapabilityId: 'claude-plugin:v1:update:user',
+      verifiedPremises: ['placement', 'installedVersion', 'published-update', 'consumers', 'impact'],
+      impact: { summary: 'Installs the verified newer frontend-design version.' } });
+    async function latestRefresh() {
+      const response = await fetch(`${ORIGIN}/api/refresh`, { headers: modelHeaders });
+      return response.json();
+    }
+    async function waitServerRefresh(running, differentFrom) {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const state = await latestRefresh();
+        const identity = state.operationId;
+        if (state.running === running && identity !== differentFrom && identity) return state;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      throw new Error('the fixture refresh did not reach the expected server state');
+    }
+    async function exerciseSupersession(holdPeer) {
+      const firstPage = await browser.newPage();
+      const peerPage = await browser.newPage();
+      let releaseFirstPoll;
+      const firstPollGate = new Promise(resolve => { releaseFirstPoll = resolve; });
+      let interceptFirstPoll = true;
+      let releasePeerStage;
+      const holdPeerStage = new Promise(resolve => { releasePeerStage = resolve; });
+      try {
+        await firstPage.route(maintenanceV2Route, maintenanceV2Stub);
+        await Promise.all([
+          firstPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+          peerPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+        ]);
+        await firstPage.route('**/api/refresh', async route => {
+          if (route.request().method() === 'GET' && interceptFirstPoll) {
+            interceptFirstPoll = false;
+            await firstPollGate;
+          }
+          await route.continue();
+        });
+        await firstPage.click('#tab-system');
+        await firstPage.click('[data-system-view="maintenance"]');
+        await firstPage.click('[data-mnt-dest="guidance"]');
+        await firstPage.waitForSelector('[data-mnt-plan-plc]');
+        refreshStageGates.set('maintenance', Promise.resolve());
+        const firstPost = firstPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'POST');
+        await firstPage.click('#refresh-run');
+        await firstPost;
+        const firstDone = await waitServerRefresh(false, null);
+        const firstIdentity = firstDone.operationId;
+        if (holdPeer) refreshStageGates.set('maintenance', holdPeerStage);
+        const peerPost = peerPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'POST');
+        await peerPage.click('#refresh-run');
+        await peerPost;
+        const newer = await waitServerRefresh(holdPeer, firstIdentity);
+        const firstStatus = firstPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'GET');
+        releaseFirstPoll();
+        await firstStatus;
+        await firstPage.waitForTimeout(100);
+        if (holdPeer) {
+          check('superseding running refresh keeps the first page and real Apply blocked',
+            !!newer.operationId && newer.operationId !== firstDone.operationId
+              && await firstPage.locator('#refresh-run').isDisabled()
+              && await firstPage.locator('[data-mnt-plan-plc]').first().isDisabled()
+              && /another refresh|supersed/i.test(await firstPage.locator('#refresh-status').innerText()));
+          releasePeerStage();
+          await waitServerRefresh(false, firstIdentity);
+          await firstPage.waitForFunction(() => !document.getElementById('refresh-run')?.disabled,
+            null, { timeout: 8000 }).catch(() => {});
+        }
+        check(`first page recovers from newer ${holdPeer ? 'running' : 'completed'} refresh without claiming its outcome`,
+          await firstPage.locator('#refresh-run').isEnabled()
+            && await firstPage.locator('[data-mnt-plan-plc]').first().isEnabled()
+            && /outcome unavailable|supersed/i.test(await firstPage.locator('#refresh-status').innerText())
+            && !/Refresh complete\.|Refresh did not complete\./.test(await firstPage.locator('#refresh-status').innerText()));
+      } finally {
+        releaseFirstPoll();
+        releasePeerStage();
+        await Promise.all([firstPage.close(), peerPage.close()]);
+      }
+    }
+    await exerciseSupersession(false);
+    await exerciseSupersession(true);
+
+    // A page that loses the single-flight POST race must respect the running
+    // operation reported in the 409 response before accepting Maintenance writes.
+    {
+      const ownerPage = await browser.newPage();
+      const losingPage = await browser.newPage();
+      let releaseOwner;
+      const ownerStage = new Promise(resolve => { releaseOwner = resolve; });
+      try {
+        await losingPage.route(maintenanceV2Route, maintenanceV2Stub);
+        await Promise.all([
+          ownerPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+          losingPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+        ]);
+        await losingPage.click('#tab-system');
+        await losingPage.click('[data-system-view="maintenance"]');
+        await losingPage.click('[data-mnt-dest="guidance"]');
+        await losingPage.waitForSelector('[data-mnt-plan-plc]');
+        refreshStageGates.set('maintenance', ownerStage);
+        await ownerPage.click('#refresh-run');
+        await waitServerRefresh(true, null);
+        const conflict = losingPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'POST' && response.status() === 409);
+        await losingPage.click('#refresh-run');
+        await conflict;
+        check('409 refresh conflict blocks the losing page and real Apply while the winner runs',
+          await losingPage.locator('#refresh-run').isDisabled()
+            && await losingPage.locator('[data-mnt-plan-plc]').first().isDisabled());
+        releaseOwner();
+        await losingPage.waitForFunction(() => !document.getElementById('refresh-run')?.disabled,
+          null, { timeout: 8000 }).catch(() => {});
+        check('409 losing page restores Apply with an outcome-unavailable message after the winner ends',
+          await losingPage.locator('[data-mnt-plan-plc]').first().isEnabled()
+            && /outcome unavailable/i.test(await losingPage.locator('#refresh-status').innerText()));
+      } finally {
+        releaseOwner();
+        await Promise.all([ownerPage.close(), losingPage.close()]);
+      }
+    }
+
+    // An unconfirmed POST cannot adopt an older terminal operation as proof
+    // that its own request ended. The page must retain the write guard.
+    {
+      const uncertainPage = await browser.newPage();
+      try {
+        await uncertainPage.route(maintenanceV2Route, maintenanceV2Stub);
+        await uncertainPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+        await uncertainPage.click('#tab-system');
+        await uncertainPage.click('[data-system-view="maintenance"]');
+        await uncertainPage.click('[data-mnt-dest="guidance"]');
+        await uncertainPage.waitForSelector('[data-mnt-plan-plc]');
+        await uncertainPage.route('**/api/refresh', route => route.request().method() === 'POST'
+          ? route.abort() : route.continue());
+        const staleRead = uncertainPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'GET');
+        await uncertainPage.click('#refresh-run');
+        await staleRead;
+        check('uncertain POST does not adopt an older completed operation or release real Apply',
+          await uncertainPage.locator('#refresh-run').isDisabled()
+            && await uncertainPage.locator('[data-mnt-plan-plc]').first().isDisabled()
+            && /retry|unavailable/i.test(await uncertainPage.locator('#refresh-status').innerText()));
+      } finally {
+        await uncertainPage.close();
+      }
+    }
 
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does
