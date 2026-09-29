@@ -93,7 +93,7 @@ test('filesystem completion excludes provider checks without inventing their suc
   const result = scanProgress(ctx)();
   assert.match(result.narrative, /1 of 1/);
   assert.equal(result.coverage.find((c) => c.sourceId === 'providers').state, 'not-scanned');
-  assert.equal(result.evidenceChecks[0].method, 'Refresh evidence');
+  assert.equal(result.evidenceChecks[0].method, 'Refresh');
 });
 test('Hermes path honors HERMES_HOME and otherwise resolves the user configuration', () => {
   const previous = process.env.HERMES_HOME;
