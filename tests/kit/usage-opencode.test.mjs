@@ -10,6 +10,8 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { listSessions, parseSession, sessionExists } from '../../src/lib/usage-opencode.mjs';
 import { promptFingerprint } from '../../src/lib/usage-parsers.mjs';
+import { sessionCostEvidence } from '../../src/lib/usage-cost.mjs';
+import { buildIndex, _resetForTest } from '../../src/lib/usage-index.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-uo-'));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
@@ -71,6 +73,88 @@ const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'openco
     ...(error != null ? { error } : {}),
     time: { created: at, ...(completed !== null ? { completed } : {}) }, finish: 'stop',
   },
+});
+
+test('positive-token reported zero is unpriced for hosted and unknown providers, but observed for local providers', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'cost-zero', directory: '/x', title: 'cost zero' }],
+      messages: [
+        assistantMsg('hosted', 'cost-zero', T, { provider: 'openrouter', model: 'unknown-model', cost: 0 }),
+        assistantMsg('unknown', 'cost-zero', T + 1000, { provider: '', model: 'unknown-model', cost: 0 }),
+        assistantMsg('local', 'cost-zero', T + 2000, { provider: 'lmstudio', model: 'unknown-model', cost: 0 }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'cost-zero' });
+    const evidence = sessionCostEvidence(session, { costOf: () => { throw Error('reported zero must not be estimated'); } });
+    assert.deepEqual(evidence, { observedUsd: 0, estimatedUsd: 0, observedMessages: 1, estimatedMessages: 0, unpricedMessages: 2 });
+    assert.equal(session.usage.length, 3, 'provider attribution remains separate');
+    assert.equal(session.usage.find(r => r.provider === 'openrouter').costObserved, null);
+    assert.equal(session.usage.find(r => r.provider === 'lmstudio').costObserved, 0);
+  } finally { rm(d); }
+});
+
+test('reported zero without measured tokens and positive observed cost preserve their own evidence', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'cost-mixed', directory: '/x', title: 'mixed' }],
+      messages: [
+        assistantMsg('positive', 'cost-mixed', T, { provider: 'openrouter', cost: 0.25 }),
+        assistantMsg('untrusted', 'cost-mixed', T + 1000, { provider: 'openrouter', cost: 0 }),
+        assistantMsg('missing', 'cost-mixed', T + 2000, { provider: 'openrouter' }),
+        assistantMsg('zero-tokens', 'cost-mixed', T + 3000, { provider: 'openrouter', cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'cost-mixed' });
+    const evidence = sessionCostEvidence(session, { costOf: () => 0.5 });
+    assert.deepEqual(evidence, { observedUsd: 0.25, estimatedUsd: 0.5, observedMessages: 2, estimatedMessages: 1, unpricedMessages: 1 });
+  } finally { rm(d); }
+});
+
+test('malformed recorded costs are missing coverage, not trusted charges', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'cost-bad', directory: '/x', title: 'bad' }],
+      messages: [
+        assistantMsg('negative', 'cost-bad', T, { cost: -1 }),
+        assistantMsg('string', 'cost-bad', T + 1000, { cost: '0' }),
+        assistantMsg('nan', 'cost-bad', T + 2000, { cost: Number.NaN }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'cost-bad' });
+    const evidence = sessionCostEvidence(session, { costOf: () => 0.1 });
+    assert.deepEqual(evidence, { observedUsd: 0, estimatedUsd: 0.1, observedMessages: 0, estimatedMessages: 3, unpricedMessages: 0 });
+  } finally { rm(d); }
+});
+
+test('a cold and warm OpenCode scan conserve unpriced zero-cost coverage', async () => {
+  const d = tmp();
+  _resetForTest();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'cost-cache', directory: '/x', title: 'cache' }],
+      messages: [assistantMsg('remote-zero', 'cost-cache', T, { provider: 'openrouter', model: 'unknown-model', cost: 0 })],
+    });
+    const opts = { now: T + DAY, days: 14, cachePath: path.join(d, 'cache', 'index.json'),
+      roots: { claude: path.join(d, 'claude'), codex: path.join(d, 'codex'), opencode: dbFile } };
+    const cold = await buildIndex(opts);
+    _resetForTest();
+    const warm = await buildIndex(opts);
+    for (const agg of [cold, warm]) {
+      const session = agg.sessions.find((row) => row.id === 'cost-cache');
+      assert.equal(session.costEvidence.unpricedMessages, 1);
+      assert.equal(session.costEvidence.observedMessages, 0);
+      assert.equal(session.costEvidence.estimatedMessages, 0);
+      assert.equal(session.cost, 0);
+      assert.equal(agg.totals.cost, 0);
+    }
+    assert.deepEqual(warm.sessions.find((row) => row.id === 'cost-cache').costEvidence,
+      cold.sessions.find((row) => row.id === 'cost-cache').costEvidence);
+  } finally { _resetForTest(); rm(d); }
 });
 
 test('listSessions filters by the latest message time and keys on mtime+count', () => {

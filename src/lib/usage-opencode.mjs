@@ -13,11 +13,10 @@
 // on bad input — an absent/corrupt db simply reads as "no opencode source".
 //
 // Two attribution rules, grounded in the store itself:
-//   - COST is opencode's own metered figure on each assistant message
-//     (data.cost). That is OBSERVED truth, so usage rows carry it as
-//     `costObserved` and the aggregate prefers it over the pricing table —
-//     never re-priced from a guessed rate (kimi/openrouter/local rates are
-//     exactly what ak does not know and must not invent).
+//   - COST is opencode's own figure on each assistant message (data.cost).
+//     A positive recorded cost is observed. A zero with positive tokens from
+//     an unverified non-local provider is unpriced: OpenCode may default a
+//     missing model rate to zero. Never re-price that row from a guessed rate.
 //   - INFERENCE PROVIDER is the assistant row's providerID when observed
 //     (provenance 'observed'), never the host. A bare `opencode` host id says
 //     nothing about who served the model.
@@ -36,6 +35,7 @@ import {
 import { normalizeMode } from './usage-modes.mjs';
 import { xdgBase } from './paths.mjs';
 import { observeUsageProject } from './usage-project-evidence.mjs';
+import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
 export function defaultOpencodeDbPath() {
@@ -268,7 +268,11 @@ function recordAssistantUsage(rec, data, at) {
   if (isUnreportedUsage(data, t, cache)) usageRow.tokensUnreported = (usageRow.tokensUnreported ?? 0) + 1;
   // Retain missing-cost tokens separately before coalescing by day/model.
   usageRow.costObserved ??= null;
-  if (typeof data.cost === 'number' && Number.isFinite(data.cost) && data.cost >= 0) {
+  const hasMeasuredTokens = [t.input, t.output, t.reasoning, cache.read, cache.write]
+    .some((value) => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  if (data.cost === 0 && hasMeasuredTokens && !isLocalInferenceProvider(provider)) {
+    usageRow.costUntrustedMessages = (usageRow.costUntrustedMessages ?? 0) + 1;
+  } else if (typeof data.cost === 'number' && Number.isFinite(data.cost) && data.cost >= 0) {
     usageRow.costObserved = (usageRow.costObserved ?? 0) + data.cost;
     usageRow.costObservedMessages = (usageRow.costObservedMessages ?? 0) + 1;
   } else {
