@@ -1,21 +1,23 @@
 # Self-Improvement Eval + RL Status-Line Telemetry — Implementation Plan
 
-> ### 🕰️ HISTORICAL — superseded by upstream (updated 2026‑05‑29)
+> ## 🕰️ HISTORICAL — superseded by upstream (updated 2026‑05‑29)
+>
 > This plan is preserved as the record of *where we've been*. Since it was written, upstream
 > ruflo shipped 3.10.6→3.10.9, which **resolved the centerpiece of this plan**:
+>
 > - **F2 (route feedback persistence)** → fixed upstream in **3.10.6 (#2222)** via `saveModel()`
 >   (@pacphi credited). Task 0 here (`ruflo-patch-route-learning`) is therefore **retired** — the
 >   script is now a version-gated no-op on ≥3.10.6 (legacy stopgap only on <3.10.6) and is no
 >   longer wired into `ruflo-resync`.
 > - A deeper follow-up (negative-reward inversion) was fixed in **3.10.7**; route-cache staleness
->   + `--explore false` in **3.10.8**.
+>   - `--explore false` in **3.10.8**.
 > - **Carry-forward (still valid):** `ruflo-improvement-eval` (the proof harness) and the F3/F4
 >   findings, which remain unaddressed/deferred upstream.
 >
 > Current truth-of-record: [`docs/upstream/ruflo-self-improvement-findings.md`](2026-06-upstream-findings-f1-f6.md).
-
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
+>
 > **SCOPE REVISED after the Tier-2 spike (see spec "Revised scope"):** Tier-2 (LoRA
 > consumption) is infeasible as a patch → upstream issue only. This branch now ships
 > **(1) the F2 fix** (route Q-learner CLI persistence — validated), **(2) a minimal
@@ -31,6 +33,7 @@
 **Reference spec:** `2026-05-28-superpowers-spec-self-improvement-eval.md`
 
 **Conventions (match the kit):**
+
 - Color/`ok()/warn()/fail()` helpers with TTY guard; `--help` via the `sed -n` idiom; exit codes `0` ok / `1` not-proven / `2` env error.
 - **No `Co-Authored-By`** trailer (kit rule; `.claude/settings.json` has no `attribution.commit`).
 - Resolve the router from the **global** install via `createRequire(npm root -g/...)`.
@@ -100,6 +103,7 @@ chmod +x bin/ruflo-patch-route-learning
 ./bin/ruflo-patch-route-learning           # patches + verifies accumulation
 ./bin/ruflo-patch-route-learning           # second run: "already persists" (idempotent)
 ```
+
 Expected: applies the patch, verifies Update Count ≥ 1 across CLI calls; second run is a no-op.
 
 - [ ] **Step 3: Commit**
@@ -114,6 +118,7 @@ git commit -m "feat: ruflo-patch-route-learning — fix F2 so route Q-learner pe
 ## Task 1: Harness skeleton — resolve ruflo's router, fail loudly if absent
 
 **Files:**
+
 - Create: `bin/ruflo-improvement-eval`
 
 - [ ] **Step 1: Write the skeleton with router resolution + `--help`**
@@ -191,6 +196,7 @@ chmod +x bin/ruflo-improvement-eval
 ./bin/ruflo-improvement-eval                 # should print "router module resolved: ..."; exit 0 for now
 echo "exit=$?"
 ```
+
 Expected: `--help` shows usage; bare run prints the resolved module path. (If ruflo absent, exit 2 with guidance.)
 
 - [ ] **Step 3: Commit**
@@ -205,6 +211,7 @@ git commit -m "feat(eval): harness skeleton — resolve ruflo's Q-learning route
 ## Task 2: Synthetic environment + verify distinct states
 
 **Files:**
+
 - Modify: `bin/ruflo-improvement-eval` (append the environment + a state-distinctness check)
 
 - [ ] **Step 1: Add the env and a `--probe-states` mode**
@@ -257,6 +264,7 @@ if (has('--probe-states')) {
 ./bin/ruflo-improvement-eval --probe-states
 echo "exit=$?"
 ```
+
 Expected: `distinct Q-states for 8 train tasks: 8` (exit 0). **If fewer than 8** (keyword collisions, spec Q1), edit the `train`/`evalq` phrasings to use more distinct `FEATURE_KEYWORDS` (see spec F3 list: implement/test/review/design/research/optimize/debug/document) until each task occupies its own state, then re-run. Do not proceed until this passes.
 
 - [ ] **Step 3: Commit**
@@ -271,6 +279,7 @@ git commit -m "feat(eval): synthetic-reward environment (task→known-best agent
 ## Task 3: Core protocol — cold baseline, train, greedy held-out eval, ablation
 
 **Files:**
+
 - Modify: `bin/ruflo-improvement-eval`
 
 - [ ] **Step 1: Add the experiment functions**
@@ -337,6 +346,7 @@ if (has('--inspect-decision')) {
 ```bash
 ./bin/ruflo-improvement-eval --inspect-decision
 ```
+
 Expected: prints the router's raw decision object. **Confirm `decide()` extracts the agent id from this shape**; if the agent is under a different key, fix `decide()` accordingly, then continue.
 
 - [ ] **Step 3: Commit**
@@ -351,6 +361,7 @@ git commit -m "feat(eval): protocol — cold baseline, exploratory training, gre
 ## Task 4: Multi-seed aggregation, CI, verdict, ASCII curve, result file
 
 **Files:**
+
 - Modify: `bin/ruflo-improvement-eval`
 
 - [ ] **Step 1: Add aggregation + report + `improvement.json` writer**
@@ -468,6 +479,7 @@ cd /tmp && rm -rf si-eval && mkdir si-eval && cd si-eval
 cat .claude-flow/improvement.json | head -40
 cd "$OLDPWD"
 ```
+
 Expected: a printed learning curve, cold→warm accuracy, ablation %, convergence stats, a PASS/FAIL verdict, and a written `improvement.json`. If the curve does not rise (e.g., ε decays too slowly at K=60), bump `--episodes` and re-run; record the working smoke parameters. A FAIL with an honest negative result is an acceptable Step outcome — the mechanism (curve + ablation + file) must work, even if 60-episode smoke doesn't clear the PASS bar.
 
 - [ ] **Step 3: Run the fuller experiment to get a real PASS (if smoke was short)**
@@ -475,6 +487,7 @@ Expected: a printed learning curve, cold→warm accuracy, ablation %, convergenc
 ```bash
 cd /tmp/si-eval && "$OLDPWD/bin/ruflo-improvement-eval" --episodes 600 --seeds 5 ; echo "exit=$?" ; cd "$OLDPWD"
 ```
+
 Expected: with enough episodes the warm held-out accuracy clears the PASS bar and beats the ablation. Capture the numbers for the docs. (If even 600 episodes can't clear +20pp/0.60, lower nothing silently — instead record the achieved delta honestly and note it in the docs; the proof is the *gap vs ablation*, not a fixed threshold.)
 
 - [ ] **Step 4: Commit**
@@ -489,6 +502,7 @@ git commit -m "feat(eval): multi-seed aggregation + CI + verdict + ASCII learnin
 ## Task 5: Status-line `📈 RL` telemetry segment
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh` (the `rufloActivationSegments` helper inside the `ruflo-fix-statusline-version` heredoc)
 
 - [ ] **Step 1: Add the RL line to the footer helper**
@@ -546,6 +560,7 @@ ruflo-fix-statusline-version .claude/helpers/statusline.cjs >/dev/null 2>&1
 node .claude/helpers/statusline.cjs <<<'{}' 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | tail -3
 cd "$OLDPWD" && rm -rf /tmp/rl-sl
 ```
+
 Expected last line resembles: `📈 RL  ▁▃▅▇  acc 12%→78%  Δ+66pp (CI±7) · p<.001 · d=2.1 · ε0.12↓ · δ̄0.01↓ · |Q|8` (add `"pValue":0.0009,"cohensD":2.1` to the synthetic JSON to see `p`/`d`). With no `improvement.json`, the line must be absent (verify by removing the file and re-rendering).
 
 - [ ] **Step 3: Verify idempotency (re-apply twice, one block)**
@@ -559,6 +574,7 @@ ruflo-fix-statusline-version .claude/helpers/statusline.cjs >/dev/null 2>&1
 echo "seg blocks: $(grep -c 'ruflo-seg:BEGIN' .claude/helpers/statusline.cjs)  wraps: $(grep -c 'rufloActivationSegments(process.cwd())' .claude/helpers/statusline.cjs)"
 cd "$OLDPWD" && rm -rf /tmp/rl-idem
 ```
+
 Expected: `seg blocks: 1  wraps: 1`.
 
 - [ ] **Step 4: Apply to this session's live statusline + run the real eval here**
@@ -570,6 +586,7 @@ source shell/ruflo-functions.sh
 ruflo-fix-statusline-version .claude/helpers/statusline.cjs >/dev/null 2>&1
 node .claude/helpers/statusline.cjs <<<'{}' 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | tail -4
 ```
+
 Expected: the live footer now includes the `📈 RL` (or `◷ RL` if smoke didn't clear the bar) line.
 
 - [ ] **Step 5: Commit**
@@ -584,14 +601,17 @@ git commit -m "feat(statusline): 📈 RL telemetry line — learning-curve spark
 ## Task 6: Documentation — primer, command, finding F2, Tier-2, troubleshooting
 
 **Files:**
+
 - Modify: `README.md`, `claude/ruflo-reference.md`, `docs/BACKGROUND.md`, `docs/TROUBLESHOOTING.md`
 
 - [ ] **Step 1: README — add the command, the `📈 RL` mockup, and the plain-language primer**
 
 In the commands table add:
-```
+
+```text
 | 📈 `ruflo-improvement-eval [--smoke\|--json\|--check]` | In-process held-out/ablated/multi-seed proof that the route Q-learner self-improves; writes `.claude-flow/improvement.json` and drives the status line's `📈 RL` line. |
 ```
+
 Add a new section `## 🧠 Is it actually learning *and* improving?` containing the plain-language primer copied from the spec's §0 (the delivery-company analogy, the three systems with ε/TD/|Q|/Δ-LoRA, the two-loops table, and the "why it's worth it without Tier-2" paragraph). Add the `📈 RL` line to the status-line mockup.
 
 - [ ] **Step 2: BACKGROUND.md — add the primer + finding F2 + Tier-2**
@@ -605,7 +625,8 @@ In the self-learning section, add `ruflo-improvement-eval` to the workflow and t
 - [ ] **Step 4: TROUBLESHOOTING.md — two entries**
 
 Add:
-```
+
+```text
 ### `📈 RL` line missing or shows `◷ RL unproven`
 The eval hasn't run, or didn't clear the PASS bar. Run `ruflo-improvement-eval` (or
 `--smoke`); it writes `.claude-flow/improvement.json` which the footer renders. A `◷`

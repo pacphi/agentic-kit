@@ -27,19 +27,23 @@ ls -l .swarm/memory.db .swarm/memory.db-wal
 | 0 (Node ≥24, ruflo <3.10.6) | 0 | agentdb on buggy sql.js WASM | upgrade ruflo (≥3.10.6) or `ruflo-patch-native` |
 
 ### cwd drift
+
 Each Claude Code Bash call may run in a different cwd. Pin the DB:
 `ruflo-setup-project` writes an absolute `CLAUDE_FLOW_DB_PATH` into
 `.claude/settings.local.json`. Verify it's absolute (not `${CLAUDE_PROJECT_DIR}`):
+
 ```bash
 cat .claude/settings.local.json    # must show /abs/path/.swarm/memory.db
 ```
 
 ### `${CLAUDE_PROJECT_DIR}` literal
+
 If `settings.local.json` contains `"${CLAUDE_PROJECT_DIR}/.swarm/memory.db"`,
 Claude Code does **not** expand it; ruflo silently fails the write. Re-run
 `ruflo-setup-project` (it heals the value) or hand-edit to an absolute path.
 
 ### WAL blindness
+
 ```bash
 ruflo-memory-checkpoint              # PRAGMA wal_checkpoint(TRUNCATE) on cwd DB
 ruflo-memory-checkpoint /path/db     # explicit
@@ -51,6 +55,7 @@ On **ruflo ≥3.10.6** this is handled by an upstream `better-sqlite3 ≥12.8.0`
 ([#2219](https://github.com/ruvnet/ruflo/issues/2219)) — the agentdb copies resolve to
 native v12 by default, and the override survives upgrades. So the first move is simply to
 be on a current ruflo. The patch remains for **ruflo <3.10.6** (or as a re-assert):
+
 ```bash
 ruflo --version                     # ≥3.10.6 means the override already applies
 ruflo-patch-native --check          # reports "already native" when the override did its job
@@ -82,11 +87,13 @@ prebuild-capable v12, the prebuilt is never fetched. ruflo then drops to buggy W
 makes the kit's native patch **more** necessary after an upgrade, not less.
 
 **Fix.**
+
 ```bash
 ruflo-resync                        # runs ruflo-patch-native; installs the native binary
                                     # even under allow-scripts (verified on npm 11.17)
 ruflo-patch-native --check          # expect "already native" afterward
 ```
+
 Alternatively, allow the blocked builds globally before re-resolving:
 `npm approve-scripts --allow-scripts-pending` (npm's own remedy), then `ruflo-resync`. The
 kit's resync handles it without that step.
@@ -94,6 +101,7 @@ kit's resync handles it without that step.
 ## `ruflo memory delete` says deleted but the row remains
 
 Known WASM-backend bug. Delete via native sqlite3:
+
 ```bash
 sqlite3 "$(pwd -P)/.swarm/memory.db" \
   "DELETE FROM memory_entries WHERE key='ns/key'; PRAGMA wal_checkpoint(TRUNCATE);"
@@ -115,15 +123,18 @@ enforced as exact `mcp__claude-flow__<tool>` entries in `permissions.deny` in
 Re-run `ruflo-setup-machine` to change the selection.
 
 To opt out of the MCP server entirely:
+
 ```bash
 ruflo-remove-mcp                    # removes the claude-flow key (and legacy `ruflo` key),
                                     # cleans up the permissions.deny rules it added
 claude mcp list | grep -E 'claude-flow|ruflo'   # should be empty
 ```
+
 (Restart Claude Code — MCP tool defs already loaded in a running session stay until
 the session restarts.)
 
 ### A committed project `.mcp.json` with `ruv-swarm` / `flow-nexus` is still cruft
+
 Independent of the user-scope registration, a per-project `.mcp.json` that `ruflo
 init` would commit is unwanted: `ruv-swarm` is a subset of ruflo and `flow-nexus` is
 auth-gated cloud SaaS. `ruflo-setup-project` **strips** these committed ruflo/ruv-swarm/
@@ -131,6 +142,7 @@ flow-nexus entries (upstream dedup [#1779](https://github.com/ruvnet/ruflo/issue
 / [#2612](https://github.com/ruvnet/ruflo/issues/2612) also skips writing one when the
 user-scope registration already exists). If you find them committed, re-run
 `ruflo-setup-project` or remove them by scope:
+
 ```bash
 claude mcp list
 claude mcp remove ruv-swarm  -s project
@@ -141,10 +153,12 @@ claude mcp remove flow-nexus -s project
 
 The prebuilt fetch may have failed (network) or your Node ABI has no v12
 prebuilt yet. Check:
+
 ```bash
 node -e 'console.log("ABI", process.versions.modules)'
 npm view better-sqlite3 versions --json | tail
 ```
+
 Fall back to Node 22 LTS (`mise install node@22`) where the native path resolves
 without patching.
 
@@ -160,22 +174,26 @@ ruflo-parity-test --verbose         # print every CLI call
 
 The dominant cause is the same missing native better-sqlite3 binary as the memory
 bug. Enable and verify:
+
 ```bash
 ruflo-enable-learning               # patch native bsq3 + assert real capability (5 probes)
 ruflo-learning-verify               # train in a temp dir; assert patterns 0 -> N persist
 ```
+
 `ruflo-enable-learning` re-runs `ruflo-patch-native`, so re-run it after every
 `npm install -g ruflo`. **Simplest after any upgrade:** `ruflo-resync` (one command
 that does enable-learning + agentic-qe native repair + statusline footer; `--aqe`
 also refreshes QE skills).
 
 ### Status-line activation footer missing after an upgrade
+
 `ruflo init` (run by upgrades/`ruflo-setup-project`) regenerates `statusline.cjs`
 without the footer. Re-apply: `ruflo-resync` (or `ruflo-fix-statusline-version`
 directly). The footer is append-only and the patcher is upgrade-safe — it strips any
 stale block and re-injects.
 
 ### Status line shows a bare "▊ Agentic QE v3" line (footer hidden after `aqe init`)
+>
 > **Fixed on agentic-qe ≥3.12.1.** `aqe init` now **merges** `.claude/settings.json`
 > non-destructively (one-time `settings.json.backup`; preserves a custom `statusLine`,
 > preserves ruflo hooks — 3.11.5 used to strip them — and preserves user `AQE_*` env).
@@ -187,14 +205,17 @@ On aqe <3.12.1, `aqe init` repointed `.claude/settings.json` `statusLine.command
 its own minimal `statusline-v3.cjs`, so Claude Code stopped rendering the rich
 `statusline.cjs` (your footer was still patched in — just not the file being run).
 Heal it:
+
 ```bash
 ruflo-resync            # or: ruflo-fix-statusline-version
 ```
+
 This re-points `settings.json` so `statusline.cjs` is primary (falling back to
 `statusline-v3.cjs`, then a literal). The status line refreshes within ~5s, or restart
 Claude Code.
 
 ### "@ruvector/core not available" persists even after the patch
+
 This line in `ruflo neural status` is usually **cosmetic**, not real dormancy.
 `getHNSWStatus()` (`memory-initializer.js`) reports "available" only if a lazy
 `_bridge`/`hnswIndex` singleton was initialized *in that process*; the status
@@ -213,20 +234,25 @@ your arch/ABI may be genuinely missing — fall back to Node 22 LTS.
 agentic-qe depends on `better-sqlite3@^12` directly and ships without the prebuilt
 `.node` on Node 24/26 (same class of bug as ruflo). `ruflo-setup-aqe` installs the
 native binary into the global `agentic-qe` before initializing:
+
 ```bash
 ruflo-setup-aqe                     # native-bsq3 repair + aqe init --auto + half-init repair
 ```
 
 ### agentic-qe half-init (SDK db present, skills missing)
+
 If `.agentic-qe/memory.db` exists but `.claude/skills/agentic-quality-engineering`
 does not, init only half-completed. `ruflo-setup-aqe` detects this and re-runs with
 `--upgrade`. Force a full reinit with `ruflo-setup-aqe --force`.
 
 ### agentic-qe RVF FsyncFailed (silently OFF ruvector)
+
 Symptom — every `aqe` start prints:
-```
+
+```text
 [RVF] Shared adapter init failed: RVF error 0x0303: FsyncFailed
 ```
+
 agentic-qe looks fine (`aqe upgrade` shows `@ruvector/rvf-node ✓`, flags on) and
 `.rvf` files exist, but the **live** shared RVF adapter never initializes — so aqe
 silently runs on the SQLite/hnswlib fallback and is **not benefiting from ruvector**.
@@ -240,6 +266,7 @@ a *derived cache* rebuilt from `.agentic-qe/memory.db`, so deleting it is safe.
 ruflo-verify-aqe            # assert AQE is on ruvector (rvf-node loaded + live init OK)
 ruflo-verify-aqe --repair   # delete a corrupt/oversized .rvf first, then assert
 ```
+
 `ruflo-setup-aqe` and `ruflo-resync` now run this repair automatically
 (`_ruflo_aqe_repair_rvf`): any `.agentic-qe/*.rvf` over 2 GiB is deleted with its
 `.idmap.json`/`.manifest.json`/`.lock` sidecars, and aqe rebuilds a fresh store on
@@ -265,6 +292,7 @@ Genuinely stale locks with no RVF magic are still left alone for aqe to self-hea
 ruflo-security-verify               # verifies scan/defend/secrets; diagnoses the defend failure
 ruflo-resync                        # heals it (reinstalls the dropped aidefence package)
 ```
+
 - **`ruflo security defend` is silently non-functional on a bare ruflo 3.28.0
   install** ([ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)): it
   prints only its AIDefence banner, completes in ~0ms, and emits **no verdict** with
@@ -287,12 +315,14 @@ ruflo-resync                        # heals it (reinstalls the dropped aidefence
 
 agentic-qe can run its QE work on your Claude subscription instead of a metered API
 key, and cap spend fleet-wide:
+
 ```bash
 export AQE_LLM_PROVIDER=claude-code   # run QE via `claude -p` on a Claude subscription
                                       # (alternative: cognitum)
 export AQE_MAX_BUDGET_USD=5           # or pass --max-budget-usd; a fleet-wide spend cap
 aqe health                            # has an "LLM Billing" section showing provider + spend
 ```
+
 These are **runtime knobs** — `aqe init` never writes them, so set them in your shell
 or environment. (aqe 3.12.0 also added an `aqe quality-gate` CLI and the
 `qe/quality/gate` MCP tool.)
@@ -332,12 +362,14 @@ then they run under ruflo 3.27/3.28's **machine-wide launch budget**
 ([#2661](https://github.com/ruvnet/ruflo/issues/2661)) — defaults **1 concurrent /
 2 per hour / 12 per day** (`RUFLO_AI_MAX_CONCURRENT` / `RUFLO_AI_MAX_PER_HOUR` /
 `RUFLO_AI_MAX_PER_DAY`):
+
 ```bash
 ruflo daemon budget show            # current AI-worker launch budget + usage
 ruflo daemon budget pause           # stop launching AI workers
 ruflo daemon budget resume
 ruflo daemon stop --all             # stop every daemon on the machine
 ```
+
 Native daemons are also TTL-reaped (`RUFLO_DAEMON_TTL_SECS`, default 12h,
 [#2356](https://github.com/ruvnet/ruflo/issues/2356)). The statusline footer caches
 its QE metrics (`RUFLO_QE_STATUSLINE_TTL_MS`, default 60000ms) — at most one

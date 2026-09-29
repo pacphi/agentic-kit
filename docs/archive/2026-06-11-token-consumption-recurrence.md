@@ -50,7 +50,8 @@ them to the daemon that produced them.
 ## Findings
 
 ### 7-day audit totals
-```
+
+```text
 Assistant API responses: 124,231   Active sessions: 10,112
 TOTAL TOKENS: 8,228.9M  (input 203.1M | output 80.7M | cache-read 7,208.9M | cache-write 736.2M)
 cache efficiency: 88% cache-reads
@@ -58,7 +59,8 @@ Cost-weighted (Opus-equivalent reference): ~$9,631
 ```
 
 ### By model — still not interactive Opus
-```
+
+```text
 haiku    total=4263.9M  out=35.6M  cache-read=3843.3M
 sonnet   total=3153.8M  out=40.9M  cache-read=2792.0M
 opus     total= 612.1M  out= 3.6M  cache-read= 573.6M   <- interactive (~7%)
@@ -66,6 +68,7 @@ other    total= 199.1M
 ```
 
 ### Activity by hour — flat 24/7 = automation
+
 ~4,000 sessions/hr at 3am–5am, same as midday. A human doesn't do that. The enqueue
 cadence held **~80/hr around the clock**, then collapsed (80 → 4) at ~23:00 UTC when the
 auto-reaper killed the daemons.
@@ -75,12 +78,14 @@ auto-reaper killed the daemons.
 1. **Every recent transcript starts with `queue-operation` `enqueue`** carrying a prompt —
    programmatic, not typed.
 2. **Only 4 distinct enqueued prompts**, three on a steady cadence:
-   ```
+
+   ```text
    1,621  Analyze this codebase for security vulnerabilities: ...
    1,068  Analyze this codebase for performance optimizations: ...
      812  Analyze test coverage and identify gaps: ...
       17  Review this change for security vulnerabilities. ...
    ```
+
 3. **No cron, no launchd, no tmux/screen, no shell-rc auto-start.** The only rc hook is
    `~/.zshrc` sourcing `ruflo-functions.sh` — which **reaps**, never starts.
 4. **Exact-phrase grep** located the templates in
@@ -98,7 +103,8 @@ auto-reaper killed the daemons.
    17 projects, all `"running": true`, with per-worker `runCount`s. **34,533 total runs.**
 
 ### Daemon census (all dead at audit time)
-```
+
+```text
 running  pid      alive   totalRuns   project
 True     -        no-pid       7,361   ai/kahoot-quiz-generator
 True     -        no-pid       6,154   ai/whetstone
@@ -112,11 +118,13 @@ True     98277    dead           563   ai/ruflo-machine-ref
 True     65255    dead            37   ai/neon-drift
 True     -        no-pid     249..529   cf-toolsuite/* (6 projects), agentic-incubator/*
 ```
+
 Every recorded PID was dead; `ps` showed **zero** live ruflo/claude-flow/worker processes
 and only one `claude` (this interactive session). The `"running": true` flags were stale
 litter — the daemons died without updating their own state.
 
 ### Why it recurred but didn't run for weeks
+
 The June fix made daemons opt-in and added a **12h TTL auto-reaper** on interactive shell
 start (`_ruflo_daemon_autoreap` in `ruflo-functions.sh`). Daemons still got started again
 (likely via `ruflo daemon start` / onboarding across more projects), but the reaper killed
@@ -124,6 +132,7 @@ each once it exceeded TTL — capping the damage at hours instead of the origina
 **The prior mitigation did its job;** what remained was cleanup of stale state + logs.
 
 ### Playwright + context7 are plugins, not global MCP
+
 - `~/.claude.json` has **no** top-level `mcpServers`.
 - Both come from `enabledPlugins` in `~/.claude/settings.json`
   (`playwright@claude-plugins-official`, `context7@claude-plugins-official`), each shipping
@@ -136,23 +145,27 @@ each once it exceeded TTL — capping the damage at hours instead of the origina
 ## Actions performed
 
 ### 1 — Stale daemon-state cleanup
+
 - Safety-verified every daemon PID dead; `ruflo-daemon-gc` confirmed "no stale daemons".
 - Removed **20 files** (`daemon-state.json` / `daemon.pid` / `daemon-children.json`) across
   17 projects. 0 remaining. Nothing can falsely report `running: true` or resume from old
   state. Worker logs left for step 2.
 
 ### 3 — Plugin prune
+
 - Backed up `~/.claude/settings.json` → `settings.json.bak`.
 - Flipped `context7` and `playwright` to `false` in `enabledPlugins`; JSON re-validated.
 - Plugins stay installed; flip back to `true` to re-enable. **Effective next session.**
 
 ### 2 — Headless log backlog
+
 - Measured **~35,300 files / 598 MB** across 15 `.claude-flow/logs/headless` dirs
   (largest: kahoot 163 MB, spring-ai-openrouter 110 MB, whetstone 107 MB, sindri 71 MB).
 - Cleared all contents (empty dirs left in place; recreated only on an explicit daemon
   start). Verified **0 files / 0 MB** remaining.
 
 ### Cleanup summary
+
 | Action | Result |
 |---|---|
 | 1 — stale daemon state | 20 files removed across 17 projects; 0 daemons live |

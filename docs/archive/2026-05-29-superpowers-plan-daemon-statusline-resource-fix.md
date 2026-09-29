@@ -11,6 +11,7 @@
 **Spec:** `2026-05-29-superpowers-spec-daemon-statusline-resource-fix.md`
 
 **Conventions:**
+
 - No `Co-Authored-By` trailer (project `.claude/settings.json` has no `attribution.commit`).
 - Commit after each task. Never use `--no-verify`.
 - `ps axww -o pid=,args=` is the portable (macOS + Linux) full-width process listing; `-e` means "environment" on BSD/macOS, so it is NOT used.
@@ -38,6 +39,7 @@
 ## Task 1: Daemon lifecycle helpers + idempotent start + autoStart guard
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh` (add helpers before `ruflo-setup-project`; edit the daemon-start line ~320 and add an autoStart guard after it)
 
 - [ ] **Step 1: Add `_ruflo_daemon_list` and `ruflo-daemon-gc`**
@@ -155,9 +157,11 @@ Expected: no NEW errors beyond any pre-existing ones (the file already had `# sh
 - [ ] **Step 5: Functional check of the helpers in a real shell**
 
 Run:
+
 ```bash
 zsh -c 'source shell/ruflo-functions.sh; type _ruflo_daemon_list ruflo-daemon-gc | grep -q "shell function" && echo "funcs load"; ruflo-daemon-gc'
 ```
+
 Expected: prints `funcs load`, then either lists current orphans or `✓ no orphan daemons ...`. (Do not pass `--kill` here — that is Task 6.)
 
 - [ ] **Step 6: Commit**
@@ -172,11 +176,12 @@ git commit -m "fix(daemon): reap orphan daemons (ruflo-daemon-gc), idempotent pe
 ## Task 2: Statusline footer — TTL cache + single sqlite3 spawn
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh` (the `RUFLO_SEG_EOF` heredoc, currently lines 127–190; and add a `node --check` after the injection node script ~line 207)
 
 - [ ] **Step 1: Replace the QE block inside the injected `rufloActivationSegments`**
 
-Inside the `RUFLO_SEG_EOF` heredoc, replace the entire `// ── agentic-qe ...` block — from the line `    // ── agentic-qe (one guarded sqlite3 read) — branch + icon-tagged metrics ──` down to and including its closing `    } catch(e){}` (the one right before `    // ── assemble:`) — with this:
+Inside the `RUFLO_SEG_EOF` heredoc, replace the entire `// ── agentic-qe ...` block — from the line `// ── agentic-qe (one guarded sqlite3 read) — branch + icon-tagged metrics ──` down to and including its closing `} catch(e){}` (the one right before `// ── assemble:`) — with this:
 
 ```javascript
     // ── agentic-qe — TTL-cached; one sqlite3 spawn only on a cache miss (issue #3) ──
@@ -266,6 +271,7 @@ after=$(stat -f %m .claude-flow/cache/qe-statusline.json 2>/dev/null || stat -c 
 [ "$before" = "$after" ] && echo "cache HIT on 2nd render (no rewrite) ✓" || echo "⚠ cache not hit"
 rm -rf "$tmp"
 ```
+
 Expected: `node --check OK`, a footer line containing `🎓 Agentic QE` with `patterns`/`traj`/`vec`/the DB size, `cache written ✓`, and `cache HIT on 2nd render (no rewrite) ✓`.
 
 - [ ] **Step 5: Commit**
@@ -280,6 +286,7 @@ git commit -m "fix(statusline): TTL-cache QE footer + single .bail-off sqlite3 s
 ## Task 3: parity-test stops its own daemon on exit
 
 **Files:**
+
 - Modify: `bin/ruflo-parity-test` (the `cleanup_on_exit` function, currently lines 83–95)
 
 - [ ] **Step 1: Stop the test-workspace daemon in `cleanup_on_exit`**
@@ -335,6 +342,7 @@ git commit -m "fix(parity-test): stop the throwaway-workspace daemon on exit (no
 ## Task 4: uninstall.sh daemon teardown
 
 **Files:**
+
 - Modify: `uninstall.sh` (insert a new section between the `--this-project` block ending at line 153 and the npm-removal section starting at line 155)
 
 - [ ] **Step 1: Insert the daemon-teardown section**
@@ -402,6 +410,7 @@ git commit -m "fix(uninstall): stop stale daemons (always) + this-project daemon
 ## Task 5: Document daemon lifecycle + CLAUDE_CODE_TMPDIR workaround
 
 **Files:**
+
 - Modify: `docs/TROUBLESHOOTING.md` (append a new section)
 
 - [ ] **Step 1: Read the end of the file to match style**
@@ -453,7 +462,8 @@ adding to `~/.claude/settings.json`:
 ```
 
 Create the directory first (`mkdir -p ~/tmp/claude-code`).
-```
+
+```text
 
 - [ ] **Step 3: Commit**
 
@@ -471,27 +481,33 @@ git commit -m "docs(troubleshooting): daemon lifecycle, ruflo-daemon-gc, CLAUDE_
 - [ ] **Step 1: Show the orphans (workspace gone) without killing**
 
 Run:
+
 ```bash
 zsh -c 'source shell/ruflo-functions.sh; ruflo-daemon-gc'
 ```
+
 Expected: a list of `orphan daemon pid=... → /private/tmp/test-* (workspace gone)`
 lines (the ~11 leftovers), and live-project daemons NOT listed.
 
 - [ ] **Step 2: Kill exactly the orphans**
 
 Run:
+
 ```bash
 zsh -c 'source shell/ruflo-functions.sh; ruflo-daemon-gc --kill'
 ```
+
 Expected: `✓ stopped orphan daemon pid=...` for each; live-project daemons remain.
 
 - [ ] **Step 3: Verify live-project daemons survived**
 
 Run:
+
 ```bash
 ps axww -o pid=,args= | grep "daemon start" | grep -v grep | grep -c -- "--workspace /Users/"
 ps axww -o pid=,args= | grep "daemon start" | grep -v grep | grep -c -- "--workspace /private/tmp/test-"
 ```
+
 Expected: the first count > 0 (live projects kept), the second `0` (test orphans gone).
 
 ---
@@ -499,6 +515,7 @@ Expected: the first count > 0 (live projects kept), the second `0` (test orphans
 ## Self-Review
 
 **Spec coverage:**
+
 - R1 (parity-test stops its daemon, every exit, regardless of `--keep`) → Task 3.
 - R2 (idempotent daemon start) → Task 1 Step 2.
 - R3 (`ruflo-daemon-gc` list/`--kill`, no-op when none) → Task 1 Step 1.

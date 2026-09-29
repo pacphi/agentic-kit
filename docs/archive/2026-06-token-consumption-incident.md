@@ -32,6 +32,7 @@ Claude Code writes a full JSONL transcript of every session under
 `cache_creation_input_tokens`, plus per-tier cache-creation breakdown and `model`.
 
 Two Python passes over all project dirs, filtered to the last 7 days by `timestamp`:
+
 1. Aggregate tokens by **day / model / project**, with an Opus-equivalent cost weight
    (input $15, output $75, cache-write $18.75/$30, cache-read $1.50 per 1M).
 2. Count **sessions/day**, the per-session **startup context tax** (cache-read on the
@@ -45,16 +46,19 @@ Two Python passes over all project dirs, filtered to the last 7 days by `timesta
 ## Findings
 
 ### 7-day totals
-```
+
+```text
 Assistant API responses: 123,757   Active sessions: 10,106
 TOTAL TOKENS: 8.1B   (input 203M | output 80M | cache-read 7,085M | cache-write 734M)
 Cost-weighted (Opus-equiv): ~$9,327
 ```
+
 **87% of all tokens are cache-reads** — the same large context re-read across thousands
 of sessions.
 
 ### By day (cost-weighted $, total tokens, output)
-```
+
+```text
 2026-06-04   $ 410.68    396.0M   out=6.1M
 2026-06-05   $1094.46   1281.3M   out=15.5M
 2026-06-06   $  71.76    245.7M   out=2.0M
@@ -66,7 +70,8 @@ of sessions.
 ```
 
 ### By model — the burn is NOT interactive Opus
-```
+
+```text
 haiku    total=4262.1M  out=35.6M  cache-read=3841.8M
 sonnet   total=3157.2M  out=41.0M  cache-read=2794.7M
 opus     total= 484.8M  out= 2.9M  cache-read= 449.5M   <- interactive work (~6%)
@@ -74,16 +79,19 @@ other    total= 199.1M
 ```
 
 ### Sessions/day — automation, not a human
-```
+
+```text
 06-04   661     06-08  2,842
 06-05 1,202     06-09  1,769
 06-06   504     06-10  1,831
 06-07    67     06-11  1,243
 ```
+
 ~1,440 sessions/day average = one new session **every minute, around the clock**.
 
 ### Startup context tax (per session, before any real work)
-```
+
+```text
 sessions measured: 10,106
 median: 38K   p90: 58K   max: 111K
 sum of all startup loads: 288M tokens just to BOOT sessions
@@ -91,7 +99,8 @@ sum of all startup loads: 288M tokens just to BOOT sessions
 ```
 
 ### Top projects — ~1,800 sessions each is a fingerprint
-```
+
+```text
 1,879  mario-kart-knockoff
 1,800  spring-ai-openrouter-example
 1,798  whetstone
@@ -101,7 +110,8 @@ sum of all startup loads: 288M tokens just to BOOT sessions
 ```
 
 ### The smoking gun — six immortal daemons
-```
+
+```text
 PID    WORKSPACE                      SINCE     UPTIME
 23966  kahoot-quiz-generator          May 23    19 days
 24431  spring-ai-openrouter-example   May 26    16 days
@@ -110,6 +120,7 @@ PID    WORKSPACE                      SINCE     UPTIME
 4711   ruvos                          Jun 5      6 days
 89485  emailibrium                    Jun 8      3 days
 ```
+
 Each is `node …/cli.js daemon start --foreground --quiet --workspace <project>`,
 reparented to PID 1, dispatching background workers (audit/optimize/testgaps/map/
 document) that each spin up Claude sessions. They map 1:1 to the top-burn projects.
@@ -118,7 +129,7 @@ document) that each spin up Claude sessions. They map 1:1 to the top-burn projec
 
 ## Root cause (policy-level, in our own kit)
 
-```
+```text
 ruflo-setup-project  ──starts──►  ruflo daemon start  ──►  daemon runs forever
    (per project)                                            (nothing stops it)
    × 6 projects                                             × weeks = token leak
@@ -151,7 +162,7 @@ Source changes in `shell/ruflo-functions.sh` + `shell/ruflo-lib.sh`, deployed to
    1–2, **yellow alarm at ≥3** (`— ruflo-daemon-gc --kill`). Global count, tmp-cached,
    one `pgrep` per 30s window. Opt out: `RUFLO_DAEMON_STATUSLINE=0`.
 
-**New env knobs**
+### New env knobs
 
 | Var | Default | Effect |
 |---|---|---|
@@ -188,6 +199,7 @@ deferred tool defs). The largest kit-controlled slice was the auto-loaded
 occasionally.
 
 **Fix (chosen: compact pointer):**
+
 - `claude/ruflo-reference.md` → compact ~40-line pointer block (832 tokens): CLI-not-MCP
   principle, when-not-to-use, most-used commands, decision tree, daemon-hygiene safeguard,
   and a pointer to the full doc + `ruflo <cmd> --help`.
@@ -213,6 +225,7 @@ So anyone can diagnose a recurrence (or any automation leak) without re-deriving
 method, the ad-hoc `/tmp` scripts were consolidated into a maintained tool + skill.
 
 **`bin/ruflo-token-audit`** (deployed to `~/.local/bin`, stdlib-only Python, no network):
+
 ```bash
 ruflo-token-audit                 # last 7 days, human report
 ruflo-token-audit --days 14       # widen the window
@@ -220,6 +233,7 @@ ruflo-token-audit --json          # machine-readable (dashboards/CI)
 ruflo-token-audit --top 20        # more projects
 ruflo-token-audit --no-daemons    # skip the `ps` daemon cross-reference
 ```
+
 Emits: total + cost-weighted (Opus-equivalent reference, **not** plan billing) tokens;
 by-day / by-model / by-project; sessions/day; per-session startup context tax; session-size
 distribution; and a **daemon cross-reference** that flags running `ruflo daemon start`
@@ -229,7 +243,8 @@ processes whose workspace is a top-burn project.
 in every project): runs the engine, interprets interactive-vs-automation signals, checks
 the daemon cross-reference, and returns a ranked diagnosis with exact fix commands.
 
-**Sample prompts**
+### Sample prompts
+
 - *"Audit my Claude Code token usage for the last 7 days — what's burning my tokens?"*
 - *"I'm hitting my Max limit in a day. Run the token audit and tell me why."*
 - *"Check for runaway ruflo daemons and show me my heaviest projects this week."*
@@ -249,7 +264,7 @@ deploy loop (no extra wiring).
 | `c48b708` | Compact `ruflo-reference` block (full reference moved to on-demand `~/.config/ruflo/ruflo-reference-full.md`) |
 | `ede698a` | Doc: mark the context-tax optimization complete |
 | `cb11189` | Remove repo-relative `docs/` references from home-assembled CLAUDE.md content (repo-independent after install) |
-| _(this change)_ | `ruflo-token-audit` CLI + skill; install/uninstall skill wiring; README + this doc |
+| *(this change)* | `ruflo-token-audit` CLI + skill; install/uninstall skill wiring; README + this doc |
 
 ---
 

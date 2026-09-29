@@ -45,7 +45,8 @@ activates, then add the genuinely-missing pieces.**
 
 ## 2. Goals / Non-goals
 
-**Goals**
+### Goals
+
 - G1. Make ruvector self-learning (SONA, ReasoningBank, HNSW) measurably *active* on a
   global ruflo install, at the machine layer, surviving upgrades via a documented
   re-run step.
@@ -64,7 +65,8 @@ activates, then add the genuinely-missing pieces.**
   (`ruflo-resync`), since upgrades wipe the native binaries and regenerate the
   statusline. Re-applying must never be a multi-step chore.
 
-**Non-goals**
+### Non-goals
+
 - N1. Do **not** re-port the gist's obsolete `controller-registry.js` patches.
 - N2. Do **not** fold agentic-qe into the default project setup.
 - N3. Do **not** build a CVE database / NVD integration (document the gap only).
@@ -77,7 +79,7 @@ The kit keeps its two existing layers and adds verification + opt-in modules. Al
 logic lives in `shell/ruflo-functions.sh` (shell helpers) and `bin/` (standalone
 executables), consistent with the current structure.
 
-```
+```text
 Machine layer  (once per machine / per ruflo upgrade)
   ├─ ruflo-patch-native           [EXISTING] native better-sqlite3 in 6 agentdb dirs
   ├─ ruflo-enable-learning        [NEW] patch-native → activate → assert ruvector live
@@ -106,6 +108,7 @@ Presentation layer  (status line, all projects)
 Each new unit has one purpose, a defined interface, and stated dependencies.
 
 **`ruflo-enable-learning`** (new bin or function)
+
 - *Does:* Run `ruflo-patch-native`; then probe `ruflo neural status` and
   `ruflo hooks intelligence --status`; assert the previously-dormant controllers
   (native bsq3, HNSW, SONA, ReasoningBank backend) are now loaded. If still dormant,
@@ -115,6 +118,7 @@ Each new unit has one purpose, a defined interface, and stated dependencies.
 - *Depends on:* `ruflo-patch-native`, `ruflo`, `node`.
 
 **`ruflo-learning-verify`** (new)
+
 - *Does:* In an isolated `/tmp` dir (like `ruflo-parity-test`), run a minimal real
   learning cycle — `ruflo neural train` and/or a ReasoningBank/SONA write — then
   assert pattern/trajectory count transitions from 0 → >0 and persists on disk.
@@ -123,6 +127,7 @@ Each new unit has one purpose, a defined interface, and stated dependencies.
 - *Depends on:* native backend active (run after `ruflo-enable-learning`).
 
 **`ruflo-setup-aqe`** (new, opt-in)
+
 - *Does:* `aqe init --auto`; verify **both** `.agentic-qe/memory.db` **and** the
   `.claude/skills/agentic-quality-engineering` marker exist; if marker missing,
   re-run `aqe init --auto --upgrade` (half-init repair from the gist).
@@ -131,6 +136,7 @@ Each new unit has one purpose, a defined interface, and stated dependencies.
 - *Depends on:* global `aqe` binary (fallback `npx -y agentic-qe@latest`).
 
 **`ruflo-fix-statusline`** (extends existing `ruflo-fix-statusline-version`)
+
 - *Does:* Keeps the existing live-version heal, and adds activation segments to the
   generated `statusline.cjs`: a self-learning indicator (e.g. `🧠 N patterns` when
   ReasoningBank/SONA active, dimmed/absent when dormant), a security indicator
@@ -145,6 +151,7 @@ Each new unit has one purpose, a defined interface, and stated dependencies.
   self-heals (same pattern as the current version-heal).
 
 **`ruflo-security-verify`** (new)
+
 - *Does:* Confirm `@claude-flow/security` + `@claude-flow/aidefence` load; run
   `ruflo security scan` (code+deps), `ruflo security defend -i "<injection sample>"`
   (proactive defense), `ruflo security secrets`; surface the `cve --list`
@@ -155,7 +162,7 @@ Each new unit has one purpose, a defined interface, and stated dependencies.
 
 ### 3.2 Data flow (self-learning activation)
 
-```
+```text
 upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=WASM ──► learning dormant
                                    │
                 ruflo-enable-learning
@@ -177,6 +184,7 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
 ## 4. Requirements
 
 ### Self-learning
+
 - **R1.** `ruflo-enable-learning` MUST run `ruflo-patch-native` and then assert, by
   parsing `ruflo neural status`, that the native SQLite backend is in use (no
   "Using sql.js (WASM)") and that HNSW, SONA, and ReasoningBank are loaded.
@@ -195,6 +203,7 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
   guarded so it no-ops once upstream resolves it.
 
 ### agentic-qe
+
 - **R7.** `ruflo-setup-aqe` MUST be opt-in (never invoked by `ruflo-setup-project`
   by default).
 - **R8.** It MUST detect and repair the half-init state (SDK DB present, project
@@ -202,6 +211,7 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
 - **R9.** It MUST prefer a global `aqe` binary and fall back to `npx -y agentic-qe@latest`.
 
 ### Security
+
 - **R10.** `ruflo-security-verify` MUST confirm `@claude-flow/security` and
   `@claude-flow/aidefence` load and that `security scan`, `security defend`, and
   `security secrets` run.
@@ -213,6 +223,7 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
   without the flag, setup behavior is unchanged.
 
 ### Status line
+>
 > **Decision (revised after review):** the status line uses an **append-only** design
 > — a footer added *below* ruflo's native render — NOT an in-place rewrite of ruflo's
 > own lines. This was chosen over a faithful gist-style rewrite for upgrade-robustness:
@@ -256,6 +267,7 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
   check so it costs nothing when AQE is absent.
 
 ### Re-apply after upgrade
+
 - **R19.** A single command (`ruflo-resync`) MUST re-apply everything that a
   `npm install -g ruflo@latest` or `agentic-qe@latest` upgrade wipes — native
   better-sqlite3 for ruflo's agentdb (via `ruflo-enable-learning`), native
@@ -265,6 +277,7 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
   It MUST be idempotent and documented as THE post-upgrade step.
 
 ### Compatibility / safety
+
 - **R14.** The kit MUST NOT apply the gist's `controller-registry.js` patches on a
   ruflo version where they are already upstream (≥3.10.x verified). A guarded
   compatibility check MAY apply a corrective patch only if it detects a regression
@@ -289,7 +302,7 @@ upgrade ruflo ──► binaries present, bsq3 .node MISSING ──► agentdb=W
   sample, secrets OK, `cve` reported as GAP with `npm audit` guidance.
 - **S8 (status line reflects activation):** Before enablement the status line shows
   no learning/security/AQE segments. After `ruflo-enable-learning` + `--with-security`
-  + `ruflo-setup-aqe`, the status line shows `🧠 N patterns  🛡 on  🎓 M patterns`
+  - `ruflo-setup-aqe`, the status line shows `🧠 N patterns  🛡 on  🎓 M patterns`
   alongside the live version — a glance confirms all three are active.
 - **S7 (old ruflo):** On a hypothetical <3.10 install where agentdb resolves <3.0, the
   guarded compatibility check (R14) applies the corrective patch; on 3.10.5 it no-ops.

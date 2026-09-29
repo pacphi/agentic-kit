@@ -6,7 +6,8 @@
 - **Author:** Chris Phillipson (with Claude)
 - **Builds on:** the merged self-learning/agentic-qe/security work (PR #1)
 
-> ### Upstream reconciliation (added 2026‑05‑29)
+> ## Upstream reconciliation (added 2026‑05‑29)
+>
 > Preserved as the record of where we've been. The F2 fix this design relies on **landed
 > upstream** in ruflo **3.10.6 (#2222)** (`saveModel()` after feedback; @pacphi credited), so the
 > `ruflo-patch-route-learning` patch is **retired** (version-gated no-op on ≥3.10.6). The Tier-2
@@ -36,6 +37,7 @@ work's scope**:
   route learner actually **learn from real CLI use across invocations**.
 
 **Revised deliverables (a mix of "fix it" + "document it"):**
+
 1. **`bin/ruflo-patch-route-learning`** — idempotent, re-appliable global-dist patch for F2
    (sets `autoSaveInterval: 1`; verifies CLI feedback accumulates). Wired into
    `ruflo-resync`. Re-run after each ruflo upgrade (like `ruflo-patch-native`).
@@ -122,7 +124,8 @@ Verified by reading ruflo source and probing in isolation:
 
 ## 2. Goals / Non-goals
 
-**Goals**
+### Goals
+
 - G1. Build `ruflo-improvement-eval`: an in-process, held-out, ablated experiment that
   proves (or refutes) that ruflo's route Q-learner self-improves from experience.
 - G2. Use a falsifiable, pre-registered proof: held-out greedy accuracy rises with
@@ -132,11 +135,12 @@ Verified by reading ruflo source and probing in isolation:
   learning curve + PASS/FAIL verdict.
 - G4. Add an academically-literate **`📈 RL` telemetry line** to the status-line footer
   that renders the eval result (learning-curve sparkline, held-out accuracy, effect size
-  + CI, ε decay, mean TD error, |Q|).
+  - CI, ε decay, mean TD error, |Q|).
 - G5. Document Tier 2 (proving the LoRA/SONA path) — what it requires and the expected
   outcomes — and document finding F2 as an upstream bug.
 
-**Non-goals**
+### Non-goals
+
 - N1. Do **not** patch ruflo source to consume the LoRA `B` at inference (Tier 2).
 - N2. Do **not** run real LLM agents — the environment is synthetic-reward (deterministic,
   free, reproducible-in-aggregate).
@@ -145,7 +149,7 @@ Verified by reading ruflo source and probing in isolation:
 
 ## 3. Architecture
 
-```
+```text
 ruflo-improvement-eval  (Node .mjs — in-process, per F1/F2)
   ├─ Environment      fixed task suite; each task → known-best agent; reward = match
   ├─ Protocol         cold baseline → train K → checkpoint eval (greedy) → ablation → N seeds
@@ -162,9 +166,10 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
 ### 3.1 Component contracts
 
 **`bin/ruflo-improvement-eval`** (new; Node, `#!/usr/bin/env node`)
+
 - *Does:* runs the full experiment in one process against ruflo's real
   `createQLearningRouter` (resolved from the global `@claude-flow/cli`); prints the curve
-  + verdict; writes `improvement.json` into `./.claude-flow/`.
+  - verdict; writes `improvement.json` into `./.claude-flow/`.
 - *Input:* flags `--episodes K` (default 300), `--seeds N` (default 5), `--checkpoints`
   (default `0,25,50,100,200,300`), `--json`, `--quiet`. `--check` to only print the last
   cached result.
@@ -173,6 +178,7 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
 - *Depends on:* global ruflo (`@claude-flow/cli` → `ruvector/index.js`), node.
 
 **Synthetic environment** (inline in the harness)
+
 - A fixed list of `{task, bestAgent}` where `bestAgent ∈ ROUTE_NAMES` and `task` contains
   the `FEATURE_KEYWORDS` that map to a distinct state (e.g. "write unit tests for the
   payment module" → tester). Split into TRAIN and EVAL instances (EVAL includes reworded
@@ -181,6 +187,7 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
   [-1,1]).
 
 **Statusline `📈 RL` segment** (extends the existing footer helper in `ruflo-functions.sh`)
+
 - *Does:* if `.claude-flow/improvement.json` exists, append one line:
   `📈 RL  <sparkline>  acc <cold%>→<warm%>  Δ<+pp> (95% CI ±<x>)  ·  ε <e0>→<ef>↓  ·  δ̄ <td>↓  ·  |Q| <n>`.
   Renders nothing if the file is absent.
@@ -191,6 +198,7 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
 ## 4. Requirements
 
 ### Eval harness
+
 - **R1.** MUST run entirely in one Node process using ruflo's shipped
   `createQLearningRouter` (not a reimplementation, not repeated CLI calls).
 - **R2.** MUST measure **cold baseline** (fresh router, exploration off, greedy) accuracy on
@@ -217,6 +225,7 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
 - **R8.** MUST print an ASCII learning curve and a clear PASS/FAIL verdict; honor `--json`.
 
 ### Status line
+
 - **R9.** The footer MUST gain a **full** `📈 RL` line rendered **only** when
   `.claude-flow/improvement.json` exists, showing: learning-curve sparkline, held-out
   accuracy cold→warm, effect size Δpp with CI, **permutation p**, **Cohen's d**, ε decay,
@@ -227,6 +236,7 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
   `route stats` (F2: permanently `0 / ε 1.0`); a code comment + docs MUST state why.
 
 ### Honesty / scope
+
 - **R12.** Docs MUST state the proof covers the **route Q-learning loop only** (tabular,
   same-distribution held-out instances), not the LoRA/SONA path (Tier 2) and not unseen
   states (F3).
@@ -262,6 +272,7 @@ shell/ruflo-functions.sh  (statusline footer helper — append-only, fs-only)
 ## 7. Tier 2 (documented, not built): proving the LoRA/SONA path
 
 To prove the *neural* self-improvement arm (Ciprian's open item), a future effort would:
+
 1. **Close the integration gap (F5):** patch ruflo so the trained MicroLoRA `B` matrix is
    consumed at inference (the `forward_array` path feeds the routing/decision scalars),
    not just trained and stored.

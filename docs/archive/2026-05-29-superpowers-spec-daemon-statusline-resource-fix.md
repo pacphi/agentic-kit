@@ -127,7 +127,8 @@ argv string), which would drop counts whenever a candidate vector table is absen
    leading `.bail off` so a missing table does not abort the remaining statements.
 2. Emit **labeled rows** so order/absence is unambiguous, in vector priority
    order:
-   ```
+
+   ```text
    .bail off
    SELECT 'pat',COUNT(*) FROM qe_patterns;
    SELECT 'vec',COUNT(*) FROM qe_pattern_embeddings;
@@ -135,6 +136,7 @@ argv string), which would drop counts whenever a candidate vector table is absen
    SELECT 'vec',COUNT(*) FROM embeddings;
    SELECT 'traj',COUNT(*) FROM qe_trajectories;
    ```
+
 3. **Recover `e.stdout` in the `catch`** — `sqlite3` still exits non-zero when any
    statement errored (even with `.bail off`), so `execFileSync` throws; the rows
    that did run are on `e.stdout` and MUST be read from the thrown error.

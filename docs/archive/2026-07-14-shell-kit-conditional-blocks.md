@@ -41,11 +41,13 @@ direct the split, not a fight with the plugin. That house-rules text is the
 Strip away the prose and a managed block is **three things**:
 
 1. **A template file** in `claude/` — markdown wrapped in two HTML-comment markers:
-   ```
+
+   ```text
    <!-- BEGIN ruflo-aqe-reference -->
    …content Claude reads…
    <!-- END ruflo-aqe-reference -->
    ```
+
    The markers are the whole trick: they let the kit find and replace *only this region* of
    `~/.claude/CLAUDE.md`, leaving your hand-written notes and every other block untouched. The
    generic `_ruflo_block_upsert` / `_ruflo_block_strip` primitives in `shell/ruflo-lib.sh` do
@@ -126,9 +128,11 @@ Two steps. No new logic, ever.
    `<!-- BEGIN ruflo-<name>-reference -->` … `<!-- END ruflo-<name>-reference -->`. Keep the
    `ruflo-` sentinel prefix — `uninstall.sh` keys off it.
 2. **Add one registry row** to `_ruflo_cond_blocks` in `shell/ruflo-lib.sh`:
-   ```
+
+   ```text
    ruflo-<name>-reference|<name>-reference.md|<name>-md-template.md|<detector>
    ```
+
    If the detector isn't a simple `have <binary>`, add a small `have_<name>` function next to
    `have_superpowers` in the same file.
 
@@ -159,6 +163,7 @@ coordinates with the others" section.** Skeleton:
 ```
 
 Note the two emphases this kit already ships:
+
 - **`ruflo-aqe-reference`** is mostly a *capability* block — it teaches Claude about a CLI/MCP
   it wouldn't otherwise know to use.
 - **`ruflo-superpowers-reference`** is the *opposite* — Claude already knows superpowers (too
