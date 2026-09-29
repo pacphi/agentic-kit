@@ -32,7 +32,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { configDir, claudeSettingsPath } from './paths.mjs';
+import { configDir, claudeSettingsPath, claudeManagedSettingsPath } from './paths.mjs';
 import { managedHostIds } from './adapters/registries.mjs';
 import { recordedHostPresence } from './providers.mjs';
 
@@ -114,9 +114,9 @@ export function readClaudeLimits({ file = claudeLimitsFile() } = {}) {
 // command line, then the project's .claude/settings.local.json, then its
 // .claude/settings.json, then the user's ~/.claude/settings.json
 // (code.claude.com/docs/en/settings). The dashboard cannot know which project
-// the next session starts in, so it classifies the USER-level statusLine, the
-// one every project without its own inherits, and lets the panel state the
-// precedence rule beside the class.
+// the next session starts in, so it classifies the machine-managed file when
+// present and otherwise the USER-level statusLine, the one every project
+// without its own inherits. Other managed policy channels are not observed.
 //
 // Read-only and path-free: this reads the settings file and, at most, the
 // script files the command names (stat first; regular files under a size cap),
@@ -166,22 +166,47 @@ function scriptChannel(token, { fsImpl, home }) {
   return scriptCarriesFooter(expanded, fsImpl) ? 'kit-footer' : 'custom';
 }
 
+function managedStatusLine(file, fsImpl) {
+  if (!file) return { state: 'absent' };
+  let managed;
+  try { managed = JSON.parse(fsImpl.readFileSync(file, 'utf8')); }
+  catch (error) { return { state: error?.code === 'ENOENT' ? 'absent' : 'unknown' }; }
+  if (!managed || typeof managed !== 'object' || Array.isArray(managed)) return { state: 'unknown' };
+  if (!Object.hasOwn(managed, 'statusLine')) return { state: 'absent' };
+  const line = managed.statusLine;
+  if (line == null || line === false) return { state: 'disabled' };
+  if (!line || typeof line !== 'object' || Array.isArray(line)
+    || (line.type !== undefined && line.type !== 'command')
+    || typeof line.command !== 'string' || !line.command.trim()) return { state: 'unknown' };
+  return { state: 'present', settings: managed };
+}
+
 /**
- * Classify the user-level Claude statusLine by whether it can feed the quota
- * tee: 'none' (no user-level statusLine), 'kit-footer' (its script carries the
+ * Classify the effective local managed/user Claude statusLine by whether it can
+ * feed the quota tee: 'none' (no statusLine), 'kit-footer' (its script carries the
  * footer), 'project-helper' (it runs each project's ruflo helper, so it depends
  * on the project), 'custom' (anything else: another script, an inline command,
- * a missing file), or 'unknown' (the settings file exists but cannot be read).
+ * a missing file), or 'unknown' (a relevant settings file cannot be read or
+ * interpreted). This does not observe server, MDM, or SDK managed policy.
  *
- * @param {{ settingsFile?: string, fsImpl?: any, home?: string }} [o]
+ * @param {{ settingsFile?: string, managedSettingsFile?: string|null,
+ *           fsImpl?: any, home?: string, platform?: NodeJS.Platform }} [o]
  * @returns {'none'|'kit-footer'|'project-helper'|'custom'|'unknown'}
  */
 export function classifyClaudeTeeChannel({
-  settingsFile = claudeSettingsPath(), fsImpl = fs, home = os.homedir(),
+  settingsFile = claudeSettingsPath(), managedSettingsFile,
+  fsImpl = fs, home = os.homedir(), platform = process.platform,
 } = {}) {
-  let settings;
-  try { settings = JSON.parse(fsImpl.readFileSync(settingsFile, 'utf8')); }
-  catch (error) { return error?.code === 'ENOENT' ? 'none' : 'unknown'; }
+  const managedFile = managedSettingsFile === undefined
+    ? claudeManagedSettingsPath(platform) : managedSettingsFile;
+  const managed = managedStatusLine(managedFile, fsImpl);
+  if (managed.state === 'unknown') return 'unknown';
+  if (managed.state === 'disabled') return 'none';
+  let settings = managed.settings;
+  if (!settings) {
+    try { settings = JSON.parse(fsImpl.readFileSync(settingsFile, 'utf8')); }
+    catch (error) { return error?.code === 'ENOENT' ? 'none' : 'unknown'; }
+  }
   const command = settings?.statusLine?.command;
   if (typeof command !== 'string' || !command.trim()) return 'none';
   const classes = statusLineScripts(command).map((token) => scriptChannel(token, { fsImpl, home }));
@@ -461,15 +486,19 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
  * @param {{ now?: number, claudeFile?: string, codexCacheFile?: string, ttlMs?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string,
  *           enabledHosts?: Record<string, boolean>,
- *           claudeSettingsFile?: string, home?: string,
+ *           claudeSettingsFile?: string, claudeManagedSettingsFile?: string|null,
+ *           home?: string,
  *           codexPresence?: () => 'found'|'not-found'|'unconfirmed' }} [o]
  */
 export async function readLimits({
   now = Date.now(), claudeFile, codexCacheFile, ttlMs, timeoutMs, spawnImpl, bin, enabledHosts,
-  claudeSettingsFile, home, codexPresence,
+  claudeSettingsFile, claudeManagedSettingsFile, home, codexPresence,
 } = {}) {
   const claude = readClaudeLimits({ file: claudeFile ?? claudeLimitsFile() });
-  const claudeChannel = classifyClaudeTeeChannel({ settingsFile: claudeSettingsFile ?? claudeSettingsPath(), home });
+  const claudeChannel = classifyClaudeTeeChannel({
+    settingsFile: claudeSettingsFile ?? claudeSettingsPath(),
+    managedSettingsFile: claudeManagedSettingsFile, home,
+  });
   const presence = (codexPresence ?? (() => recordedHostPresence('codex', { now })))();
   const { limits: codex, unavailable: codexUnavailable } = presence === 'found'
     ? await collectCodexLimitsDetailed({

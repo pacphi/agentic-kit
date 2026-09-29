@@ -7,8 +7,12 @@
 
 ## Status
 
-Active. Unit 1 is implemented on this branch; each later unit requires a separate
-dispatch, RED/GREEN evidence and capture commit.
+Active. Unit 1 is implemented on this branch. Unit 20 is dispatched independently:
+V4 has no planned `quota.mjs` edits, B1 is integrated, and the controller cleared
+the classifier file boundary. Its managed-file precedence does not depend on the
+pending raw-origin review decision or parser/cache migration. All other unit
+dependencies remain in force; each later unit requires a separate dispatch,
+RED/GREEN evidence and capture commit.
 
 ## Gates and ownership
 
@@ -40,7 +44,7 @@ footprint discovery files until integration; V6 task 1 owns only `session-surfac
 | 13 | C-9 local-timezone day bucketing frozen in cache. | Boundary-day fixtures in two zones; after cache integration. |
 | 14 | C-11 unknown-record counter. | Known/unknown record fixtures; after parser integration. |
 | 15–19 | O-6, O-9, O-10, O-11, O-12, each in a separate commit. | Recover the exact audit requirements first; then current count-only reproduction. Candidate topics are cost trust, database discovery, V2/legacy storage, compaction/reconciliation, and sidechain exclusion. These descriptions are hypotheses, not acceptance criteria. Wait for V4 ownership to clear. |
-| 20 | StatusLine classifier reads managed settings. | Settings fixture and classifier regression; after V4 integration. |
+| 20 | StatusLine classifier reads local managed settings. | Settings fixture and classifier regression; independently reordered before V4 integration. Other managed policy channels remain unobserved. |
 | 21 | Shell wrapper around footer helper is `custom` (UA-4). | Wrapper fixture; after unit 20. |
 | 22 | Shared labels across Usage, System Projects, Maintenance and Intelligence; unknown has one label and designations use separate axes. | View assertions; **after V3 merges into develop**, then integrate develop. |
 | 23 | Show imported exclusion count in Intelligence census, System Projects and `ak system`; disclose Cowork source coverage is absent. | Three render assertions and source-bound counts; after V3 and unit 7. |
