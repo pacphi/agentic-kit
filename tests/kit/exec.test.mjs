@@ -186,6 +186,7 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
 }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-abort-shim-'));
   const pidFile = path.join(dir, 'pids.json');
+  const shimEntry = path.join(dir, 'powershell-pid');
   const controller = new AbortController();
   const quotedNode = process.execPath.replaceAll("'", "''");
   let pids = [];
@@ -195,21 +196,26 @@ test('Windows abort reaps the Node child behind a PowerShell shim and its grandc
     fs.writeFileSync(path.join(dir, 'codex.cmd'), '@echo off\r\n');
     const code = `const {spawn}=require('node:child_process');
       const gc=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
-      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid,process.ppid]));
       setInterval(()=>{},1000);`;
     // npm shims forward a script filename; PowerShell 5.1 reserializes
     // native arguments, so multiline node -e source is not that interface.
     const script = path.join(dir, 'fixture.cjs');
     fs.writeFileSync(script, code);
     fs.writeFileSync(path.join(dir, 'codex.ps1'),
-      `& '${quotedNode}' '${script.replaceAll("'", "''")}' $args\nexit $LASTEXITCODE\n`);
+      `[System.IO.File]::WriteAllText('${shimEntry.replaceAll("'", "''")}',[string]$PID)\n`
+      + `& '${quotedNode}' '${script.replaceAll("'", "''")}' $args\nexit $LASTEXITCODE\n`);
     pending = run('codex', [], {
-      env: { PATH: dir, PATHEXT: '.CMD' }, signal: controller.signal, timeout: 10_000,
+      // PowerShell checks PATHEXT even for the absolute Node.exe path.
+      // Excluding .EXE changes native execution into document activation.
+      env: { PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, signal: controller.signal, timeout: 10_000,
     });
     pending.then((result) => { outcome = result; });
     assert.equal(await waitUntil(() => fs.existsSync(pidFile) || outcome), true, 'PowerShell launch settled or ready');
+    assert.equal(fs.existsSync(shimEntry), true, `PowerShell entered owned shim: ${JSON.stringify(outcome)}`);
     assert.equal(fs.existsSync(pidFile), true, `PowerShell launched Node: ${JSON.stringify(outcome)}`);
     pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+    assert.equal(pids[2], Number(fs.readFileSync(shimEntry, 'utf8')), 'Node is a child of the observed PowerShell shim');
     assert.equal(isAlive(pids[1]), true);
     controller.abort();
     const result = await pending;
