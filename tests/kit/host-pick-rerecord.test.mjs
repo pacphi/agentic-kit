@@ -1,5 +1,6 @@
-import { test, after } from 'node:test';
+import { test, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { format } from 'node:util';
 import { sandboxHome, rmrf, writeKitConfig, offlineKitConfig } from './helpers/home-sandbox.mjs';
 
 const home = sandboxHome('ak-host-pick-rerecord');
@@ -7,6 +8,10 @@ after(() => rmrf(home));
 const host = await import('../../src/commands/x/host.mjs');
 const cfg = { integrations: { hosts: { claude: false, codex: true, opencode: false } } };
 const cwd = '/disposable-project';
+
+// Node 22 can misread Unicode stdout between binary test events (nodejs/node#65934).
+// Keep the messages visible, but frame them as test diagnostics; restore per test.
+beforeEach(t => t.mock.method(console, 'log', (...args) => t.diagnostic(format(...args))));
 
 for (const [name, initial, ok, expected] of [
   ['successful install', 'absent', true, 2],

@@ -947,12 +947,13 @@ test('an empty corpus yields a zeroed Aggregate rather than throwing', async () 
   assert.equal(agg.sourceHealth.codex.diagnostics.files, 0);
 });
 
-test('buildIndex reports ok claude/codex root health when the transcript roots exist', async () => {
+test('buildIndex reports malformed Claude coverage while Codex root health remains ok', async () => {
   _resetForTest();
   const sb = sandbox();
   const agg = await buildIndex(opts(sb));
-  assert.equal(agg.sourceHealth.claude.status, 'ok');
-  assert.equal(agg.sourceHealth.claude.reason, null);
+  assert.equal(agg.sourceHealth.claude.status, 'degraded');
+  assert.equal(agg.sourceHealth.claude.reason, 'transcript-record-coverage-incomplete');
+  assert.equal(agg.sourceHealth.claude.diagnostics.records.malformedRecords, 1);
   // Source health reports what was READ, never what the parser could report:
   // the old per-host capability matrix is not part of this payload.
   assert.ok(!Object.hasOwn(agg.sourceHealth.claude, 'capabilities'),

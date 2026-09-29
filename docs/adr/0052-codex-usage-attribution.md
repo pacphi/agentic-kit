@@ -12,6 +12,18 @@
   record with at least one response (`usage-aggregate.mjs`'s `buildSessionRows`), so the file's 176,326
   tokens never reach any total regardless of the explanation. The advisory is right in substance;
   classification is unchanged. Extends the "Not done" bullet below with the measured counts.
+- **Updated:** 2026-09-29 — Unit 8 re-read the one gap candidate selected from a read-only schema-25
+  cache under a 2 MiB source bound. Its current source has five token snapshots with full
+  input/cache/output components, no normalized assistant response, tool items and an abort.
+  The parser already retains its component row; aggregation now admits a Codex record with
+  positive component usage even when responses are zero. A positive total-only counter
+  remains unsupported: it supplies no input/cache/output split or price. Source health
+  discloses such events as `total-only-token-count` and reports zero-response records with
+  counted components separately from those without attributable component rows.
+- **Updated:** 2026-09-29 — accepted V6 also classifies guardian reviews and other thread sources,
+  rolls up verified acyclic parent links, retains effort and host-reported first-token timing,
+  and exposes compaction bounds. Auto-review models without supported prices are unpriced.
+  The delivered cache migration is 25 → 26; earlier v23 evidence below describes the original fix.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),
@@ -121,16 +133,50 @@ lists them). Their turns are stamped `external-import-turn-N`, they have no
 "responses" and a large share of prompts, priced at model `unknown`, $0, while the
 real data lives in the Claude transcript.
 
-The in-rollout marker (the `turn_id` prefix) is the signal, so detection works
-without the imports file. Parsing stops at the first such line; the record is kept
-out of aggregation, out of every yield statistic, and counted in
-`diagnostics.importedExcluded` (796 on the reference machine). Nothing is dropped
-silently. The record itself is still cached, so a rescan is cheap.
+The in-rollout marker (`payload.turn_id` prefix) is the signal; the import map is not a
+runtime dependency. Exclusion is per turn. A valid native `task_started` or identified
+`turn_context` opens native ownership; explicit record IDs must agree with that boundary.
+Missing or conflicting IDs in mixed files remain unattributable. An absent context ID may
+enrich an identified turn, but an explicitly invalid boundary ID breaks adjacency and marks
+ownership incomplete. A foreign completion does
+not close the active turn. Replayed parent history still cannot count as child activity.
+Marker text in messages and later `session_meta` declarations establish no ownership.
 
-Project discovery applies the same marker to each rollout's bounded head (256 KiB, 40 lines): an
-imported copy names no project, host or Desktop origin, and the scan reports how many it set aside
-(`importedExcluded`, 924 on the reference machine on 2026-09-27, every marker on the rollout's
-second line).
+Copied prompts, responses, tools, context and tokens are excluded. Excluded cumulative
+snapshots advance the baseline; native snapshots book only their deltas. Decreasing counters
+or an explicit first native `last_token_usage == total_token_usage` reset start a new segment
+(the latter excludes identical re-emissions). First session identity remains authoritative.
+A native turn's cwd can establish its genuine project; otherwise the first declared cwd is
+eligible only after own activity is proved. The first declared app surface applies, without
+assuming every mixed file came from Desktop.
+
+Files without proven own activity remain `imported: true` with unknown/imported-copy origin
+and are cached but excluded. Mixed files retain `importEvidence`: `importedTurns`,
+`importedRecords`, `ambiguousRecords` and `nativeRecords`, with no turn IDs or copied content.
+The unique imported-turn set retains at most 4,096 bounded IDs; `importedTurnCountComplete`
+marks a lower-bound count when capped. Mixed sources with clipped lines, skipped nonblank
+records or explicitly invalid turn-boundary IDs are conservatively excluded in their entirety
+with `ownershipComplete: false`, pending a complete readable source. String and streaming
+readers expose the last pass's skipped-record count as `importEvidence.malformedRecords`;
+clipping retains its existing diagnostic. This may omit proven activity before a gap but
+cannot carry native ownership across unreadable copied-turn metadata. A subagent
+whose replay cannot be separated also has incomplete ownership. Source-health counters
+`importOwnershipIncompleteFiles` and `importedTurnCountIncompleteFiles` retain these gaps
+even when the file is excluded or served from cache.
+Usage diagnostics expose `importedExcluded`, `importedMixed`, `importedTurnsExcluded` and
+`importAmbiguousRecords`; the ambiguous count discloses excluded records without proved
+ownership. Aggregate rows and session detail preserve the same evidence. Schema 26 remains
+the single unreleased migration; no personal cache is rebuilt during implementation.
+
+Discovery first reads its usual 256 KiB/40-line head. Import-marked heads additionally read
+at most a 256 KiB head and a 2 MiB tail, capped at 20,000 records per window and 512 MiB of
+additional reads per scan. An unread middle resets ownership. Positive native activity can
+establish a mixed sighting; imported-only exclusion requires a complete, unambiguous read.
+Malformed envelopes or explicitly invalid turn-boundary IDs also leave an import candidate
+unresolved. A sampled subagent without a complete replay boundary remains unresolved. Sources and the
+discovery summary expose `importedMixed` and `importedUnresolved`; unresolved imports make
+`complete` and `sessionCountComplete` false and cannot trigger encoded-directory recovery.
+These are bounded observations, not an exhaustive turn census.
 
 ### 4. Cumulative counter restarts are summed, per event
 
@@ -171,7 +217,7 @@ tools and `FunctionCallOutput` the known set. Only a type in none of them warns.
 
 ## Consequences
 
-- Cache schema **v23**: every cached Codex record and its `parseStats` re-derive.
+- Original implementation cache schema **v23**: every cached Codex record and its `parseStats` re-derive.
   Earlier records carry the wrong imports, subagent usage, replay counts,
   last-wins totals, single-day/model rows and permanent diagnostics.
 - Codex subagent sessions now have real tokens and cost. Cost totals, the
@@ -204,28 +250,26 @@ subagent and previously dropped usage is now priced.
 
 ## Not done (recorded follow-ups)
 
-- Guardian-review classification, unread host fields, and the context-coverage
-  denominator remain as audited; this ADR does not change them.
+- Guardian-review classification, effort, first-token timing and compaction evidence are now
+  captured. Compaction lower/nullable upper bounds preserve uncertain pairing. This does not
+  establish support for every unread host field or change the context-coverage denominator.
 - A stream tee or push channel for live oversized rollouts is out of scope.
 - The cause of counter restarts is unknown (decision 4).
 - A subagent with no ordinals still reports no usage (decision 2).
-- One rollout carries `token_count`s but no agent message, so the pre-existing
-  `partial-response-yield` warning remains — measured on the reference machine (2026-09-28): of 1,714
-  Codex rollouts (734 token-bearing), exactly 1 is such a gap file. It is explained by a cached fact
-  (`session.aborts > 0`, tool-only activity) but that does not change what is counted: the aggregate
-  never builds a session row for a record with zero responses (`usage-aggregate.mjs`'s
-  `buildSessionRows`), so the file's usage (176,326 tokens, its own `last_token_usage.total_tokens`
-  sum across its `token_count` events) reaches no total either way. Counting that usage, or
-  documenting the shape more precisely, is left to the usage-accuracy branch.
-- Whole-rollout exclusion may drop real usage (open, plausible, 2026-09-27). On the reference
-  machine 6 of 924 imported rollouts carry a later turn that is not an import: one `task_started`
-  whose `turn_id` starts with `rollout-`, no `user_message` event, `role: user` response items in
-  five of the six (2 to 76 per file) and non-zero `token_count` usage (the per-file sum of
-  `last_token_usage.total_tokens` is about 8k to 449k). Both usage and discovery set the whole file
-  aside at the marker, so this usage is not counted. With no `user_message`, the turn may be
-  automatic (a compaction or title pass). Measured from counts only. Decided 2026-09-27 (audit
-  decision 12): Branch 8 excludes per turn instead of per file, so imported turns are never counted
-  and later turns are, after it establishes whether they are the user's work or an automatic pass.
+- The 2026-09-28 full-corpus count (1,714 rollouts, 734 token-bearing, one
+  zero-response gap) is historical. Unit 8's bounded 2026-09-29 re-read of that gap
+  candidate found 11,082 uncached input, 163,456 cached input and 1,788 output
+  tokens in a native, zero-response record. Those components now reach aggregate
+  totals and cost estimation. Total-only counters still cannot yield a split or
+  price and are diagnosed rather than silently treated as free usage.
+- The historical 2026-09-27 observation (6 of 924 import-marked files) did not prove
+  that every token snapshot in those files belonged to a native turn. Unit 7 implements
+  decision 12 per turn. The 2026-09-29 metadata-only reproduction found 6 mixed files among
+  945 import-marked candidates, with 64 native-turn responses. Only one token snapshot fell
+  inside a native interval, and its input/cache/output components were all zero; the other
+  snapshots were copied-turn evidence. No billable components are inferred from total-only
+  counters. The native turn's initiator remains unknown unless separately declared; this
+  does not prove whether it was user work or an automatic pass.
 
 ## Verification
 

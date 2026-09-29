@@ -1,3 +1,4 @@
+import { censusDisclosure } from '../lib/census-presentation.mjs';
 // ak system — the machine footprint in the terminal (ADR-0025).
 //
 // The CLI twin of the dashboard's System area, driving the SAME composed
@@ -231,24 +232,25 @@ function renderRuntime(runtime) {
   }
   const rows = census?.value ?? [];
   if (!rows.length) {
-    console.log(`  ${dim('no agent processes are running')}`);
+    console.log(`  ${dim('no coding-agent or desktop-application processes are running')}`);
     return;
   }
   const sink = reasonSink();
   console.log('');
-  table(['HOST', 'PID', 'CPU', 'RSS', 'UPTIME', 'PROJECT'], rows.map((row) => [
-    row.host,
+  table(['CODING-AGENT HOST / DESKTOP APPLICATION', 'PID', 'CPU', 'RSS', 'UPTIME', 'WORKING CONTEXT'], rows.map((row) => [
+    row.application ?? row.host ?? 'Unknown process',
     String(row.pid),
     sink.cell(row.cpuPercent, fmtPercent),
     sink.cell(row.rssBytes, fmtBytes),
     sink.cell(row.uptimeMs, fmtDuration),
-    row.project?.status === UNKNOWN ? 'unattributed' : (row.project?.value?.label ?? 'unattributed'),
+    row.source?.status === UNKNOWN ? 'unattributed'
+      : (row.source?.value?.label ?? row.project?.value?.label ?? 'unattributed'),
   ]));
   sink.report();
-  // `project` degrades per process (a cwd the platform will not disclose); its
+  // `source` degrades per process (a cwd the platform will not disclose); its
   // reason lives on the row, not in the numeric sink above.
-  for (const reason of new Set(rows.filter((row) => row.project?.status === UNKNOWN)
-    .map((row) => row.project.reason))) {
+  for (const reason of new Set(rows.filter((row) => (row.source ?? row.project)?.status === UNKNOWN)
+    .map((row) => (row.source ?? row.project).reason))) {
     console.log(`  ${dim(`unattributed: ${reason}`)}`);
   }
 }
@@ -348,6 +350,7 @@ function renderProjects(projects, now) {
     info(dim('not measured yet — run: ak system --refresh=machine'));
     return;
   }
+  info(dim(censusDisclosure(projects)));
   field('discovered', `${meas(projects.count)}${projects.truncated ? dim(' · list truncated') : ''}`);
   if (!projects.locMeasured) field('lines of code', dim('not measured in this scan'));
 

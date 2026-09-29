@@ -328,6 +328,9 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
  */
 export function costOf(usage) {
   const { model, provider, input, output, cacheRead, cacheWrite, cacheWrite1h, day } = usage ?? {};
+  // The Auto-review alias selects a server-side model whose price is not
+  // published. A generic unknown-model fallback would manufacture dollars.
+  if (model === 'codex-auto-review') return 0;
   const { in: rin, out: rout, cacheReadMultiplier, cacheWriteMultiplier, cacheWrite1hMultiplier } = priceFor(model, provider, day);
   const writes = tokens(cacheWrite);
   const writes1h = Math.min(tokens(cacheWrite1h), writes);

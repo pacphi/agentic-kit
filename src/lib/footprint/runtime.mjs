@@ -47,7 +47,8 @@ function sourceOf(entry, { platform, classifyContext }) {
     return measured({ kind: 'host-service', label: `${hostTitle(entry.host)} app service` });
   }
   if (entry.controllerKind === 'desktop-app') {
-    return measured({ kind: 'desktop-app', label: `${hostTitle(entry.host)} desktop app` });
+    return measured({ kind: 'desktop-app', label: entry.application
+      ?? `${hostTitle(entry.host)} desktop app` });
   }
   if (!entry.cwd) return unknown(cwdDetail(entry.cwdReason ?? 'cwd-unavailable'));
   const pathImpl = platform === 'win32' ? path.win32 : path;
@@ -189,6 +190,7 @@ export async function collectRuntimeCensus({
     const source = sourceOf(entry, { platform, classifyContext });
     return {
       host: entry.host,
+      application: entry.application ?? null,
       pid: entry.pid,
       startedAt: entry.startedAt,
       // Kept alongside `project` so a renderer or a debug log can key on the

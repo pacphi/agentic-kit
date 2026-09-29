@@ -1,13 +1,13 @@
 # ADR-0060 — Session surface, initiator and official product names
 
-- **Status:** Proposed; §3 implemented for project discovery (2026-09-27), the rest staged follow-on
+- **Status:** Accepted
 - **Date:** 2026-09-26
-- **Updated:** 2026-09-27 — §3 implemented for project discovery and the System projects note:
-  imported copies give no project, host or origin and are counted. The ledger-derived source labels
-  (Cursor, Cowork) and the other views remain proposed.
+- **Updated:** 2026-09-29 — delivered shared classification, usage/cache and census evidence,
+  Runtime application attribution, and CLI/dashboard presentation. Dedicated Cowork storage remains
+  an optional follow-up (#257); acceptance covers the bounded sources described below.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0050](0050-dashboard-project-identity-and-context-reporting.md) (session origin
-  rule, superseded in part by this record once accepted),
+  rule, superseded in part by this record),
   [ADR-0052](0052-codex-usage-attribution.md) (imported Codex rollouts excluded from usage),
   [ADR-0025](0025-machine-footprint-metrics.md) (Runtime census labels),
   [ADR-0027](0027-shared-project-census.md) (project census),
@@ -25,7 +25,7 @@ the product's official commercial name, with no duplicate or false categories.
 
 Research on 2026-09-26 read only enumerated log fields and counts (no prompt or response content),
 the vendors' current documentation, the openai/codex source at `7f6c0f9`, and the installed Claude
-Code 2.1.283 and Claude Desktop 2.9939.2 builds. What it established:
+Code 2.1.283 and Claude Desktop 2.9939.2 builds. What that historical sample established (not a fresh census or current behavior):
 
 1. **The logs declare where a session came from.** Claude Code transcripts carry `entrypoint`;
    Codex rollouts carry `session_meta.originator`, `source` and `thread_source`. Folder location is
@@ -66,9 +66,9 @@ Code 2.1.283 and Claude Desktop 2.9939.2 builds. What it established:
    copied in five files. The Runtime census counts `Claude.app` as the Claude Code host (basename
    match) while `ChatGPT.app` is invisible.
 
-## Decision (proposed)
+## Decision
 
-### 1. Two dimensions from declared fields, raw value always kept
+### 1. Separate dimensions from declared fields, bounded raw evidence
 
 Every session record carries:
 
@@ -77,18 +77,23 @@ Every session record carries:
 - **Initiator** — `person`, `automation`, `agent` (a subagent or reviewer spawned by another
   session) or `imported-copy`. Claude: person when interactive or the entrypoint is one Claude Code
   itself treats as attended (`claude-vscode`, `claude-desktop*`, `local-agent`, `remote*`,
-  `ssh-remote`, Claude Tag values); automation for `sdk-*`, `mcp`, `claude-code-github-action`, and
+  `ssh-remote`, Claude Tag values); automation for `sdk-py`, `sdk-ts`, `sdk-cli`, `mcp`, `claude-code-github-action`, and
   for `sessionKind` `bg`/`daemon`/`daemon-worker`. Codex: `thread_source` `user` and
   `chatgpt_handoff` are person, except that `codex exec` top-level threads are automation;
-  `subagent` and `guardian_review` are agent; app feature values such as `automation` are
+  `subagent`, `guardian_review` and `agent_created_thread` are agent; app feature values such as `automation` are
   automation.
-- **Raw evidence** — the exact declared values (`entrypoint:cli`,
-  `originator:codex_exec/source:exec`). An unrecognized value is shown as "Other" with its raw value,
-  never merged into a larger bucket.
+- **Raw evidence** — bounded tokens from the named declaration fields, such as `entrypoint:cli` and
+  `originator:codex_exec/source:exec`. Unfamiliar valid tokens remain available in local detail, with Other or Unknown
+  classification and no inferred product or provider. Tokens must be at most 80 characters,
+  begin with a letter and contain only letters, digits, underscores, dots or hyphens; the known
+  `Codex Desktop` value is the sole space-containing exception. Malformed values are omitted.
 
 Folder class (ChatGPT Projects folder, projectless Work folder, Cowork data, temporary folder) is an
-explanatory attribute, never the classifier. The first record that declares a value wins, and
-the rule is stated in code and tests.
+explanatory attribute, never the classifier. The first eligible declaring record wins within each reader's bounded evidence window;
+invalid values remain Unknown and do not authorize a search for a preferred later identity.
+A later replayed parent declaration cannot replace the child's identity. Git scope, host,
+surface, initiator and provider are separate fields and filters. Cloud choices appear only
+when a covered record declares a cloud surface.
 
 ### 2. Official names
 
@@ -101,8 +106,8 @@ Claude (per code.claude.com and claude.com documentation):
 | `claude-desktop`, `claude-desktop-3p` | Claude Desktop (attribute "on 3P" for the second) | person |
 | `local-agent`, `local_agent`, `remote_cowork` | Cowork | person |
 | `remote`, `remote_desktop`, `remote_mobile`, `remote_projects` | Cloud session (attribute: started from Desktop, mobile, web or a project) | person |
-| `remote_trigger`, `remote_cowork_trigger` | Cloud session (routine) | automation |
-| `sdk-py`, `sdk-ts` | Claude Agent SDK (attribute: Python or TypeScript; "plugin hook" when evidenced) | automation |
+| `remote_trigger`, `remote_cowork_trigger` | Cloud session | automation |
+| `sdk-py`, `sdk-ts` | Claude Agent SDK | automation |
 | `sdk-cli` | Non-interactive mode (`claude -p`) | automation |
 | `claude-code-github-action` | GitHub Actions | automation |
 | `claude_in_slack`, `claude-in-slack`, `claude-in-teams` | Claude Tag (Slack or Teams) | person |
@@ -126,7 +131,8 @@ OpenAI (per learn.chatgpt.com, which developers.openai.com/codex now redirects t
 | `codex_work_web`, `codex_work_mobile`, `codex_work_cca`, `chatgpt_cca` | ChatGPT Work (cloud) | by `thread_source` |
 | any other | Other OpenAI client (raw value shown) | by `thread_source` |
 
-Subagents and Auto-review roll up under their parent surface ("Subagents", "Auto-review", OpenAI's
+Codex subagents and Auto-review with a verified, acyclic parent link in the observed record set
+roll up under their parent surface ("Subagents", "Auto-review", OpenAI's
 own labels) and are never separate products. `source="vscode"` never produces a "VS Code" label.
 
 Hosts are named **Claude Code**, **Codex**, **OpenCode** (by Anomaly) and **Hermes Agent** (Nous
@@ -135,10 +141,20 @@ Desktop** and **ChatGPT desktop app**; they are applications, not hosts.
 
 ### 3. Imported copies are excluded everywhere, and counted
 
-ADR-0052's rule extends to project discovery and every origin view: a rollout stamped
-`external-import-turn-*` (or listed in the imports ledger when present) contributes no project
-sighting, origin, facet count or Runtime attribution. Each view reports how many it excluded, labelled
-"Imported from Claude Code" (or Cursor, or Cowork, from the ledger's source path).
+ADR-0052's rule extends to project discovery and origin views **per turn**. The portable
+signal is `payload.turn_id` beginning `external-import-turn`; an import map is not required.
+Copied turns contribute no usage or project/origin sighting. A later proven native turn can
+establish the first declared app surface and a genuine project; unknown or conflicting turn
+boundaries remain excluded with diagnostics. A Desktop declaration is not inferred for
+other declared products. First session identity and parent replay exclusion remain intact.
+
+Pure imports remain unknown/imported-copy. Mixed usage rows retain import-exclusion counts.
+Discovery distinguishes confirmed exclusions (`importedExcluded`), proven mixed observations
+(`importedMixed`) and bounded observations that cannot settle ownership (`importedUnresolved`).
+The latter make coverage incomplete, without inventing a project from an encoded directory.
+See ADR-0052 §3 for exact byte/record budgets and cumulative-counter rules. Intelligence,
+System Projects and `ak system` disclose these populations and source incompleteness.
+Optional ledger source labels remain follow-on work.
 
 ### 4. One vocabulary module and one label table
 
@@ -151,56 +167,59 @@ Labels are tested once; views test that they use the shared table.
 - The Runtime census treats `Claude.app` and `ChatGPT.app` symmetrically as desktop applications,
   neither as a host; their bundled CLIs are attributed to the hosted session (lane D's Claude rule
   extended to the Codex bundle).
-- Cowork transcripts become an optional discovery source; until then views say Cowork is not
-  covered.
+- Dedicated Cowork storage remains uncovered (#257), and views disclose that limit. Covered
+  Claude transcript records may still declare the Cowork surface; that does not prove coverage
+  of the separate store.
 
-### 6. Counting rules
+### 6. Counting rules and compatibility
 
-Claude sessions are counted by `sessionId`, excluding `subagents/` transcripts and non-conversation
-records; Codex subagent and reviewer rollouts roll up to their parent; `thread_source` is classified
-in full.
+Claude project census sessions use declared `sessionId`, excluding subagent and bridge-only
+transcripts. Rows expose `countBasis`: declared-session IDs, transcript files, database sessions,
+recovered-project sightings or mixed observations. Encoded-directory recovery can establish a
+project sighting with zero session weight; missing identity and bounded reads keep completeness
+visible. Census session observations are distinct from billed Usage sessions.
+
+Project `sessionSurfaces` is additive: legacy `sessionOrigins` remains for compatibility. Raw
+project detail unions retain at most 16 sorted values per named field per classification group;
+`rawEvidenceComplete: false` discloses truncation. The raw-token policy was explicitly approved
+by the maintainer for local detail; it does not authorize publishing private tokens.
+
+Old coarse `codex-desktop` snapshots render Unknown surface with a ChatGPT desktop app family
+note because their mode was not recorded. Old `claude-desktop` snapshots retain Claude Desktop;
+initiator and provider remain Unknown. Saved legacy origin filters preserve their membership
+and use explicit legacy labels. Missing newer fields are not evidence of a precise mode.
+
+### 7. Provider evidence is independent
+
+Claude provider-specific assistant model IDs may establish Amazon Bedrock or Google Vertex AI
+metadata (`assistant-model-id`); ordinary or conflicting IDs leave Unknown. Codex and OpenCode
+may provide a recorded provider ID. Both are observed source metadata, not network attestation.
+Current environment, routing configuration, application identity and price-table identity cannot
+establish a historical serving provider. The `on 3P` attribute remains visible independently of
+provider Unknown. Codex Auto-review tokens remain unpriced when no supported price exists.
 
 ## Consequences
 
-- Usage, System → Projects, Maintenance facets, Intelligence designation (which today mixes Git
-  scope, origin and host in one enum) and the Runtime table change labels and counts. On this
-  machine 32 project folders lost a false Desktop origin when discovery began setting imports aside
-  (re-measured 2026-09-27; 23 on 2026-09-26).
-- The usage cache schema changes (new session fields); a rebuild is expected.
-- Tests that pin current names change together (inventory in the audit record, Addendum 3).
-- `CLAUDE_CODE_ENTRYPOINT` and the transcript format are internal to Claude Code and may change;
-  keeping the raw value and an "Other" fallback bounds that risk.
-- Privacy is unchanged: only enumerated values and counts are read.
+- Shared vocabulary in `src/lib/session-surface.mjs` supplies Usage, project details, Maintenance,
+  Intelligence and Runtime labels. Desktop applications have no host identity; bundled CLIs need
+  observed session attribution, and a Codex app-server process is a service.
+- Usage cache schema changes exactly **25 → 26**; old entries require rebuilding. Footprint
+  snapshot schema remains **8**, with additive evidence and explicit legacy presentation.
+- First-declaration, parent-link, import-ownership and source bounds prevent these observations
+  from establishing whole-corpus coverage. Historical research counts above are not release metrics.
+- Internal host fields can change. Unknown, bounded raw evidence and source-health diagnostics
+  preserve uncertainty without deriving products from directories or `source="vscode"`.
 
-## Open questions for acceptance
+## Verification and remaining limits
 
-- Whether "Cloud session" should appear at all in local views, given none was observed locally.
-- Whether the "on 3P" attribute is worth showing.
-- How ADR-0057's role lenses consume surface and initiator.
-- Whether a later turn inside an imported copy that is not itself an import (6 of 924 rollouts on
-  2026-09-27, with real token usage) counts as the importing app's own session. Decided 2026-09-27
-  (audit decision 12): it counts, excluded per turn in Branch 8
-  ([ADR-0052](0052-codex-usage-attribution.md), "Not done").
+Synthetic fixtures cover shared vocabulary, first declaring records, parent/reviewer attribution,
+legacy filters, raw-token caps, provider evidence, import ownership, session-count bases and
+Runtime application/service distinctions. CLI/dashboard consumer assertions cover the shared
+labels and disclosures. The implementation is bound to the accepted V6 source units; final
+integration gates and publication are separate decisions.
 
-## Verification (when implemented)
-
-Fixtures per raw value; an import-ledger join fixture; a census reproduction of the 2026-09-26 counts
-from enumerated values; one-label-per-value UI assertions across views; no prompt content in any
-fixture.
-
-## Implementation status
-
-§3 is implemented for project discovery and the System projects note (2026-09-27): an imported copy
-gives no project, host or origin, and discovery counts it in `importedExcluded`. The per-source
-labels from the imports ledger, Runtime attribution and §1, §2 and §4–§6 remain follow-on work
-(the audit record's Addendum 3).
-
-Three views already show the smaller project counts but do not yet say how many imported copies were
-set aside; §3's "each view reports how many it excluded" is still owed for them:
-
-- the Intelligence census line (`src/lib/dashboard/client/intelligence.mjs`, which prints
-  `everSeen`; the server's `readCensus` in `src/lib/dashboard-server.mjs` drops `importedExcluded`);
-- the System → Projects liner (`sysProjectsLinerHtml` in
-  `src/lib/dashboard/client/system-projects.mjs`);
-- the `ak system` text output (`renderProjects` in `src/commands/system.mjs`, which prints only the
-  count; `ak system --json` carries `importedExcluded`).
+Dedicated Cowork storage (#257), optional import-ledger source labels, missing parent evidence
+and records outside bounded readers remain uncovered. No new live corpus, provider, performance
+or billing measurement is claimed by this documentation update. See
+[Usage metrics](../usage-scorecard-metrics.md#current-accounting-and-cache-contracts) for the
+bounded accounting, source selection and cache contracts delivered alongside this vocabulary.

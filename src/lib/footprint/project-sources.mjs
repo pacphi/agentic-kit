@@ -18,28 +18,27 @@
 //
 // Content boundary. This is DISCOVERY, invariant 9's candidate-path source, not
 // a measurement: it reads a session's cwd and explicit launch-origin declaration
-// from the bounded head. The same read `native-transcript-discovery.mjs` already
+// from bounded head metadata (and bounded import continuation windows). The read `native-transcript-discovery.mjs` already
 // performs for Observability at the same trust boundary. No message, prompt or
 // tool payload is retained or emitted; every figure the System area
 // renders is measured downstream by walk.mjs-backed collectors from the paths
 // this module returns.
 //
-// Cost. The corpus here is ~3,200 transcripts. Each file is opened once and
-// only its HEAD is read (HEAD_BYTES, JSON-parsed up to HEAD_MAX_LINES non-blank
-// lines) — a session's cwd is recorded in its opening records or not at all, so
-// reading further would cost the whole corpus to learn nothing. A file that
-// cannot be read or parsed is counted and skipped; one bad transcript never
-// aborts the walk (invariant 6).
+// Cost. Ordinary files use HEAD_BYTES and HEAD_MAX_LINES. Import-marked
+// heads additionally use codex-import-discovery's bounded head/tail windows,
+// record cap and shared byte budget. Missing ranges remain explicitly unknown.
 import fs from 'node:fs';
 import path from 'node:path';
 import { claudeDir, codexDir } from '../paths.mjs';
 import { resolveProjectLabel } from '../live/index.mjs';
 import { withDb } from '../sqlite.mjs';
-import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
+import { selectOpencodeSource } from '../usage-opencode.mjs';
 import { presenceOf, statNode, UNKNOWN, walkTree } from './walk.mjs';
 import { inspectProjectIdentity } from './project-identity.mjs';
+import { mergeSessionSurfaces, sessionSurfaceSighting } from './session-surfaces.mjs';
 import { transcriptSessionOrigin } from './session-origin.mjs';
 import { isImportedCodexRollout } from '../codex-import-marker.mjs';
+import { inspectCodexImport, IMPORT_SCAN_BYTES } from './codex-import-discovery.mjs';
 
 /** Hosts in the order every payload lists them. */
 export const PROJECT_SOURCE_HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
@@ -54,6 +53,11 @@ export const HEAD_MAX_LINES = 40;
  *  `sessions/YYYY/MM/DD/<file>.jsonl`, 4 deep. 8 leaves room for either root
  *  gaining a level without letting an unexpected tree run away. */
 const TRANSCRIPT_MAX_DEPTH = 8;
+const CLAUDE_NON_CONVERSATION_TYPES = new Set([
+  'bridge-session', 'cost-state', 'file-history-snapshot', 'queue-operation',
+  'ai-title', 'atis-latch', 'last-prompt', 'attachment', 'mode',
+  'permission-mode', 'agent-name', 'agent-setting', 'system', 'progress', 'summary',
+]);
 
 /** lstat budget for one encoded-directory decode. The decode is a bounded
  *  search (below), so it needs a ceiling of its own; 512 covers a deep path
@@ -63,8 +67,8 @@ const DECODE_STAT_BUDGET = 512;
 /** The one-line statement of what was counted and how, so no surface can render
  *  these numbers without being able to say where they came from. */
 export const PROJECT_SOURCE_METHOD =
-  'every cwd named by a Claude or Codex transcript head, plus every OpenCode session '
-  + 'directory, de-duplicated by resolved real path — not only projects with ruflo state';
+  'eligible Claude and Codex bounded transcript cwd evidence, plus every OpenCode session '
+  + 'directory, de-duplicated by resolved real path; Claude sessions use declared sessionId';
 
 // ── transcript heads ──────────────────────────────────────────────────────────
 
@@ -122,7 +126,7 @@ function firstClaudeSessionMetadata(lines) {
   let startedAt = null;
   for (const record of parsedHeadRecords(lines)) {
     if (!cwd && typeof record.cwd === 'string' && record.cwd) cwd = record.cwd;
-    if (!nativeId && typeof record.sessionId === 'string' && record.sessionId) nativeId = record.sessionId;
+    if (!nativeId && typeof record.sessionId === 'string' && /^\S+$/.test(record.sessionId)) nativeId = record.sessionId;
     if (!startedAt) startedAt = normalizedInstant(record.timestamp);
     if (cwd && nativeId && startedAt) break;
   }
@@ -232,6 +236,12 @@ function rootStatus(walkResult) {
   return presence === 'present' ? 'ok' : presence;
 }
 
+function completeSessionScan(result, unreadable, unknown, imports) {
+  return result.complete !== false && unreadable === 0 && unknown === 0 && imports === 0;
+}
+
+function hasCodexImports(host, lines) { return host === 'codex' && isImportedCodexRollout(lines); }
+
 /**
  * Every cwd named by the transcripts under `root`, plus the counts a liner note
  * needs to state what was and was not recoverable.
@@ -269,6 +279,14 @@ export function scanTranscriptCwds(root, host, {
     unresolved: 0,
     recoveredFromDirName: 0,
     importedExcluded: 0,
+    importedMixed: 0,
+    importedUnresolved: 0,
+    sessions: 0,
+    duplicateSessionFiles: 0,
+    subagentExcluded: 0,
+    nonConversationExcluded: 0,
+    unknownSessionFiles: 0,
+    sessionCountComplete: status === 'absent' || (status === 'ok' && result.complete !== false),
     sightings: [],
     truncated: Boolean(result.truncated),
     truncatedBy: result.truncatedBy ?? null,
@@ -287,29 +305,76 @@ export function scanTranscriptCwds(root, host, {
   let empty = 0;
   let unreadable = 0;
   let importedExcluded = 0;
+  let importedMixed = 0;
+  let importedUnresolved = 0;
+  const importBudget = { remaining: IMPORT_SCAN_BYTES };
+  let duplicateSessionFiles = 0;
+  let subagentExcluded = 0;
+  let nonConversationExcluded = 0;
+  let unknownSessionFiles = 0;
+  const seenClaudeIds = new Set();
+  // The walk's order is an implementation detail. File path order makes the
+  // first declaration the stable owner when an id appears in multiple files.
+  files.sort((a, b) => a.file.localeCompare(b.file));
 
   for (const { file, mtimeMs } of files) {
+    const relativeParts = path.relative(root, file).split(path.sep);
+    if (host === 'claude' && relativeParts.includes('subagents')) {
+      subagentExcluded += 1;
+      continue;
+    }
+    const lines = readHead(file, { fsImpl, headBytes, maxLines });
+    if (lines === null) { unreadable += 1; continue; }
+    if (lines.length === 0) { empty += 1; continue; }
+    // Imported turns do not establish project/origin evidence. Look for own
+    // activity within fixed read budgets before excluding a whole file.
+    let genuineCwd = null;
+    if (hasCodexImports(host, lines)) {
+      const imported = inspectCodexImport(file, { fsImpl, headBytes, budget: importBudget });
+      if (imported.kind === 'imported') { importedExcluded++; continue; }
+      if (imported.kind === 'unresolved') { importedUnresolved++; continue; }
+      importedMixed++;
+      genuineCwd = imported.cwd;
+    }
+    let weight = 1;
+    if (host === 'claude') {
+      const records = [...parsedHeadRecords(lines)];
+      const hasConversation = records.some((record) => record.type === 'user' || record.type === 'assistant');
+      // A sideband-only head excludes a file only when the read reached EOF.
+      // A later conversation may exist beyond either bounded limit.
+      let fullyRead = false;
+      try { fullyRead = fsImpl.statSync(file).size <= headBytes && lines.length < maxLines; }
+      catch { /* the head alone does not establish an end-of-file */ }
+      if (!hasConversation && (fullyRead && records.length > 0
+        && records.every((record) => CLAUDE_NON_CONVERSATION_TYPES.has(record.type)))) {
+        nonConversationExcluded += 1;
+        continue;
+      }
+      const { nativeId } = firstClaudeSessionMetadata(lines);
+      if (!nativeId || !hasConversation) {
+        unknownSessionFiles += 1;
+        weight = 0;
+      } else if (seenClaudeIds.has(nativeId)) {
+        duplicateSessionFiles += 1;
+        continue;
+      } else {
+        seenClaudeIds.add(nativeId);
+      }
+    }
     let group = null;
     if (decodeDir) {
-      const key = path.relative(root, file).split(path.sep)[0];
+      const key = relativeParts[0];
       group = groups.get(key);
       if (!group) { group = { key, withCwd: false, newestMtimeMs: null }; groups.set(key, group); }
       if (Number.isFinite(mtimeMs) && (group.newestMtimeMs === null || mtimeMs > group.newestMtimeMs)) {
         group.newestMtimeMs = mtimeMs;
       }
     }
-    const lines = readHead(file, { fsImpl, headBytes, maxLines });
-    if (lines === null) { unreadable += 1; continue; }
-    if (lines.length === 0) { empty += 1; continue; }
-    // An imported copy of a Claude Code transcript is not a Codex session: it
-    // names the folder the Claude session ran in and declares the ChatGPT
-    // desktop app as originator. It gives no project, host or origin and is
-    // counted, never dropped silently (ADR-0052 §3, ADR-0060 §3).
-    if (host === 'codex' && isImportedCodexRollout(lines)) { importedExcluded += 1; continue; }
-    const cwd = firstCwd(lines, host);
+    const cwd = genuineCwd || firstCwd(lines, host);
     if (!cwd) { withoutCwd += 1; continue; }
     withCwd += 1;
-    sightings.push({ cwd, mtimeMs, origin: 'cwd', sessionOrigin: transcriptSessionOrigin(lines, host) });
+    sightings.push({ cwd, mtimeMs, origin: 'cwd', weight,
+      sessionOrigin: transcriptSessionOrigin(lines, host) });
     if (group) group.withCwd = true;
   }
 
@@ -320,7 +385,7 @@ export function scanTranscriptCwds(root, host, {
     const decoded = decodeDir(group.key);
     if (decoded) {
       recoveredFromDirName += 1;
-      sightings.push({ cwd: decoded, mtimeMs: group.newestMtimeMs, origin: 'encoded-dir' });
+      sightings.push({ cwd: decoded, mtimeMs: group.newestMtimeMs, origin: 'encoded-dir', weight: 0 });
     } else {
       unresolved += 1;
     }
@@ -336,10 +401,18 @@ export function scanTranscriptCwds(root, host, {
     unresolved,
     recoveredFromDirName,
     importedExcluded,
+    importedMixed,
+    importedUnresolved,
+    sessions: host === 'claude' ? seenClaudeIds.size : undefined,
+    duplicateSessionFiles,
+    subagentExcluded,
+    nonConversationExcluded,
+    unknownSessionFiles,
+    sessionCountComplete: completeSessionScan(result, unreadable, unknownSessionFiles, importedUnresolved),
     sightings,
     // Transcripts we could not read, and project directories whose path could
     // not be recovered, both mean the project list is a floor.
-    complete: result.complete !== false && unreadable === 0 && unresolved === 0,
+    complete: completeSessionScan(result, unreadable, unresolved, importedUnresolved),
   };
 }
 
@@ -350,12 +423,14 @@ export function scanTranscriptCwds(root, host, {
  * from there rather than guessed at. The store is opened READ-ONLY and only
  * that one column is selected.
  *
- * An absent store means OpenCode was never used on this machine (a real zero);
+ * An absent selected store contributes no observed projects;
  * a store that will not open, or an older schema without `directory`, is
  * reported degraded with its reason rather than silently contributing nothing.
  */
-export function scanOpencodeDirectories({ dbFile = defaultOpencodeDbPath(), withDb: withDbImpl = withDb } = {}) {
+export function scanOpencodeDirectories({ dbFile = undefined, selection = selectOpencodeSource(dbFile === undefined ? {} : { roots: { opencode: dbFile } }), withDb: withDbImpl = withDb } = {}) {
+  dbFile = selection.dbFile;
   const base = { host: 'opencode', root: dbFile, status: 'ok', reason: null, sessions: 0, sightings: [], complete: true };
+  if (!dbFile) return { ...base, ...selection.health, complete: selection.health.status === 'absent' };
   const result = withDbImpl(dbFile, (db) => db.prepare(
     'SELECT directory, COUNT(*) AS sessions, MAX(COALESCE(time_updated, time_created)) AS lastMs'
     + " FROM session WHERE directory IS NOT NULL AND directory <> '' GROUP BY directory",
@@ -365,7 +440,7 @@ export function scanOpencodeDirectories({ dbFile = defaultOpencodeDbPath(), with
     return {
       ...base,
       status: absent ? 'absent' : 'degraded',
-      reason: absent ? null : (result.error?.message ?? 'store unreadable'),
+      reason: absent ? null : (result.error?.kind ?? 'store-unreadable'),
       complete: absent,
     };
   }
@@ -428,7 +503,8 @@ function gitPresence(projectPath, fsImpl) {
  *                     exists: boolean, isGitRepo: boolean, lastSeenMs: number|null,
  *                     sessions: number }>,
  *   everSeen: number, onDisk: number, gitRepos: number, unresolved: number,
- *   importedExcluded: number, complete: boolean, method: string,
+ *   importedExcluded: number, importedMixed: number, importedUnresolved: number,
+ *   complete: boolean, method: string,
  *   sources: Record<'claude'|'codex'|'opencode', object>,
  * }} `everSeen` counts projects INCLUDING vanished ones; `onDisk` counts the
  *   measurable subset. `complete: false` means at least one transcript or
@@ -439,7 +515,7 @@ function gitPresence(projectPath, fsImpl) {
 export function discoverProjectSources({
   claudeRoot = path.join(claudeDir(), 'projects'),
   codexRoot = path.join(codexDir(), 'sessions'),
-  opencodeDbFile = defaultOpencodeDbPath(),
+  opencodeDbFile,
   walk = walkTree,
   fsImpl = fs,
   now = Date.now,
@@ -469,12 +545,13 @@ export function discoverProjectSources({
       const resolved = resolvePath(cwd, fsImpl);
       let row = byPath.get(resolved);
       if (!row) {
-        row = { path: resolved, hosts: new Set(), origins: new Set(), sessionOrigins: new Map(), sessions: 0, lastSeenMs: null };
+        row = { path: resolved, hosts: new Set(), origins: new Set(), sessionOrigins: new Map(), sessionSurfaces: [], sessions: 0, lastSeenMs: null };
         byPath.set(resolved, row);
       }
       row.hosts.add(host);
       row.origins.add(sighting.origin ?? 'cwd');
-      const weight = Number.isFinite(sighting.weight) ? sighting.weight : 1;
+      const weight = sighting.origin === 'encoded-dir' ? 0
+        : Number.isFinite(sighting.weight) ? sighting.weight : 1;
       row.sessions += weight;
       const declared = sighting.sessionOrigin;
       const origin = ['claude-desktop', 'codex-desktop'].includes(declared?.origin)
@@ -485,8 +562,9 @@ export function discoverProjectSources({
         row.sessionOrigins.set(origin, membership);
       }
       membership.sessions += weight;
+      row.sessionSurfaces.push(sessionSurfaceSighting(sighting, host, weight));
       membership.countBases.add(sighting.origin === 'encoded-dir' ? 'recovered-project-sighting'
-        : host === 'opencode' ? 'database-sessions' : 'transcript-files');
+        : host === 'opencode' ? 'database-sessions' : host === 'claude' ? 'declared-session-ids' : 'transcript-files');
       membership.evidence.add(origin === 'unknown' ? 'desktop-origin-not-declared' : declared.evidence);
       const at = sighting.mtimeMs;
       if (Number.isFinite(at) && (row.lastSeenMs === null || at > row.lastSeenMs)) row.lastSeenMs = at;
@@ -508,6 +586,7 @@ export function discoverProjectSources({
       isGitRepo: exists && gitPresence(row.path, fsImpl),
       lastSeenMs: row.lastSeenMs,
       sessions: row.sessions,
+      sessionSurfaces: mergeSessionSurfaces(row.sessionSurfaces),
       sessionOrigins: [...row.sessionOrigins.values()].map((entry) => ({
         origin: entry.origin, sessions: entry.sessions, evidence: [...entry.evidence].filter(Boolean).sort(),
         countBasis: entry.countBases.size === 1 ? [...entry.countBases][0] : 'mixed-observations',
@@ -531,6 +610,8 @@ export function discoverProjectSources({
     gitRepos: projects.filter((project) => project.isGitRepo).length,
     unresolved,
     importedExcluded,
+    importedMixed: sources.codex?.importedMixed ?? 0,
+    importedUnresolved: sources.codex?.importedUnresolved ?? 0,
     complete: PROJECT_SOURCE_HOSTS.every((host) => sources[host]?.complete !== false),
     method: PROJECT_SOURCE_METHOD,
     sources,

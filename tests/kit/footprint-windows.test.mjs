@@ -460,6 +460,34 @@ test('runtime census names the process source instead of treating every cwd as a
   assert.match(rows[3].source.reason, /reported no working directory/);
 });
 
+test('runtime census exposes application identity separately from coding-agent host', async () => {
+  const census = await collectRuntimeCensus({
+    platform: 'darwin',
+    surveyImpl: async () => ({ processes: [
+      { pid: 1, host: null, application: 'Claude Desktop', controllerKind: 'desktop-app',
+        startedAt: new Date(WIN_NOW - 1000).toISOString(), uptimeMs: 1000,
+        cpuPercent: 0, rssBytes: 100, cwd: '/', cwdReason: null },
+      { pid: 2, host: null, application: 'ChatGPT desktop app', controllerKind: 'desktop-app',
+        startedAt: new Date(WIN_NOW - 1000).toISOString(), uptimeMs: 1000,
+        cpuPercent: 0, rssBytes: 100, cwd: '/', cwdReason: null },
+      { pid: 3, host: 'codex', application: null, controllerKind: 'project-session',
+        startedAt: new Date(WIN_NOW - 1000).toISOString(), uptimeMs: 1000,
+        cpuPercent: 0, rssBytes: 100, cwd: '/repos/work', cwdReason: null },
+    ] }),
+    listDaemonsImpl: async () => [],
+    osImpl: { totalmem: () => 1000, freemem: () => 500, cpus: () => [1] },
+    now: WIN_NOW,
+    classifyContext: () => ({ kind: 'repository', label: 'work', path: '/repos/work', projectKey: 'work' }),
+  });
+  assert.deepEqual(census.processes.value.map(({ host, application, source }) =>
+    ({ host, application, sourceKind: source.value.kind, sourceLabel: source.value.label })), [
+    { host: null, application: 'Claude Desktop', sourceKind: 'desktop-app', sourceLabel: 'Claude Desktop' },
+    { host: null, application: 'ChatGPT desktop app', sourceKind: 'desktop-app', sourceLabel: 'ChatGPT desktop app' },
+    { host: 'codex', application: null, sourceKind: 'repository', sourceLabel: 'work' },
+  ]);
+  assert.equal(census.ephemeral, true);
+});
+
 test('a Windows survey that cannot run at all leaves the machine facts standing', async () => {
   const census = await collectRuntimeCensus({
     platform: 'win32',

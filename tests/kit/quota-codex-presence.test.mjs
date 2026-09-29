@@ -63,7 +63,8 @@ function spawnSpy() {
 }
 
 const callLimits = (extra = {}) => readLimits({
-  now: NOW, claudeFile, claudeSettingsFile, codexCacheFile: cacheFile, ...extra,
+  now: NOW, claudeFile, claudeSettingsFile, claudeManagedSettingsFile: null,
+  codexCacheFile: cacheFile, ...extra,
 });
 
 test('found Codex, stale cache: one app-server call', async () => {

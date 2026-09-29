@@ -57,12 +57,16 @@ function clippedStub(head) {
 }
 
 /** Parse one whole line, or `null` for anything that is not a JSON object. */
-function parseLine(buf) {
-  if (!buf.length || buf[0] !== OPEN_BRACE) return null;
+function parseLine(buf, stats) {
+  if (!buf.length) return null;
+  if (buf[0] !== OPEN_BRACE) {
+    if (buf.toString('utf8').trim()) stats.malformedRecords++;
+    return null;
+  }
   try {
     const obj = JSON.parse(buf.toString('utf8'));
     return obj && typeof obj === 'object' ? obj : null;
-  } catch { return null; }
+  } catch { stats.malformedRecords++; return null; }
 }
 
 /**
@@ -75,6 +79,7 @@ function parseLine(buf) {
  */
 function* passOver(file, { chunkBytes, maxLineBytes, stats }) {
   stats.clippedLines = 0;
+  stats.malformedRecords = 0;
   const fd = fs.openSync(file, 'r');
   try {
     const limit = fs.fstatSync(fd).size;
@@ -102,7 +107,7 @@ function* passOver(file, { chunkBytes, maxLineBytes, stats }) {
         stats.clippedLines++;
         out = clippedStub(head);
       } else if (partsLen) {
-        out = parseLine(parts.length === 1 ? parts[0] : Buffer.concat(parts, partsLen));
+        out = parseLine(parts.length === 1 ? parts[0] : Buffer.concat(parts, partsLen), stats);
       }
       parts = []; partsLen = 0; oversize = false; head = null;
       return out;
@@ -119,7 +124,7 @@ function* passOver(file, { chunkBytes, maxLineBytes, stats }) {
         if (nl < 0) break;
         let obj;
         if (partsLen === 0 && !oversize && nl - start <= maxLineBytes) {
-          obj = parseLine(view.subarray(start, nl)); // whole line inside this chunk: no copy
+          obj = parseLine(view.subarray(start, nl), stats); // whole line inside this chunk: no copy
         } else {
           take(Buffer.from(view.subarray(start, nl))); // `chunk` is reused, so keep a copy
           obj = finish();
@@ -140,7 +145,7 @@ function* passOver(file, { chunkBytes, maxLineBytes, stats }) {
  * Open a rollout for parsing. Returns a source `parseCodex` accepts in place of
  * a string: `head` (the first 256 KiB, for session-origin detection), `lines`
  * (re-iterable — each iteration re-reads the file, which the subagent replay
- * pre-pass needs) and `stats` (`clippedLines` of the LAST pass).
+ * pre-pass needs) and `stats` (`clippedLines` and `malformedRecords` of the LAST pass).
  *
  * Throws (ENOENT, EACCES, …) when the file cannot be opened or its head read;
  * the caller decides how to report that.
@@ -151,7 +156,7 @@ function* passOver(file, { chunkBytes, maxLineBytes, stats }) {
 export function openCodexRollout(file, limits = {}) {
   const chunkBytes = limits.chunkBytes ?? DEFAULT_CHUNK_BYTES;
   const maxLineBytes = limits.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
-  const stats = { clippedLines: 0 };
+  const stats = { clippedLines: 0, malformedRecords: 0 };
   const fd = fs.openSync(file, 'r');
   let head;
   try {

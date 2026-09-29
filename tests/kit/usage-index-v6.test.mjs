@@ -138,9 +138,10 @@ test('parseCodex normalizes current item_completed messages and exposes bounded 
   // genuinely new shapes.
   assert.equal(s.tools.CommandExecution, 1, 'tallied as the tool it is');
   assert.deepEqual(agg.sourceHealth.codex.diagnostics, {
-    files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0,
-    filesWithTokens: 1, filesWithResponses: 1,
-    legacyEvents: 0, itemCompletedEvents: 3, tokenCountEvents: 1,
+    files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0, importedMixed: 0, importedTurnsExcluded: 0, importAmbiguousRecords: 0,
+    importOwnershipIncompleteFiles: 0, importedTurnCountIncompleteFiles: 0,
+    filesWithTokens: 1, filesWithResponses: 1, zeroResponseUsageFiles: 0, zeroResponseUnsupportedFiles: 0,
+    legacyEvents: 0, itemCompletedEvents: 3, tokenCountEvents: 1, totalOnlyTokenCountEvents: 0,
     prompts: 1, responses: 1, unknownItemTypes: {}, unknownItemTypeOverflow: 0, clippedLines: 0,
     warnings: [],
     common: {
@@ -169,7 +170,7 @@ test('parseCodex accepts a mixed legacy/current rollout without dropping either 
   assert.equal(agg.sourceHealth.codex.diagnostics.itemCompletedEvents, 3);
 });
 
-test('Codex source health degrades when token-bearing files yield zero normalized responses', async () => {
+test('Codex source health counts component usage with zero normalized responses', async () => {
   _resetForTest();
   const id = 'item-completed-zero';
   const line = (o) => `${JSON.stringify(o)}\n`;
@@ -180,13 +181,14 @@ test('Codex source health degrades when token-bearing files yield zero normalize
     } });
   const sb = sandbox({ [`rollout-2026-07-24T09-00-00-${id}.jsonl`]: raw });
   const agg = await buildIndex(opts(sb));
-  assert.equal(agg.totals.sessions, 0);
-  assert.equal(agg.sourceHealth.codex.status, 'degraded');
-  assert.equal(agg.sourceHealth.codex.reason, 'parse-yield-zero');
-  assert.deepEqual(agg.sourceHealth.codex.diagnostics.warnings, ['zero-response-yield']);
+  assert.equal(agg.totals.sessions, 1);
+  assert.equal(agg.totals.tokens, 120);
+  assert.equal(agg.sourceHealth.codex.status, 'ok');
+  assert.equal(agg.sourceHealth.codex.diagnostics.zeroResponseUsageFiles, 1);
+  assert.deepEqual(agg.sourceHealth.codex.diagnostics.warnings, []);
 });
 
-test('Codex source health exposes partial response yield across token-bearing files', async () => {
+test('Codex source health counts a zero-response component file alongside responses', async () => {
   _resetForTest();
   const id = 'item-completed-partial';
   const line = (o) => `${JSON.stringify(o)}\n`;
@@ -199,10 +201,9 @@ test('Codex source health exposes partial response yield across token-bearing fi
     'rollout-2026-07-24T09-00-01-zero-yield.jsonl': zero,
   });
   const agg = await buildIndex(opts(sb));
-  assert.equal(agg.totals.sessions, 1);
-  assert.equal(agg.sourceHealth.codex.status, 'degraded');
-  assert.equal(agg.sourceHealth.codex.reason, 'parse-yield-partial');
-  assert.deepEqual(agg.sourceHealth.codex.diagnostics.warnings, ['partial-response-yield']);
+  assert.equal(agg.totals.sessions, 2);
+  assert.equal(agg.sourceHealth.codex.status, 'ok');
+  assert.deepEqual(agg.sourceHealth.codex.diagnostics.warnings, []);
   assert.equal(agg.sourceHealth.codex.diagnostics.filesWithTokens, 2);
   assert.equal(agg.sourceHealth.codex.diagnostics.filesWithResponses, 1);
 });
