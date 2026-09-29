@@ -2,7 +2,7 @@
 
 ## Status
 
-Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Only Task 10 research and this plan are authorized in this pass. No implementation, backlog removal, push, PR or merge has occurred. Native Windows/Linux proof and complete manual lifecycle certification remain open. Default sibling handling is list-only on every platform.
+Research drafted against `develop` commit `e2f9dcae0554ff63921df618a819fd5e6afe80d2` on `test/runner-hygiene`. Only Task 10 research and this plan are authorized in this pass. No implementation, backlog removal, push, PR or merge has occurred. The creator census is complete: 647 sites classified, zero unresolved current lifecycles. Native Windows/Linux behavioral proof remains open. Default sibling handling is list-only on every platform.
 
 ## Contract and dependencies
 
