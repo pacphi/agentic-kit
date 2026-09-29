@@ -3,7 +3,7 @@
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
 - **Updated:** 2026-09-29
-- **Latest update note (2026-09-29):** The Codex balanced tier is now `gpt-6.1-sol`; `gpt-6-sol` is
+- **Update note:** 2026-09-29 — the Codex balanced tier is now `gpt-6.1-sol`; `gpt-6-sol` is
   `tier: 'prior'`, so a pinned `gpt-6-sol` route mirrors to the Claude prior tier, as other prior pins do.
   It is also the first Codex `prior` entry, so a pinned `claude-sonnet-5` route now mirrors to `gpt-6-sol`
   (it was `gpt-5.6-sol` as of 2026-09-28).
