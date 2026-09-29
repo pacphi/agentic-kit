@@ -16,13 +16,28 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { spawnEnv, sandboxProject, writeKitConfig, offlineKitConfig } from './helpers/home-sandbox.mjs';
 import {
   startGuardedDashboard, stopGuardedDashboard, getJson, markLedgerBoundary, readLedger, sliceByCallBoundary,
   isVersionDriftLookup,
 } from './helpers/dashboard-child-server.mjs';
 
-test('two 30s-poll-tick /api/status requests: the second starts no processes and transfers no more data than the first', async () => {
+function postRefresh(port, token) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path: '/api/refresh', method: 'POST', headers: {
+      'x-dash-token': token, 'content-type': 'application/json',
+      origin: `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin',
+    } }, res => {
+      let body = ''; res.on('data', chunk => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('error', reject);
+    req.end(JSON.stringify({ strength: 'local' }));
+  });
+}
+
+test('two 30s-poll-tick /api/status requests: the second starts no processes and transfers no more data than the first', async t => {
   const ledgerFile = path.join(os.tmpdir(), `ak-dash-cost-${process.pid}.ndjson`);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-cost-home-'));
   fs.mkdirSync(path.join(home, '.config'), { recursive: true });
@@ -69,10 +84,38 @@ test('two 30s-poll-tick /api/status requests: the second starts no processes and
     assert.ok(second.bytes <= first.bytes + budget,
       `second /api/status response (${second.bytes} bytes) exceeds the first (${first.bytes} bytes) `
       + `by more than the ${budget}-byte budget — possible in-process cache growth/leak across polls`);
+
+    const startedAt = Date.now();
+    const refreshStart = await postRefresh(port, token);
+    assert.equal(refreshStart.status, 202, refreshStart.body);
+    let refresh;
+    do {
+      refresh = await getJson(port, '/api/refresh', token);
+      if (refresh.json.running) await new Promise(resolve => setTimeout(resolve, 50));
+    } while (refresh.json.running && Date.now() - startedAt < 60_000);
+    assert.equal(refresh.json.running, false, 'local refresh must finish within 60 s in the sandbox');
+    assert.deepEqual(refresh.json.stages.map(({ id, state }) => [id, state]),
+      [['maintenance', 'done'], ['inventory', 'done'], ['local', 'done']]);
+    markLedgerBoundary(ledgerFile, 'refresh');
+    const third = await getJson(port, '/api/status', token);
+    assert.equal(third.status, 200);
+    markLedgerBoundary(ledgerFile, 'third');
+    const { third: thirdSlice } = sliceByCallBoundary(readLedger(ledgerFile), ['first', 'second', 'refresh', 'third']);
+    const thirdUnexplained = thirdSlice.filter((l) => !isVersionDriftLookup(l));
+    assert.equal(thirdUnexplained.length, 0, JSON.stringify(thirdUnexplained.map((l) => [l.cmd, l.args])));
+    assert.ok(third.bytes <= second.bytes + budget, `third /api/status: ${third.bytes} bytes; second: ${second.bytes}`);
+    assert.deepEqual(Object.keys(third.json).sort(), Object.keys(second.json).sort());
+    t.diagnostic(`status bytes cold/warm/post-refresh=${first.bytes}/${second.bytes}/${third.bytes}; `
+      + `local refresh=${Date.now() - startedAt}ms; third unexplained spawns=${thirdUnexplained.length}`);
   } finally {
     await stopGuardedDashboard(child);
     fs.rmSync(ledgerFile, { force: true });
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });
   }
+});
+
+test('the idle polling client never requests the refresh route', () => {
+  const poll = fs.readFileSync(new URL('../../src/lib/dashboard/client/poll.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(poll, /\/api\/refresh/);
 });

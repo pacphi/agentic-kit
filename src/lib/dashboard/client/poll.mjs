@@ -13,7 +13,7 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
   // Governs EVERY tab, not just Usage (ADR-0009 §7). The old hardcoded 5 s poll
   // predated any expensive view; 30 s is the default now, and the whole range is
   // user-chosen and persisted. Every refresh path — automatic or manual — funnels
-  // through refreshAll(), so the single-flight guard and the cooldown are
+  // through reloadView(), so the single-flight guard and the cooldown are
   // impossible to route around.
   var LS_POLL="ak-dash-poll";
   var POLL_DEFAULT_MS=30000;
@@ -21,6 +21,7 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
   var POLL_LABEL={15000:"15s",30000:"30s",60000:"1m",300000:"5m",900000:"15m",
     1800000:"30m",3600000:"1h",21600000:"6h",43200000:"12h",86400000:"24h"};
   export var pollOn=true, pollMs=POLL_DEFAULT_MS, pollTimer=null, inflight=false, lastAttempt=0;
+  var lastManualAttempt=0;
 
   try{
     var savedPoll=JSON.parse(localStorage.getItem(LS_POLL)||"null");
@@ -128,11 +129,17 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
     });
   }
 
-  function refreshAll(){
+  export function reloadView(force){
+    // A deliberate Reload should not be lost to a recent background tick.
+    // Still coalesce a double-click before joining an in-flight read.
+    if(force==="manual"){
+      if(Date.now()-lastManualAttempt<POLL_COOLDOWN_MS)return;
+      lastManualAttempt=Date.now();force=true;
+    }
     // single-flight: a refresh already in the air is joined, never duplicated.
-    if(inflight)return;
+    if(inflight){if(force===true)setTimeout(function(){reloadView(true);},250);return;}
     // cooldown: a double-click (or a held Enter) cannot stack requests.
-    if(Date.now()-lastAttempt<POLL_COOLDOWN_MS)return;
+    if(force!==true&&Date.now()-lastAttempt<POLL_COOLDOWN_MS)return;
     inflight=true; lastAttempt=Date.now();
     var btn=document.getElementById("poll-now");
     if(btn)btn.classList.add("spin");
@@ -141,17 +148,11 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
       jobs.push(loadUsage(true));
       if(usageView==="models")jobs.push(loadModelLifecycle(true));
     }
-    // The Runtime view is a live census — processes, CPU, RSS, daemon ages —
-    // and it used to load ONCE when the System tab was first opened, so its
-    // "live" figures could sit unchanged for an entire session while the
-    // header cheerfully reported "updated 4s ago". It now refreshes on the
-    // same clock as everything else the header speaks for.
-    //
-    // Only the cheap tier: this is the plain /api/system/summary read, which is
-    // memoized server-side and never walks the filesystem. The deep scan stays
-    // behind Rescan (?refresh=deep) — putting a multi-minute walk on a 30s
-    // timer would be a different feature and a much worse one.
-    if(activeTab==="system"&&systemView==="runtime"&&!systemBusy)jobs.push(loadSystem());
+    // Background polling reads System's live Runtime census only. A user
+    // Reload or a completed Refresh re-reads whichever System view is active.
+    // loadSystem is a cheap, read-only /api/system/summary GET for every view.
+    if(activeTab==="system"&&systemView!=="maintenance"&&!systemBusy
+      &&(systemView==="runtime"||force===true||force==="manual"))jobs.push(loadSystem());
     if(activeTab==="system"&&systemView==="maintenance"&&!maintenanceBusy)jobs.push(loadMaintenance(true));
     Promise.all(jobs).catch(function(){}).then(function(){
       inflight=false;
@@ -162,7 +163,7 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
 
   export function schedulePoll(){
     if(pollTimer){clearInterval(pollTimer); pollTimer=null;}
-    if(pollOn)pollTimer=setInterval(refreshAll,pollMs);
+    if(pollOn)pollTimer=setInterval(reloadView,pollMs);
     var pulse=document.getElementById("pulse");
     if(pulse)pulse.classList.toggle("off",!pollOn);
     var play=document.getElementById("poll-play");
@@ -197,7 +198,7 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
     if(play)play.addEventListener("click",function(){pollOn=!pollOn; savePoll(); schedulePoll();});
     // Manual refresh survives the pause — that is the whole point of the off
     // state: stale on purpose, refreshable on demand.
-    if(now)now.addEventListener("click",refreshAll);
+    if(now)now.addEventListener("click",function(){reloadView("manual");});
     if(ivl&&menu)ivl.addEventListener("click",function(e){
       e.stopPropagation();
       menu.hidden=!menu.hidden;

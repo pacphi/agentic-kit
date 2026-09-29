@@ -303,14 +303,14 @@ test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async 
   assert.equal(unknownMutation.status, 405);
 
   const rescanned = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
-  assert.equal(rescanned.status, 200);
-  assert.equal(service.calls.scan, 1, 'only the explicit scan query invokes maintenance scanning');
+  assert.equal(rescanned.status, 400);
+  assert.equal(service.calls.scan, 0, 'GET cannot invoke maintenance scanning');
 
   const unknownRefresh = await request(server, '/api/maintenance?refresh=deep', { origin: false, fetchSite: null });
   const duplicateRefresh = await request(server, '/api/maintenance?refresh=scan&refresh=scan', { origin: false, fetchSite: null });
   const unknownQuery = await request(server, '/api/maintenance?extra=scan', { origin: false, fetchSite: null });
   assert.deepEqual([unknownRefresh.status, duplicateRefresh.status, unknownQuery.status], [400, 400, 400]);
-  assert.equal(service.calls.scan, 1, 'ambiguous scan queries never invoke maintenance scanning');
+  assert.equal(service.calls.scan, 0, 'scan queries never invoke maintenance scanning');
 });
 
 test('dashboard Maintenance reports provider activity and refuses action requests during a scan', async (t) => {
@@ -465,18 +465,6 @@ test('dashboard Maintenance API distinguishes pre-mutation refusal from a receip
 
 // ── ADR-0048: provider scans chain the inventory rebuild (QE defect D5) ─────
 
-function eventually(predicate, message, timeout = 1500) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const check = () => {
-      if (predicate()) return resolve(undefined);
-      if (Date.now() - started >= timeout) return reject(new Error(message));
-      setTimeout(check, 5);
-    };
-    check();
-  });
-}
-
 function recordingManagement({ refreshInventory, measured = true } = {}) {
   const calls = [];
   const rebuilt = { inventoryId: 'inv_refreshed', capturedAt: '2026-09-05T12:00:00.000Z' };
@@ -493,84 +481,39 @@ function recordingManagement({ refreshInventory, measured = true } = {}) {
   return { calls, facade };
 }
 
-test('GET /api/maintenance?refresh=scan chains exactly one management.refreshInventory({ deep:false }) without awaiting it', async (t) => {
-  const service = fixtureService();
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const management = recordingManagement({ refreshInventory: () => gate });
-  const server = await startDashboard({ port: 0, maintenance: service, management: management.facade, usage: {} });
-  t.after(() => server.close());
-
-  const plain = await request(server, '/api/maintenance', { origin: false, fetchSite: null });
-  assert.equal(plain.status, 200);
-  assert.deepEqual(management.calls, [], 'a plain read never rebuilds the inventory');
-
-  const first = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
-  assert.equal(first.status, 200, 'the provider-scan response never waits for the inventory rebuild');
-  await eventually(() => management.calls.length === 1, 'the provider scan must chain one inventory rebuild');
-  assert.deepEqual(management.calls, [{ deep: false }], 'a cheap provider check rebuilds only; it never walks discovery sources');
-
-  const second = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
-  assert.equal(second.status, 200);
-  assert.equal(service.calls.scan, 2);
-  assert.equal(management.calls.length, 1, 'a rebuild still in flight is joined, not duplicated');
-  release();
-  await eventually(() => JSON.parse(JSON.stringify(management.calls)).length === 1, 'settled');
-  const third = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
-  assert.equal(third.status, 200);
-  await eventually(() => management.calls.length === 2, 'a later provider scan rebuilds again once the flight settled');
-});
-
-test('an inventory rebuild failure is logged and never turns the provider-scan response into an error', async (t) => {
-  const service = fixtureService();
-  const management = recordingManagement({ refreshInventory: async () => { throw new Error('inventory store unavailable'); } });
-  const logged = [];
-  const original = console.error;
-  console.error = (...args) => { logged.push(args.map(String).join(' ')); };
-  t.after(() => { console.error = original; });
-  const server = await startDashboard({ port: 0, maintenance: service, management: management.facade, usage: {} });
-  t.after(() => server.close());
-
-  const scanned = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
-  assert.equal(scanned.status, 200);
-  await eventually(() => logged.some((line) => /maintenance inventory refresh failed/.test(line)), 'the failure is logged');
-  assert.deepEqual(management.calls, [{ deep: false }]);
-  const again = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
-  assert.equal(again.status, 200);
-  await eventually(() => management.calls.length === 2, 'a failed rebuild does not wedge the single-flight slot');
-});
-
-test('a completed System deep scan chains one provider scan and then one inventory rebuild', async (t) => {
+test('GET Maintenance scan queries never invoke provider checks or inventory rebuilds', async (t) => {
   const service = fixtureService();
   const management = recordingManagement();
-  const collector = {
-    async read() { return { scan: { running: false, phase: 'idle' }, generatedAt: '2026-09-05T12:00:00.000Z' }; },
-    async refreshDeep() { return { ok: true, persisted: { ok: true } }; },
-    scanState() { return { running: true, phase: 'system' }; },
-  };
-  const server = await startDashboard({ port: 0, system: collector, maintenance: service, management: management.facade, usage: {} });
+  const server = await startDashboard({ port: 0, maintenance: service, management: management.facade, usage: {} });
   t.after(() => server.close());
-
-  const started = await request(server, '/api/system?refresh=deep', { origin: false, fetchSite: null });
-  assert.equal(started.status, 200);
-  await eventually(() => service.calls.scan === 1, 'the completed System scan refreshes Maintenance evidence once');
-  await eventually(() => management.calls.length === 1, 'the provider scan then rebuilds the inventory once');
-  assert.deepEqual(management.calls, ['rebuildAfterMeasurement'],
-    'a machine measurement walks discovery sources and rebuilds, and never also runs the cheap rebuild');
+  assert.equal((await request(server, '/api/maintenance', { origin: false, fetchSite: null })).status, 200);
+  for (const query of ['refresh=scan', 'refresh=deep', 'refresh=scan&refresh=scan', 'trees=1', 'extra=scan']) {
+    const response = await request(server, '/api/maintenance?' + query, { origin: false, fetchSite: null });
+    assert.equal(response.status, 400, query);
+    assert.deepEqual(JSON.parse(response.body), { error: 'start a refresh with POST /api/refresh' });
+  }
+  assert.equal(service.calls.scan, 0);
+  assert.deepEqual(management.calls, []);
 });
 
-test('a completed System deep scan falls back to the cheap rebuild when the facade has no measured rebuild', async (t) => {
-  const service = fixtureService();
-  const management = recordingManagement({ measured: false });
-  const collector = {
-    async read() { return { scan: { running: false, phase: 'idle' } }; },
-    async refreshDeep() { return { ok: true, persisted: { ok: true } }; },
-  };
-  const server = await startDashboard({ port: 0, system: collector, maintenance: service, management: management.facade, usage: {} });
-  t.after(() => server.close());
-  assert.equal((await request(server, '/api/system?refresh=deep', { origin: false, fetchSite: null })).status, 200);
-  await eventually(() => management.calls.length === 1, 'the chain still rebuilds');
-  assert.deepEqual(management.calls, [{ deep: false }]);
+test('POST refresh stages retain machine measurement, provider scan and inventory rebuild order', async () => {
+  const { dashboardRefreshStages } = await import('../../src/lib/dashboard/refresh-api.mjs');
+  const calls = [];
+  const stage = dashboardRefreshStages({ cwd: process.cwd(),
+    getSystem: async () => ({ refreshDeep: async options => { calls.push(['machine', options]); return { ok: true, persisted: { ok: true } }; } }),
+    getMaintenance: async () => ({ scan: async options => { calls.push(['maintenance', options]); return { scan: {} }; } }),
+    refreshInventoryAfterProviderScan: async options => { calls.push(['inventory', options]); return {}; },
+    getHostReadiness: async () => ({}), statusCollect: async () => ({}), loadConfig: () => ({}),
+  });
+  assert.equal((await stage.machine({ projectTrees: true })).ok, true);
+  assert.equal((await stage.maintenance()).ok, true);
+  assert.equal((await stage.inventory({ strength: 'machine' })).ok, true);
+  assert.deepEqual(calls, [['machine', { includeProjectTrees: true }], ['maintenance', { deep: false }],
+    ['inventory', { measured: true }]]);
+  calls.length = 0;
+  assert.equal((await stage.maintenance()).ok, true);
+  assert.equal((await stage.inventory({ strength: 'local' })).ok, true);
+  assert.deepEqual(calls, [['maintenance', { deep: false }], ['inventory', { measured: false }]]);
 });
 
 test('an injected maintenance service without an injected facade never composes the default facade (hermetic)', async (t) => {
@@ -578,8 +521,8 @@ test('an injected maintenance service without an injected facade never composes 
   const server = await startDashboard({ port: 0, maintenance: service, usage: {} });
   t.after(() => server.close());
   const scanned = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
-  assert.equal(scanned.status, 200);
-  assert.equal(service.calls.scan, 1);
+  assert.equal(scanned.status, 400);
+  assert.equal(service.calls.scan, 0);
   const inventory = await request(server, '/api/maintenance/v2/inventory', { origin: false, fetchSite: null });
   assert.equal(inventory.status, 503);
   assert.deepEqual(JSON.parse(inventory.body), { error: 'maintenance management unavailable' });

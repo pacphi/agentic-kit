@@ -10,7 +10,6 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { sandboxHome, assertSandboxed, rmrf } from './helpers/home-sandbox.mjs';
-import { waitUntil } from './helpers/wait-until.mjs';
 
 const home = sandboxHome('ak-dash-hermetic');
 after(() => rmrf(home));
@@ -42,9 +41,7 @@ test('an injected System collector alone never builds the default maintenance se
   t.after(() => server.close());
 
   const deep = await get(server, 'api/system?refresh=deep');
-  assert.equal(deep.status, 200);
-  await waitUntil(() => errors.some((e) => /maintenanceOptions\.controlRoot/.test(e)),
-    'the refused default maintenance service must be logged', { timeout: 5000 });
+  assert.equal(deep.status, 400);
   const maintenance = await get(server, 'api/maintenance');
   assert.equal(maintenance.status, 503);
   assert.equal(fs.existsSync(path.join(paths.maintenanceControlDir())), false,
