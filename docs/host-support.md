@@ -119,15 +119,20 @@ Official extension references: [Claude hooks](https://code.claude.com/docs/en/ho
 | Teardown | Managed blocks and registrations | Receipt-based managed teardown | Value- and hash-receipt teardown; user-owned values survive |
 
 Ruflo MCP access and Ruflo-backed inference are different contracts. In
-particular, Ruflo's [`agent_execute` provider-key behavior](https://github.com/ruvnet/ruflo/issues/2356)
-can still require a separate provider credential even when invoked from Codex.
+Ruflo 3.48.0's shipped `agent_execute` path, execution uses a separately
+configured inference provider; its no-provider branch still returns an error
+instead of delegating to the MCP host
+([ruflo #2356](https://github.com/ruvnet/ruflo/issues/2356)). This is a source
+check, not a credentialed runtime probe from Codex.
 `ak run` avoids that conflation by executing the selected host directly and using
 Ruflo for tools, memory, routing context, and orchestration assets.
 
 The dated upstream risk inventory includes:
 
-- force initialization can overwrite unrelated `.mcp.json` content
-  ([ruflo #420](https://github.com/ruvnet/ruflo/issues/420));
+- force initialization still writes a generated `.mcp.json` over the existing
+  file in Ruflo 3.48.0's shipped source, without merging unrelated servers
+  ([ruflo #420](https://github.com/ruvnet/ruflo/issues/420)); this was not
+  exercised on a real project;
 - generated Claude and Codex instructions can diverge
   ([#2638](https://github.com/ruvnet/ruflo/issues/2638));
 - init and plugin installation can duplicate assets or hooks
@@ -171,10 +176,13 @@ Current AQE includes a subscription-backed `codex` provider. Agentic-kit accepts
 `ak host pick --aqe-provider codex`, admits Codex fallback rungs, enables Codex
 providers referenced by `agentOverrides`, and projects Codex activity routes.
 
-The dated AQE risk inventory includes its
-[MCP entrypoint double-spawn](https://github.com/proffesor-for-testing/agentic-qe/issues/528),
-[multi-platform initialization behavior](https://github.com/proffesor-for-testing/agentic-qe/issues/532),
-[MCP tool correctness gaps](https://github.com/proffesor-for-testing/agentic-qe/issues/535),
+AQE 3.14.4 adopted fixes for the
+[MCP entrypoint double-spawn](https://github.com/proffesor-for-testing/agentic-qe/issues/528)
+and [exclusive platform initialization](https://github.com/proffesor-for-testing/agentic-qe/issues/532)
+(`aqe init --no-claude`). Both upstream issues remain open; versions below
+3.14.4 retain those gaps. The remaining dated AQE risk inventory includes
+[GOAP `maxSteps` and world-state, test-generation quality, and coherence recommendation-text gaps](https://github.com/proffesor-for-testing/agentic-qe/issues/535)
+(the 3.14.4 recheck did not exercise `goap_execute`),
 [RVF recovery loop](https://github.com/proffesor-for-testing/agentic-qe/issues/574),
 and [local-embedding audit findings](https://github.com/proffesor-for-testing/agentic-qe/issues/615).
 
