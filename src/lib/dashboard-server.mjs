@@ -1,4 +1,6 @@
 import { HOST_HEALTH_POST_ROUTES, handleHostHealthPost } from './dashboard/host-health-api.mjs';
+import { REFRESH_POST_ROUTES, REFRESH_LOCAL_TIMEOUT_MS, createRefreshOperation,
+  dashboardRefreshStages, handleRefreshPost, handleRefreshGet } from './dashboard/refresh-api.mjs';
 import { createHostReadinessReader } from './host-readiness.mjs';
 // dashboard-server.mjs — a read-only, localhost-only web dashboard for the kit.
 //
@@ -148,16 +150,16 @@ const STATUS_TIMEOUT_MS = 30_000;
  *  settles within STATUS_TIMEOUT_MS, resolves to an honest empty payload rather than
  *  rejecting or hanging the server, so /api/status always answers with valid
  *  JSON. */
-function inProcessStatus(cwd) {
+function inProcessStatus(cwd, { refresh = false, timeoutMs = STATUS_TIMEOUT_MS } = {}) {
   return () => new Promise((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       resolve({ overall: 'unknown', rows: [], error: 'status collection timed out' });
-    }, STATUS_TIMEOUT_MS);
+    }, timeoutMs);
     timer.unref?.();
-    statusCollect({ pkgRoot: PKG_ROOT, cwd, refresh: false })
+    statusCollect({ pkgRoot: PKG_ROOT, cwd, refresh })
       .then((rows) => ({ overall: worstLevel(rows), rows }))
       .catch((e) => ({ overall: 'unknown', rows: [], error: String(e?.message ?? e) }))
       .then((result) => {
@@ -1086,7 +1088,7 @@ function lazyLive(liveOptions = {}) {
  *           machineWideIntel?: (projects: Array<any>) => any,
  *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
  *           maintenance?: any, maintenanceOptions?: any, hostReadiness?: any,
- *           management?: any, managementOptions?: any }} [opts]
+ *           management?: any, managementOptions?: any, refreshStages?: Record<string, (ctx: any) => Promise<any>> }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -1097,7 +1099,7 @@ export function startDashboard({
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
-  maintenance, maintenanceOptions = {}, management, managementOptions = {}, hostReadiness,
+  maintenance, maintenanceOptions = {}, management, managementOptions = {}, hostReadiness, refreshStages,
 } = {}) {
   const refused = refusesDefaultState({
     fetchStatus, usage, limits, hooks, live, transcripts, intelWatch, discoverProjects, machineWideIntel,
@@ -1216,6 +1218,11 @@ export function startDashboard({
       .finally(() => { inventoryRefreshPromise = null; });
     return inventoryRefreshPromise;
   }
+  const refreshOperation = createRefreshOperation({ stages: refreshStages ?? dashboardRefreshStages({
+    cwd, pkgRoot: PKG_ROOT, getSystem, getMaintenance, refreshInventoryAfterProviderScan,
+    getHostReadiness, statusCollect: inProcessStatus(cwd, { refresh: true, timeoutMs: REFRESH_LOCAL_TIMEOUT_MS }),
+    loadConfig: loadKitConfig,
+  }) });
   let maintenanceRefreshSource = null;
   let maintenanceRefreshPromise = null;
   function refreshMaintenanceAfterSystem(deepScan) {
@@ -1417,7 +1424,8 @@ export function startDashboard({
     const maintenanceMutation = req.method === 'POST'
       && (MAINTENANCE_MUTATION_ROUTES.has(url) || MAINTENANCE_V2_MUTATION_ROUTES.has(url));
     const healthMutation = req.method === 'POST' && HOST_HEALTH_POST_ROUTES.has(url);
-    if (req.method !== 'GET' && !maintenanceMutation && !healthMutation) {
+    const refreshMutation = req.method === 'POST' && REFRESH_POST_ROUTES.has(url);
+    if (req.method !== 'GET' && !maintenanceMutation && !healthMutation && !refreshMutation) {
       res.writeHead(405).end('method not allowed');
       return;
     }
@@ -1445,13 +1453,13 @@ export function startDashboard({
     // Query tokens remain an SSE compatibility exception for GET. Mutation
     // capability can only be reached with the explicit header; it never rides
     // in a URL, browser history, referrer or server log.
-    const authorized = (maintenanceMutation || healthMutation)
+    const authorized = (maintenanceMutation || healthMutation || refreshMutation)
       ? tokenMatches(req.headers['x-dash-token'], token) : checkToken(req, query);
     if (url.startsWith('/api/') && !authorized) {
       sendUnauthorized(res, 'Wrong or missing dashboard token.');
       return;
     }
-    if (maintenanceMutation || healthMutation) {
+    if (maintenanceMutation || healthMutation || refreshMutation) {
       const mutationRejection = maintenanceMutationRejection(req.headers);
       if (mutationRejection) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
@@ -1459,6 +1467,7 @@ export function startDashboard({
         return;
       }
       if (healthMutation) { await handleHostHealthPost(url, req, res, getHostReadiness); return; }
+      if (refreshMutation) { await handleRefreshPost(req, res, refreshOperation); return; }
       try { await (await getMaintenanceApi()).mutate(url, req, res); }
       catch { sendJson(res, 503, { error: 'maintenance operation unavailable' }); }
       return;
@@ -2113,6 +2122,7 @@ export function startDashboard({
     // out separately into sse.mjs's sseRoute().
     const ROUTES = {
       '/api/status': handleStatus,
+      '/api/refresh': (_req, res) => handleRefreshGet(res, refreshOperation),
       '/api/host-health': async (_req, res) => {
         try { sendJson(res, 200, await getHostReadiness()); }
         catch { sendJson(res, 503, { error: 'Host health checks unavailable.' }); }
