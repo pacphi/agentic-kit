@@ -117,7 +117,7 @@ test('a stale Codex answer served after a failed refresh says the refresh failed
   assert.doesNotMatch(fresh['u-lim-codex-note'].textContent, /refresh failed/);
 });
 
-// Fix round 1: a cached figure served under a presence-gated reason (no spawn
+// a cached figure served under a presence-gated reason (no spawn
 // was ever attempted) must say "not refreshed", never "last refresh failed" —
 // that phrase implies an attempt that did not happen.
 test('a cached Codex figure served under a presence-gated reason says "not refreshed", never "failed"', () => {

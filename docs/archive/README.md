@@ -225,3 +225,15 @@ incident reports intentionally keep their original, now-dangling paths.
 | [2026-09-07-validation-maintenance-option-a.md](2026-09-07-validation-maintenance-option-a.md) | `docs/design/maintenance-overhaul/option-a-validation.md` | Maintenance overhaul option-a-validation.md | Dated verification evidence; does not prove the current source state or close open release gates. |
 | [2026-09-08-design-maintenance-project-metadata-adapters.md](2026-09-08-design-maintenance-project-metadata-adapters.md) | `docs/design/maintenance-overhaul/project-metadata-adapters.md` | Maintenance overhaul project-metadata-adapters.md | Live successor: [PROJECT-METADATA-ADAPTERS.md](../proposals/project-metadata-adapters.md); original snapshot retained as provenance. |
 | [2026-09-04-design-maintenance-overhaul-provider-and-action-policy.md](2026-09-04-design-maintenance-overhaul-provider-and-action-policy.md) | `docs/design/maintenance-overhaul/provider-and-action-policy.md` | Maintenance overhaul provider-and-action-policy.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
+
+## Added 2026-09-29 — remediation v2 evidence capture
+
+| File | Original location | What it was | Why it is historical |
+| --- | --- | --- | --- |
+| [2026-09-29-plan-remediation-v2-closeout.md](2026-09-29-plan-remediation-v2-closeout.md) | `docs/plans/2026-09-29-remediation-v2-closeout.md` | V7 closeout execution plan | Implementation and local gates completed; later PR, timing and human-review receipts remain separate. |
+| [2026-09-29-aqe-released-artifact-receipt.md](2026-09-29-aqe-released-artifact-receipt.md) | Written here | AQE 3.14.5 released-artifact receipt (2026-09-29) | Dated capture; final main approval and operational gates remain. |
+| [2026-09-29-remediation-v2-integration-evidence.md](2026-09-29-remediation-v2-integration-evidence.md) | Written here | Remediation v2 integration evidence | Dated capture; final main approval and operational gates remain. |
+| [2026-09-29-remediation-v2-rulings.md](2026-09-29-remediation-v2-rulings.md) | Written here | Remediation v2 ordered execution rulings | Dated capture; final main approval and operational gates remain. |
+| [2026-09-29-dashboard-paused-time-evidence.md](2026-09-29-dashboard-paused-time-evidence.md) | `.superpowers/sdd/2026-09-28-dashboard-refresh/paused-time-report.md` | V3 paused-time consumer proof | Body preserved from its pre-integration capture; later integration evidence is separate. |
+| [2026-09-29-remediation-v2-scope-matrix.md](2026-09-29-remediation-v2-scope-matrix.md) | Written here | Remediation v2 scope reconciliation | Dated capture; final main approval and operational gates remain. |
+| [2026-09-29-windows-ci-evidence.md](2026-09-29-windows-ci-evidence.md) | Written here | Windows CI historical cohort and current timing gate | Dated capture; final main approval and operational gates remain. |

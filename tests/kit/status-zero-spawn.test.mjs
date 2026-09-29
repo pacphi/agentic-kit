@@ -1,11 +1,11 @@
-// Branch 6a Task 8a built this harness: src/commands/status.mjs's collect()
+// This harness covers src/commands/status.mjs's collect()
 // runs inside a real child Node process launched with `--import` of
 // tests/helpers/spawn-guard.mjs (Ruling C: a product-code ledger seam inside
 // exec.mjs would under-count — ~30 files spawn child_process directly, not
 // through it), so every spawn path is caught regardless of which module
 // makes it, with no product code change.
 //
-// Task 7 closed every remaining spawn path on a plain `ak status` (native
+// Evidence caching closed every remaining spawn path on a plain `ak status` (native
 // runtime, host setup/launch, deja-vu, version drift, npm's global root, the
 // daemon process sweep, the ak-launcher-availability check) and promotes the
 // zero-spawn assertion from `test.todo` (Ruling D — never commit a red test)

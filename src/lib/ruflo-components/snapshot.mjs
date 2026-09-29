@@ -230,7 +230,7 @@ export function componentSnapshot({ cfg, rufloVersion, evidence, projection, now
 }
 
 /** Controller ruling 3: the ONE read-only projection every surface (status's own
- *  section, and Task 10's dashboard) builds a snapshot from — so none of them
+ *  section, and the dashboard) builds a snapshot from — so none of them
  *  re-implements it. Never spawns anything and never writes: the Claude env read
  *  is a dry run, and the evidence comes from whatever is already cached (a
  *  caller wanting fresher evidence collects + writes it BEFORE calling this,

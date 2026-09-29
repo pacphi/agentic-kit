@@ -1,7 +1,7 @@
-// Branch 6a Task 9 / Task 8b — the Review Focus item this whole branch was
-// scoped around: "Dashboard cost. The 30-second poll must not start more
-// processes or transfer more data than before the branch." Task 7 made a
-// warm-cache collect() spawn-free; this task made dashboard-server.mjs call
+// The dashboard cost regression budget is the requirement this test is
+// built around: "Dashboard cost. The 30-second poll must not start more
+// processes or transfer more data than before the branch." Evidence caching made a
+// warm-cache collect() spawn-free; dashboard-server.mjs calls
 // it in process instead of shelling out. This file is the end-to-end proof
 // that swap actually delivered the promised cost property, simulating two
 // 30s poll ticks against a running server (not a bare collect() call):
@@ -56,7 +56,7 @@ test('two 30s-poll-tick /api/status requests: the second starts no processes and
     const { port, token } = started;
 
     // Tick 1: a cold-cache poll. Every real dashboard's FIRST poll after
-    // startup pays this cost — Ruling A (Task 7) says a cold cache probes at
+    // startup pays this cost — a cold cache probes at
     // least once per gated kind, so this is not itself under budget.
     const first = await getJson(port, '/api/status', token);
     assert.equal(first.status, 200);

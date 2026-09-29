@@ -503,7 +503,7 @@ async function main() {
     assert(resolvesInsideRoot(root, path.resolve(path.sep, 'etc', 'passwd')) === false, 'an absolute path escapes the root');
   });
 
-  // ── namespaced subagent session ids (Task 5 round 2) ──
+  // ── namespaced subagent session ids ──
   await test('parseNamespacedSessionId accepts <parentId>/<stem>, decodes percent-encoding, and parses named subagents', async () => {
     const r = parseNamespacedSessionId('fc8c05e0-c311-456e-a226-6dac4279199b/agent-a2fc4593254cc01b9');
     assert(r && r.parentId === 'fc8c05e0-c311-456e-a226-6dac4279199b' && r.stem === 'agent-a2fc4593254cc01b9',
@@ -749,7 +749,7 @@ async function main() {
         'readSession must NOT be called for any hostile id — got ' + (spy.calls.readSession.length - before) + ' call(s)');
     });
 
-    // ── namespaced subagent session ids reach readSession end-to-end (Task 5 round 2) ──
+    // ── namespaced subagent session ids reach readSession end-to-end ──
     await test('GET /api/session/:parentId/:stem → a namespaced subagent id reaches readSession end-to-end', async () => {
       const before = spy.calls.readSession.length;
       const r = await get(usageSrv.url + 'api/session/parent-uuid/agent-a2fc4593254cc01b9', usageSrv.token);

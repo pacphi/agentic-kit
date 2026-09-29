@@ -389,7 +389,7 @@ test('healNatives leaves a present binding that loads alone', async () => {
   } finally { cleanup(); }
 });
 
-// ── Task 4: a repair's evidence round-trips into a subsequent status read ───
+// ── a repair's evidence round-trips into a subsequent status read ───
 
 test('healNatives\'s repair evidence round-trips through rufloRuntimeNatives({ refresh: false }) without a second spawn', async () => {
   const { pkg, cleanup } = presentBindingTree();

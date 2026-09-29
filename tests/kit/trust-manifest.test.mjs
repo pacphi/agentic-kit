@@ -250,7 +250,7 @@ test('ruflo components governance disclosure states enforcement is scoped to the
   assert.match(text, /project's own existing \.harness\/mcp-policy\.json is left alone/);
 });
 
-// Branch 3, Task 2.2: project setup discloses both daemon writes and the opt-out.
+// project setup discloses both daemon writes and the opt-out.
 test('project setup discloses the managed Ruflo daemon settings and how to opt out', () => {
   const group = (cfg, project) => setupTrustManifest(cfg, { hosts: [], project })
     .find((g) => g.componentId === 'ruflo-daemon');

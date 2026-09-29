@@ -1,4 +1,4 @@
-// ak-managed Ruflo daemon settings (Branch 3, Task 2.2). The daemon reads FLAT
+// ak-managed Ruflo daemon settings. The daemon reads FLAT
 // keys from <root>/.claude-flow/config.json once, in its constructor
 // (worker-daemon.js:139-144, 354-416, Ruflo 3.46.1); `ruflo config set`
 // writes nested keys and relocates the memory root (ruvnet/ruflo#3449), so ak
@@ -448,7 +448,7 @@ test('a daemon deferring under a user-managed config.json is not restarted: sync
   }
 });
 
-// F5 (Branch 3 fix round 2): Ruflo 3.46.1 treats a folder as a Ruflo project
+// F5: Ruflo 3.46.1 treats a folder as a Ruflo project
 // only with a durable marker (services/daemon-autostart.js:90-123, isRufloProject):
 // .claude-flow/config.{yaml,yml,json}, claude-flow.config.json,
 // .swarm/memory.db, settings.json `claudeFlow`, or a ruflo/claude-flow server in

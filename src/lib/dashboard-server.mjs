@@ -2032,7 +2032,7 @@ export function startDashboard({
       // filesystem call, so the 400 happens here and nowhere deeper. Two
       // shapes are accepted: a plain id (unchanged — parseSessionId/
       // resolvesInsideRoot, exactly as before), or a namespaced
-      // `<parentId>/<stem>` Claude subagent id (Task 5 round 2), gated by
+      // `<parentId>/<stem>` Claude subagent id, gated by
       // its own dedicated parse+containment pair rather than loosening
       // parseSessionId/resolvesInsideRoot — those two also gate the
       // live-playback/SSE routes, which this fix does not touch.

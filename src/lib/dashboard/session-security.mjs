@@ -35,7 +35,7 @@ export function resolvesInsideRoot(root, id) {
  *  Claude Code writes every one as `agent-<hex>`, or `agent-<name>-<hex>`
  *  when the Task tool call carried a name (the Agent tool's own `name`
  *  parameter, charset [A-Za-z0-9_-]). A survey of this machine's real
- *  corpus (404 files, Task 5 round 2) found most stems carry a name — a
+ *  corpus (404 files) found most stems carry a name — a
  *  hex-only pattern would leave most subagent sessions still unopenable.
  *  '/', '.', and '\' are simply not in this charset, so no separate
  *  traversal check is needed for this segment beyond the charset itself. */

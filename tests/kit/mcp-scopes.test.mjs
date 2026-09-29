@@ -357,7 +357,7 @@ test('status names the store the launcher picks from this folder', (t) => {
   assert.match(outside.message, /from here it uses the user-level store .*\.claude-flow.memory \(this folder is the home folder\)/);
 });
 
-// Plan Task 4.2: register() refuses with 'ak-not-on-path' when it would write
+// register() refuses with 'ak-not-on-path' when it would write
 // a registration that starts `ak`, so every row whose sync fix goes through
 // that write is the user's step until `ak` resolves on PATH.
 const AK_OFF_PATH_FIX = 'put `ak` on PATH, then run `ak sync`';
@@ -400,10 +400,10 @@ test('the mcp section looks ak up only when ak manages the registration', async 
   assert.equal(rows.find((r) => /not registered/.test(r.message)).fix, AK_OFF_PATH_FIX);
 });
 
-// Task 7: the mcp section's collect() threads refresh/record into
+// the mcp section's collect() threads refresh/record into
 // launcherCheck() (claudeLauncherUnavailable, evidence-gated) so a plain
 // `ak status` (refresh: false) stays cache-first while `--refresh` forces it,
-// mirroring hosts.mjs's Task 5 precedent.
+// mirroring hosts.mjs's evidence-cache precedent.
 test('the mcp section threads refresh/record into launcherCheck, defaulting to a plain-status-shaped call', async (t) => {
   const { home, cwd } = fixture(t);
   const seen = [];
@@ -421,7 +421,7 @@ test('the mcp section threads refresh/record into launcherCheck, defaulting to a
     'explicit refresh/record/source thread straight through');
 });
 
-// F1 (Branch 3 fix round 2): an `ak` on PATH older than the launcher's
+// F1: an `ak` on PATH older than the launcher's
 // `--host` option cannot start `ak x ruflo-mcp --host claude` (it exits 2 on
 // the unknown option), so being on PATH is not enough. The check asks the PATH
 // `ak` for its launcher help; this is ak 4.0.0-alpha.56's, which has no --host.

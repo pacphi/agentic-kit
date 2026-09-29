@@ -1,4 +1,4 @@
-// Branch 6a Task 7: listDaemons()'s processSweep() (src/lib/daemons.mjs)
+// listDaemons()'s processSweep() (src/lib/daemons.mjs)
 // stops spawning `ps -eo pid=,args=` (or the Windows CIM query) on every
 // plain `ak status` call — it reuses fresh evidence instead (kind
 // 'daemon-sweep', id 'machine', 5-minute TTL: this is live process-table
@@ -8,7 +8,7 @@
 // collect() explicitly threads refresh:false from ctx.
 //
 // processSweep has no injectable runner, so — mirroring
-// tests/kit/host-setup-evidence.test.mjs's Task 5 precedent — these tests
+// tests/kit/host-setup-evidence.test.mjs's state-isolation precedent — these tests
 // break PATH so a real `ps` ENOENTs deterministically (run() never throws;
 // it degrades to an empty result), then seed cached evidence with a marker
 // entry no real sweep could ever produce. Getting the marker back proves the

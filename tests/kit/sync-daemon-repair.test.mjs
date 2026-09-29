@@ -1,4 +1,4 @@
-// final-review fix: sync's 'daemons' step must re-record daemon-sweep
+// sync's 'daemons' step must re-record daemon-sweep
 // evidence after a successful reap. The Important finding: listDaemons()
 // records the PRE-reap process list; without a re-list after reap() kills
 // something, that stale list is the last thing written — a later `ak

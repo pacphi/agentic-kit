@@ -22,7 +22,7 @@
 // nearby falls back to a plain range check (the file has enough lines) —
 // there is nothing sharper to hold it to.
 //
-// Fix round 1, C-1 — the DEFINITION-SITE rule. A named symbol's word-boundary
+// C-1 — the DEFINITION-SITE rule. A named symbol's word-boundary
 // match above only proves the TEXT appears somewhere in the widened window —
 // a call site (`printScoreReliability(agg);`) contains the identifier just as
 // much as its definition does, so a citation moved off a function's real
@@ -34,14 +34,14 @@
 // multiple such declarations is too ambiguous to gate on and relies on the
 // plain word-boundary check above instead.
 //
-// Fix round 1, I-2 — SAME-ROW fallback for table citations. Cell-scoping
+// I-2 — SAME-ROW fallback for table citations. Cell-scoping
 // (below) stops a neighbouring column's identifier from anchoring a
 // DIFFERENT fact's citation, but a `| `symbol` | prose (`file.mjs:N`) |` row
 // legitimately names its subject in one cell and cites it in another. When a
 // table citation's OWN cell yields no anchor at all, it falls back to the
 // REST OF ITS ROW (every other cell on the same line) — never another row.
 //
-// Fix round 2 — the CALL-SITE marker (an affordance, not an escape hatch).
+// the CALL-SITE marker (an affordance, not an escape hatch).
 // Round 1 fixed genuine call-site citations by DE-ANCHORING them — stripping
 // or requoting the identifier so the definition-site rule had nothing to gate
 // on. That made the citation's own NUMBER invisible to the gate again, and
@@ -97,7 +97,7 @@ function fileIndex() {
 const IDENTIFIER_RE = /^[A-Za-z_$][\w$]{3,}$/;
 const IDENTIFIER_PREFIX_RE = /^([A-Za-z_$][\w$]{3,})\s*(?:=|:(?!:)|\()/;
 
-// Fix round 2 — the literal word "call" (never "calls"/"called"/"calling",
+// the literal word "call" (never "calls"/"called"/"calling",
 // which \b already excludes), read from the citation's own sentence/cell as
 // a deliberate self-declaration that this citation is about a call site.
 const CALL_SITE_MARKER_RE = /\bcall\b/i;
@@ -111,7 +111,7 @@ function identifierIn(tok) {
   return m ? m[1] : null;
 }
 
-// Fix round 1, C-1 — the definition-site rule. `name` is always a validated
+// C-1 — the definition-site rule. `name` is always a validated
 // identifier token (from identifierIn), never doc free text, so it is safe
 // to interpolate into a RegExp without escaping.
 function definitionRe(name) {
@@ -194,7 +194,7 @@ function extractCitations(docText) {
     spans.push({ tok: m[1].replace(/\s+/g, ' '), line: startLine, col: m.index - lineStartOffset[startLine - 1] });
   }
   for (const c of cites) {
-    // Fix round 1, I-2: mine the citation's OWN cell first; a table citation
+    // I-2: mine the citation's OWN cell first; a table citation
     // whose own cell names nothing falls back to the REST OF ITS ROW (never
     // another row) — see the file header. Non-table citations are unaffected
     // (ownCellOnly never restricts anything for them).
@@ -234,7 +234,7 @@ function extractCitations(docText) {
     }
     c.idAnchors = [...idAnchors];
     c.strAnchors = [...strAnchors];
-    // Fix round 2 — the call-site marker, read from the SAME own-cell/prose
+    // the call-site marker, read from the SAME own-cell/prose
     // context as the quoted-string anchors above (not the row-fallback: a
     // marker is a deliberate per-citation declaration, never inherited from
     // a sibling cell).
@@ -286,7 +286,7 @@ function checkDoc(docRel, index) {
       );
       continue;
     }
-    // Fix round 1, C-1 — the definition-site rule: a word-boundary hit above
+    // C-1 — the definition-site rule: a word-boundary hit above
     // only proves the identifier's TEXT is somewhere in the window, which a
     // call site satisfies just as well as a definition. Scoped to the
     // anchors that ACTUALLY hit (idHitAnchors) — an identifier merely mined
@@ -296,7 +296,7 @@ function checkDoc(docRel, index) {
     // only a symbol whose text-match is doing the work here has to prove
     // that text-match is a definition, not a call site.
     //
-    // Fix round 2 — a citation self-declared as a call site (see the
+    // a citation self-declared as a call site (see the
     // CALL_SITE_MARKER_RE header note) skips ONLY this rule; idHit/strHit
     // above still had to pass, so the citation is not exempt from having a
     // real anchor, only from that anchor having to be a declaration.

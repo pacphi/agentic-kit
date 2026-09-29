@@ -89,6 +89,8 @@ jobs:
       - name: Install devDependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Tracked JavaScript comment and test-title guard
+        run: pnpm run test:quality
       - name: Typecheck (tsc --checkJs)
         run: pnpm run typecheck
       - name: Lint (eslint)

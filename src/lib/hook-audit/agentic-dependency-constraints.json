@@ -682,7 +682,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["constraint agentic-qe-3.14.0-codex-guidance-policy"], "files": [] },
-      "adjustment": "Keep constraint agentic-qe-3.14.0-codex-guidance-policy: the 2026-09-27 conformance on 3.14.4 failed. On each Agentic-QE release run AK_AQE_CONFORMANCE=1 node --test tests/live/aqe-codex-guidance-conformance.test.mjs; sunset the constraint when it passes without its todo.",
+      "adjustment": "Keep constraint agentic-qe-3.14.0-codex-guidance-policy. The released 3.14.5 artifact passed the selected compact owned-byte and foreign-content preservation check, but full/none modes, all receipt and platform checks, and the complete ak conformance remain unverified. Run the existing opt-in full conformance on a future released artifact before any sunset.",
       "status": "released",
       "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
       "history": [
@@ -690,7 +690,8 @@
         { "date": "2026-09-06", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" },
-        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 conformance on ak's path (full aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, sandboxed): FAIL, constraint kept. full: no block when AGENTS.md exists and platform verify reports detected=none; compact and none select correctly and are idempotent, but compact adds 6 bytes outside its sentinel; through the aqe bin resolvePackageRoot() misses the package, so no Codex hooks or skills install; platform verify exits 0 on failed checks; platform setup codex: Module not found in bundle. Evidence: Branch 5 report b5-655-conformance; upstream issue drafted, not filed" }
+        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 conformance on ak's path (full aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, sandboxed): FAIL, constraint kept. full: no block when AGENTS.md exists and platform verify reports detected=none; compact and none select correctly and are idempotent, but compact adds 6 bytes outside its sentinel; through the aqe bin resolvePackageRoot() misses the package, so no Codex hooks or skills install; platform verify exits 0 on failed checks; platform setup codex: Module not found in bundle. Evidence: Branch 5 report b5-655-conformance; upstream issue drafted, not filed" },
+        { "date": "2026-09-29", "event": "reviewed", "note": "Private source-bound agentic-qe 3.14.5 tarball proof: selected compact AGENTS sentinel is 315 bytes; separate foreign prefix/suffix survives two same-option public init calls with bytes and mtime stable between calls 1/2. Full/none, complete receipts and all-platform conformance unverified; constraint retained. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
       ]
     },
     {
@@ -2624,18 +2625,19 @@
       "kind": "issue",
       "title": "Witness chain forks when two processes append at once. `append()` reads the tail and inserts it without a transaction, so `aqe audit verify --chain audit` reports BROKEN.",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": {"refs": ["investigation aqe-audit-chain", "Branch 5: stray-store merge runs with no other AQE writer"], "files": ["src/lib/aqe-store-holders.mjs", "src/lib/aqe-store-merge.mjs"]},
-      "adjustment": "Once a released agentic-qe appends to the witness chain atomically, ak no longer needs to stop other AQE writers before merging stray stores.",
-      "status": "fixed-unreleased",
+      "adjustment": "Released agentic-qe 3.14.5 passed a native macOS fresh WAL chain append check: one sequential and three two-process rounds each yielded 4001 valid rows, with only one concurrent round demonstrably interleaved. Keep ak's live-holder refusal around stray-store backup, import and archive; the probe does not establish old-fork repair, import splice safety, live host behavior, signatures, or Windows/Linux conformance.",
+      "status": "released",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5: ak x aqe-store merge finds the processes holding the root or a stray store by open file (lsof, /proc; the host-session census on Windows) before its backup, its real import and its archive, and refuses while any holds one; there is no force" },
         { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact; refs agentic-qe#759 (issuecomment-5863202746)" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 764; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 764; no release contains it yet" },
+        { "date": "2026-09-29", "event": "released", "note": "npm-integrity-verified 3.14.5 tarball, source-bound native macOS fresh-chain append proof: immediate transaction; 4001 valid rows in sequential control and three synchronized two-process rounds; only round 1 demonstrably interleaved. No old-fork repair, signed-entry, import-splice or live-holder removal claim. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
       ]
     },
     {
@@ -2764,12 +2766,14 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["ak setup invokes aqe init and can inherit its repeat-run settings churn"], "files": [] },
-      "adjustment": "AQE 3.14.4 repeated init rewrites .claude/settings.json, changes domain and learning defaults on the second run, and creates a backup; CLAUDE.md and AGENTS.md hashes and mtimes stayed unchanged. Keep setup convergence claims bounded until a released fix is verified; 3.14.5 behavior has not been established.",
-      "status": "watching",
+      "adjustment": "Released AQE 3.14.5 still rewrites .claude/settings.json on all three same-option public init runs of an unchanged minimal project; run 2 also creates a backup and changes domain/learning defaults. AGENTS.md and CLAUDE.md remain stable after run 1. PR #783 merged after the 3.14.5 publication; wait for a later released artifact and repeat exact conformance before claiming setup convergence or setting a minimum fixed version.",
+      "status": "fixed-unreleased",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-29", "event": "filed", "note": "approved exact draft posted; remote title and body match receipt" },
-        { "date": "2026-09-29", "event": "registered", "note": "3.14.4 disposable project repro: settings changed on all three runs; guidance hashes and mtimes did not" }
+        { "date": "2026-09-29", "event": "registered", "note": "3.14.4 disposable project repro: settings changed on all three runs; guidance hashes and mtimes did not" },
+        { "date": "2026-09-29", "event": "closed", "note": "upstream completed via PR #783; merge commit 63d3deb dated 13:05:19 UTC, after npm 3.14.5 publication at 10:08:33 UTC" },
+        { "date": "2026-09-29", "event": "reviewed", "note": "Source-bound released 3.14.5 disposable public init still churns settings on each of three same-option runs, with backup and default changes on run 2. Subsequent release conformance unverified; global 3.14.4 metadata unchanged. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
       ]
     }
   ]
