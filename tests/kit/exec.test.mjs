@@ -31,12 +31,13 @@ for (const [name, options] of [
       require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
       setInterval(()=>{},1000);`;
     let pids = [];
+    let pending;
     try {
       const launch = () => run(process.execPath, ['-e', code], {
         input: options.input, timeout: 5_000,
         ...(options.inherited ? {} : { signal: controller.signal }),
       });
-      const pending = options.inherited ? withAbortSignal(controller.signal, launch) : launch();
+      pending = options.inherited ? withAbortSignal(controller.signal, launch) : launch();
       assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true, 'owned children started');
       pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
       assert.equal(isAlive(pids[1]), true, 'grandchild alive before abort');
@@ -52,6 +53,8 @@ for (const [name, options] of [
           try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
         }
       }
+      await pending;
+      assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true, 'fixture children exited');
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -96,12 +99,24 @@ for (const stop of ['abort', 'timeout']) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-exited-root-'));
     const pidFile = path.join(dir, 'pids.json');
     const exitFile = path.join(dir, 'parent-exit');
+    const readyFile = path.join(dir, 'descendant-ready');
     const controller = new AbortController();
+    // libuv's Windows Job Object kills non-detached children when their
+    // parent exits. unref() alone only releases the event-loop reference.
+    // Deliberately escape that job while retaining the real output handles.
+    const descendant = `require('node:fs').writeFileSync(${JSON.stringify(readyFile)},'ready');
+      setTimeout(()=>{},10000);`;
     const code = `const {spawn}=require('node:child_process');
-      const gc=spawn(process.execPath,['-e','setTimeout(()=>{},5000)'],{stdio:['ignore','inherit','inherit']});
+      const fs=require('node:fs');
+      const gc=spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{
+        detached:process.platform==='win32',stdio:['ignore','inherit','inherit']});
       gc.unref();
-      require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
-      process.on('exit',()=>require('node:fs').writeFileSync(${JSON.stringify(exitFile)},'yes'));`;
+      fs.writeFileSync(${JSON.stringify(pidFile)},JSON.stringify([process.pid,gc.pid]));
+      const ready=setInterval(()=>{
+        if(fs.existsSync(${JSON.stringify(readyFile)})) clearInterval(ready);
+      },10);
+      setTimeout(()=>process.exit(2),4000).unref();
+      process.on('exit',()=>fs.writeFileSync(${JSON.stringify(exitFile)},'yes'));`;
     let pids = [];
     let pending;
     try {
@@ -111,6 +126,7 @@ for (const stop of ['abort', 'timeout']) {
       });
       assert.equal(await waitUntil(() => fs.existsSync(pidFile)), true);
       pids = JSON.parse(fs.readFileSync(pidFile, 'utf8'));
+      assert.equal(await waitUntil(() => fs.existsSync(readyFile)), true, 'descendant initialized');
       assert.equal(await waitUntil(() => fs.existsSync(exitFile)), true, 'direct child exited');
       await new Promise((resolve) => setTimeout(resolve, 100));
       assert.equal(isAlive(pids[1]), true, 'descendant still owns the output pipe');
@@ -129,6 +145,7 @@ for (const stop of ['abort', 'timeout']) {
         }
       }
       await pending;
+      assert.equal(await waitUntil(() => pids.every((pid) => !isAlive(pid))), true, 'fixture children exited');
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
