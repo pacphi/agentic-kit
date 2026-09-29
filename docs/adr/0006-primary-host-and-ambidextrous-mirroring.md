@@ -2,7 +2,10 @@
 
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
-- **Updated:** 2026-09-28
+- **Updated:** 2026-09-29
+- **Latest update note (2026-09-29):** The Codex balanced tier is now `gpt-6.1-sol`; `gpt-6-sol` is
+  `tier: 'prior'`, so a pinned `gpt-6-sol` route mirrors to the Claude prior tier, as other prior pins do.
+  See `docs/archive/2026-09-29-audit-gpt-6-1-sol.md`.
 - **Update note:** Balanced tier moved to `claude-sonnet-5-5` (same per-token price
   as `claude-sonnet-5`; Anthropic's first-party benchmarks show it strictly ahead on every axis
   checked). `claude-sonnet-5` is retained at `tier: 'prior'` for user pins, so a pinned route now
@@ -60,7 +63,7 @@ orchestrator stays symmetric underneath.
   (routing, escalation, status severity, dashboard indicator) following symmetrically.
 - The default (claude-primary) is unchanged, so existing repos see no difference.
 - The mirror pairs models by tier. Both hosts carry `reasoning`, `balanced` and `fast` tiers
-  (`claude-opus-5-5` ↔ `gpt-6-astra`, `claude-sonnet-5-5` ↔ `gpt-6-sol`, Haiku ↔ `gpt-6-luna`), so
+  (`claude-opus-5-5` ↔ `gpt-6-astra`, `claude-sonnet-5-5` ↔ `gpt-6.1-sol`, Haiku ↔ `gpt-6-luna`), so
   reasoning work and escalation land on the same tier whichever host drives. A model with no
   same-tier twin uses an explicit `pairs` entry (`claude-fable-5-1` → `gpt-6-astra`), else the
   counterpart host's recommended model. Users tune per activity with `--route`.

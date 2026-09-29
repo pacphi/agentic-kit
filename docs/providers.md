@@ -480,7 +480,7 @@ reasoning model and escalation steps up a tier either way:
 | Tier | Claude | Codex |
 |---|---|---|
 | reasoning | `claude-opus-5-5` | `gpt-6-astra` |
-| balanced | `claude-sonnet-5-5` | `gpt-6-sol` |
+| balanced | `claude-sonnet-5-5` | `gpt-6.1-sol` |
 | fast | `claude-haiku-4-5-20251001` | `gpt-6-luna` |
 
 With Codex leading, architecture, design, security-analysis and debugging run on `gpt-6-astra`,
@@ -535,8 +535,12 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 |---|---|---|
 | specification, review, release | claude | `claude-sonnet-5-5` |
 | architecture, design, debugging, security-analysis | claude | `claude-opus-5-5` |
-| implementation, testing, security-scan | codex | `gpt-6-sol` |
+| implementation, testing, security-scan | codex | `gpt-6.1-sol` |
 | documentation, packaging | codex | `gpt-6-luna` |
+
+A machine seeded before `gpt-6.1-sol` became the default keeps `gpt-6-sol` on those routes;
+`ak status` reports the difference and `ak host reset-routes` adopts the new default. `gpt-6-sol` stays
+selectable as a prior-tier model.
 
 *(packaging & release are `ak`-added — ruflo ships templates for feature/security/refactor only.)*
 

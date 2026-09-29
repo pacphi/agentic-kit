@@ -1239,15 +1239,17 @@ documentation and are the most drift-prone entries in the file — this is
 explicitly why `PRICES_AS_OF` is surfaced in the UI (`u-asof`,
 `dashboard/client.mjs`) rather than assumed current.
 
-Standard USD rates per million tokens, verified 2026-09-23 against
+Standard USD rates per million tokens, verified 2026-09-23 (GPT-6.1 Sol: 2026-09-29) against
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and the
 individual model pages for [Astra](https://developers.openai.com/api/docs/models/gpt-6-astra),
-[GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol) and
+[GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol),
+[GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol) and
 [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna):
 
 | Model (kit key) | Input | Output | Cache read |
 |---|---|---|---|
 | `gpt-6-astra` | $10 | $50 | $1 |
+| `gpt-6.1-sol` | $2 | $10 | $0.10 |
 | `gpt-6-sol` | $2 | $10 | $0.20 |
 | `gpt-6-luna` | $0.10 | $0.50 | $0.01 |
 | `gpt-5.6-sol` | $4 | $20 | $0.40 |
@@ -1258,6 +1260,7 @@ individual model pages for [Astra](https://developers.openai.com/api/docs/models
 
 GPT-6 and GPT-5.6 cache writes cost 1.25× input (Astra $12.50, GPT-6 Sol
 $2.50, GPT-6 Luna $0.125/MTok), using the existing cache-write arithmetic.
+GPT-6.1 Sol reads cache at 0.05× input, half of GPT-6 Sol's 0.1×; its writes are 1.25× ($2.50).
 Do not confuse GPT-6 Sol ($2/$10) with GPT-5.6 Sol ($4/$20); both are current. Sol's promotional rate has no confirmed end date:
 OpenAI says at least through 2026-11-21, so no future reversion is invented.
 These are API list-price equivalents, not subscription charges or access guarantees.
