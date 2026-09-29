@@ -40,6 +40,6 @@ test('enforces lower-case markdown names and root documents', () => {
 });
 
 test('the tracked tree follows the documentation layout', () => {
-  const files = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean);
+  const files = execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean); // spawn-env: inherits (read-only git query on this checkout)
   assert.deepEqual(layoutProblems({ files, read: (file) => fs.readFileSync(file, 'utf8') }), []);
 });
