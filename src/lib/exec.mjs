@@ -8,13 +8,15 @@
 // breaks out into a second command). The actual fix is resolving the shim to
 // its real file on PATH. Native .com/.exe files run directly. A .cmd shim is
 // never passed to spawn: Node does not execute batch files without a shell.
-// Instead, its sibling .ps1 shim runs through Windows PowerShell's `-File`
-// interface, preserving every caller argument as a separate argv element.
+// An exact recognized npm wrapper pair launches its declared public bin with
+// Node directly, preserving interactive stdio and literal argv. Other wrappers
+// keep their sibling .ps1 through Windows PowerShell's `-File` interface.
 import { spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isWindows } from './paths.mjs';
+import { npmShimInvocation, windowsEnvValue, mergeWindowsEnv } from './windows-npm-shim.mjs';
 
 const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
 
@@ -36,18 +38,20 @@ const CMD_SHIMS = new Set([
 
 /** Build a shell-free invocation for `cmd`, trying Windows' shim extensions in
  *  PATHEXT order. A native executable is launched directly; a .cmd shim is
- *  accepted only when its sibling .ps1 and system PowerShell both exist.
+ *  mapped to its own public Node bin only for an exact recognized npm wrapper
+ *  pair; other .cmd wrappers require a sibling .ps1 and system PowerShell.
  *  Falls back to the bare name with resolved:false when no safe target exists.
  *  Exported: the execution adapters spawn these CLIs directly (subprocess.mjs
  *  for claude/codex, opencode.mjs for the serve child, x/ruflo-mcp.mjs for the
  *  Ruflo MCP launcher) and must share the same
  *  resolution `run()`/`have()` use, or readiness passes but launch ENOENTs on
- *  Windows (swarm review, #88). */
-export function resolveShim(cmd, args = [], { windows = isWindows, env = process.env } = {}) {
+ *  Windows (swarm review, #88). `npmBin:false` retains the PowerShell boundary
+ *  for native diagnostics. */
+export function resolveShim(cmd, args = [], { windows = isWindows, env = process.env, npmBin = true } = {}) {
   const direct = { command: cmd, args: [...args], resolved: !windows };
   if (!windows) return direct;
 
-  const systemRoot = env.SystemRoot || env.WINDIR;
+  const systemRoot = windowsEnvValue(env, 'SystemRoot') || windowsEnvValue(env, 'WINDIR');
   const powershell = systemRoot
     ? path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     : null;
@@ -59,7 +63,10 @@ export function resolveShim(cmd, args = [], { windows = isWindows, env = process
     if (ext === '.com' || ext === '.exe' || !ext) {
       return { command: candidate, args: [...args], resolved: true };
     }
-    if (ext !== '.cmd' || !powershell) return null;
+    if (ext !== '.cmd') return null;
+    const npm = npmBin ? npmShimInvocation(candidate, args, env) : null;
+    if (npm) return npm;
+    if (!powershell) return null;
     const script = `${candidate.slice(0, -ext.length)}.ps1`;
     try {
       if (!fs.statSync(script).isFile() || !fs.statSync(powershell).isFile()) return null;
@@ -75,15 +82,21 @@ export function resolveShim(cmd, args = [], { windows = isWindows, env = process
   };
 
   if (path.isAbsolute(cmd)) return invocationFor(cmd) ?? direct;
-  const exts = (env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+  const exts = (windowsEnvValue(env, 'PATHEXT') || '.COM;.EXE;.BAT;.CMD')
     .split(';')
     .map((ext) => ext.trim())
     .filter(Boolean);
-  for (const dir of (env.PATH || env.Path || '').split(path.delimiter)) {
+  for (const dir of (windowsEnvValue(env, 'PATH') || '').split(path.delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
-      const invocation = invocationFor(path.join(dir, cmd + ext.toLowerCase()));
+      const candidate = path.join(dir, cmd + ext.toLowerCase());
+      const invocation = invocationFor(candidate);
       if (invocation) return invocation;
+      // An earlier custom/unusable .cmd still selects this installation. Do
+      // not silently switch to a later package because its shim is recognized.
+      if (ext.toLowerCase() === '.cmd') {
+        try { if (fs.statSync(candidate).isFile()) return direct; } catch { /* absent */ }
+      }
     }
   }
   return direct;
@@ -268,8 +281,9 @@ function runOwned(command, args, execOpts, { windows, input }) {
  *  `runOwned` keeps that payload out of the process table. */
 export async function run(cmd, args = [], opts = {}) {
   try {
-    const env = opts.env ? { ...process.env, ...opts.env } : process.env;
     const windows = opts.windows ?? isWindows;
+    const env = opts.env
+      ? (windows ? mergeWindowsEnv(process.env, opts.env) : { ...process.env, ...opts.env }) : process.env;
     const invocation = CMD_SHIMS.has(cmd)
       ? resolveShim(cmd, args, { windows, env })
       : { command: cmd, args };

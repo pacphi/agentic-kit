@@ -20,7 +20,7 @@ const input = `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', p
 } })}\n`;
 
 test('diagnose installed Ruflo Windows public shim versus installed bin transport', {
-  skip: process.env.AK_RUFLO_WINDOWS_DIAGNOSTIC !== '1', timeout: 120000,
+  skip: process.env.AK_RUFLO_WINDOWS_DIAGNOSTIC !== '1', timeout: 180000,
 }, async () => {
   assert.equal(process.platform, 'win32', 'diagnostic requires native Windows');
   const packageRoot = process.env.AK_RUFLO_PACKAGE_ROOT;
@@ -46,14 +46,17 @@ test('diagnose installed Ruflo Windows public shim versus installed bin transpor
     fs.writeFileSync(path.join(root, 'claude-flow.config.json'), JSON.stringify({ daemon: { autostart: false } }));
     const invocation = resolveShim('ruflo', ['mcp', 'start'], { env });
     assert.equal(invocation.resolved, true, 'installed public shim must resolve');
-    const scriptIndex = invocation.args.indexOf('-File');
+    const powershell = resolveShim('ruflo', ['mcp', 'start'], { env, npmBin: false });
+    const scriptIndex = powershell.args.indexOf('-File');
     assert.ok(scriptIndex >= 0, 'receipt requires the native PowerShell transport');
-    const shim = invocation.args[scriptIndex + 1];
+    const shim = powershell.args[scriptIndex + 1];
+    const cmdShim = shim.slice(0, -4) + '.cmd';
     const version = await scope.launch(resolveShim('ruflo', ['--version'], { env }),
       { cwd: root, env, timeoutMs: 10000 });
     console.log(JSON.stringify({ diagnostic: 'inputs', node: process.version, uv: process.versions.uv,
       platform: process.platform, packageVersion: pkg.version, version,
-      packageSha: sha(packageFile), bin, binSha: sha(bin), invocation,
+      packageSha: sha(packageFile), bin, binSha: sha(bin), invocation, powershell,
+      cmdSha: sha(cmdShim), cmdSource: fs.readFileSync(cmdShim, 'utf8').slice(0, 8192),
       shimSha: sha(shim), shimSource: fs.readFileSync(shim, 'utf8').slice(0, 8192),
       sourceSha: sha(new URL(import.meta.url)),
       launcherSha: sha(new URL('./ruflo-windows-diagnostic-process.mjs', import.meta.url)) }));
@@ -65,8 +68,8 @@ test('diagnose installed Ruflo Windows public shim versus installed bin transpor
     fs.writeFileSync(legacyShim, `& '${process.execPath.replaceAll("'", "''")}' -e $args[0]\nexit $LASTEXITCODE\n`);
     const legacyCode = `const {spawn}=require('node:child_process');
       require('node:fs').writeFileSync(${JSON.stringify(marker)},JSON.stringify([process.pid]));`;
-    const legacy = await scope.launch({ command: invocation.command, args: [
-      ...invocation.args.slice(0, scriptIndex + 1), legacyShim, legacyCode,
+    const legacy = await scope.launch({ command: powershell.command, args: [
+      ...powershell.args.slice(0, scriptIndex + 1), legacyShim, legacyCode,
     ] }, { cwd: root, env, timeoutMs: 5000 });
     console.log(JSON.stringify({ diagnostic: 'legacy-multiline-node-e',
       marker: fs.existsSync(marker), ...legacy }));
@@ -74,6 +77,8 @@ test('diagnose installed Ruflo Windows public shim versus installed bin transpor
     for (const [transport, spec, eof] of [
       ['public-open-stdin', invocation, false],
       ['public-eof', invocation, true],
+      ['powershell-open-stdin', powershell, false],
+      ['powershell-eof', powershell, true],
       ['installed-bin-open-stdin', { command: process.execPath, args: [bin, 'mcp', 'start'] }, false],
     ]) {
       const observation = await scope.launch(spec, { cwd: root, env, input, endInput: eof,
