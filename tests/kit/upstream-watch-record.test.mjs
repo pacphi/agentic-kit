@@ -75,6 +75,7 @@ test('a released fix fires the routine with its id, version and branch, and the 
     assert.match(result.notice.body, /\nThe full record: `node scripts\/upstream-watch\.mjs ledger --recorded-since 2026-09-26T23:00:00Z`\n$/);
     assert.deepEqual(result.dispatchErrors, []);
     assert.deepEqual(result.wouldFire, [], 'a real run lists nothing it would fire');
+    assert.deepEqual(result.deferred, [], 'nothing deferred within the per-run cap');
   });
 });
 
@@ -153,7 +154,7 @@ test('a ledger commit that cannot be built after a firing keeps the session link
 test('record is blind (exit 3) when gh, the ledger, the registry or every upstream thread fails', async () => {
   await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
     const offline = await record(file, [], { fetcher: fixtureFetcher({ authenticated: false }) });
-    assert.deepEqual([offline.code, offline.result.blind, offline.ledgerStore.built, offline.result.wouldFire, offline.result.fired], [3, true, [], [], []]);
+    assert.deepEqual([offline.code, offline.result.blind, offline.ledgerStore.built, offline.result.wouldFire, offline.result.deferred, offline.result.fired], [3, true, [], [], [], []]);
     const broken = { read: async () => { throw new Error('events.ndjson line 2 is not JSON'); }, build: async () => { throw new Error('not called'); } };
     const unreadable = await record(file, [], { ledgerStore: broken });
     assert.equal(unreadable.code, 3);
