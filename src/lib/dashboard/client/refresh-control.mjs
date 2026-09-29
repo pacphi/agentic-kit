@@ -3,8 +3,18 @@ import { authHeaders } from './bootstrap.mjs';
 import { reloadView } from './poll.mjs';
 import { mntRefreshActiveDestination } from './maintenance-workspace.mjs';
 
-var refreshBusy=false,refreshStartedAt=0,refreshRenderedBusy=null;
+var refreshBusy=false,refreshStartedAt=0,refreshStartedIso=null,refreshRenderedBusy=null;
 export function refreshRunning(){return refreshBusy;}
+function validRefreshState(state){
+  return !!state&&Number.isFinite(Date.parse(state.startedAt))
+    &&typeof state.running==='boolean'&&Array.isArray(state.stages)
+    &&(state.running||typeof state.ok==='boolean');
+}
+function currentRefreshState(state){
+  if(!validRefreshState(state))return false;
+  if(refreshStartedIso!==null)return state.startedAt===refreshStartedIso;
+  return Date.parse(state.startedAt)>=refreshStartedAt;
+}
 function refreshText(state){
   var stages=state&&state.stages||[];
   var active=stages.find(function(stage){return stage.state==='running';});
@@ -30,30 +40,50 @@ function renderRefresh(state){
 }
 function refreshPoll(){
   if(!refreshBusy)return;
-  fetch('/api/refresh',{cache:'no-store',headers:authHeaders()}).then(function(response){return response.json();})
+  fetch('/api/refresh',{cache:'no-store',headers:authHeaders()}).then(function(response){
+    if(!response.ok)throw new Error('Refresh status unavailable.');
+    return response.json();
+  }).then(function(state){
+    if(!currentRefreshState(state))throw new Error('Refresh status was incomplete or belonged to another run.');
+    if(refreshStartedIso===null)refreshStartedIso=state.startedAt;
+    return state;
+  })
     .then(function(state){
       if(!refreshBusy)return;
       if(state.running){renderRefresh(state);setTimeout(refreshPoll,1500);return;}
       refreshBusy=false;renderRefresh(state);reloadView(true);
     }).catch(function(){
-      refreshBusy=false;renderRefresh(null);
-      var status=document.getElementById('refresh-status');if(status)status.textContent='Refresh status could not be read.';
+      if(!refreshBusy)return;
+      var status=document.getElementById('refresh-status');if(status)status.textContent='Refresh status unavailable; retrying…';
+      setTimeout(refreshPoll,1500);
     });
 }
 export function startRefresh(strength,options){
   if(refreshBusy)return Promise.resolve(false);
-  refreshBusy=true;refreshStartedAt=Date.now();renderRefresh({running:true,stages:[]});
+  refreshBusy=true;refreshStartedAt=Date.now();refreshStartedIso=null;renderRefresh({running:true,stages:[]});
   var body={strength:strength||'local'};
   if(strength==='machine'&&options&&options.projectTrees)body.projectTrees=true;
   return fetch('/api/refresh',{method:'POST',headers:Object.assign({'content-type':'application/json'},authHeaders()),body:JSON.stringify(body)})
-    .then(function(response){return response.json().then(function(state){return {response:response,state:state};});})
+    .then(function(response){return response.json().catch(function(){return null;}).then(function(state){return {response:response,state:state};});})
     .then(function(result){
-      if(!result.response.ok)throw new Error(result.state.error||'Refresh could not start.');
-      renderRefresh(result.state.state);setTimeout(refreshPoll,1500);return true;
-    }).catch(function(error){
-      refreshBusy=false;renderRefresh(null);
-      var status=document.getElementById('refresh-status');if(status)status.textContent=error.message;
-      return false;
+      if(!result.response.ok){
+        refreshBusy=false;renderRefresh(null);
+        var rejected=document.getElementById('refresh-status');
+        if(rejected)rejected.textContent=result.state&&result.state.error||'Refresh could not start.';
+        return false;
+      }
+      if(validRefreshState(result.state&&result.state.state)){
+        refreshStartedIso=result.state.state.startedAt;
+        renderRefresh(result.state.state);
+      }
+      else{var pending=document.getElementById('refresh-status');if(pending)pending.textContent='Checking refresh status…';}
+      setTimeout(refreshPoll,1500);return true;
+    }).catch(function(){
+      // The POST may have reached the server before the network failed. Keep
+      // writes blocked until a valid operation state establishes completion.
+      var status=document.getElementById('refresh-status');
+      if(status)status.textContent='Refresh request outcome unavailable; checking status…';
+      setTimeout(refreshPoll,1500);return null;
     });
 }
 export function wireRefresh(){

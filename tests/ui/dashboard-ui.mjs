@@ -1328,7 +1328,8 @@ async function main() {
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const loc = m.location();
-    if (/status of 409 \(Conflict\)/.test(m.text()) && loc?.url && expectedHttpConsoleErrors.delete(loc.url)) return;
+    if (/status of (?:409 \(Conflict\)|503 \(Service Unavailable\))/.test(m.text())
+      && loc?.url && expectedHttpConsoleErrors.delete(loc.url)) return;
     const where = loc?.url ? ` @ ${loc.url}` : '';
     consoleErrors.push(`${m.text()}${where}`);
   });
@@ -5811,6 +5812,51 @@ async function main() {
           && refresh.getBoundingClientRect().right <= globalThis.innerWidth;
       }));
     await page.setViewportSize({ width: 1440, height: 900 });
+    check('wide dark screenshot has the dark theme at capture time',
+      await page.evaluate(() => document.documentElement.getAttribute('data-theme') === 'dark'
+        && getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() === '#000000'));
+    await page.screenshot({ path: path.join(SHOTS, 'refresh-header-dark-1440.png'), animations: 'disabled' });
+
+    // A rejected status read cannot release the write guard for an operation
+    // this page already started. The next valid state reconciles it.
+    await page.click('[data-system-view="maintenance"]');
+    await page.click('[data-mnt-dest="guidance"]');
+    await page.waitForSelector('[data-mnt-plan-plc]');
+    let releaseStatusStage;
+    refreshStageGates.set('maintenance', new Promise(resolve => { releaseStatusStage = resolve; }));
+    let statusFailures = 2;
+    const rejectStatus = route => {
+      if (route.request().method() === 'GET' && statusFailures > 0) {
+        statusFailures--;
+        if (statusFailures === 1) expectedHttpConsoleErrors.add(route.request().url());
+        return route.fulfill(statusFailures === 1
+          ? { status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporary status failure' }) }
+          : { status: 200, contentType: 'application/json', body: JSON.stringify({ running: 'unknown', stages: [] }) });
+      }
+      return route.continue();
+    };
+    await page.route('**/api/refresh', rejectStatus);
+    const rejectedStatus = page.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh' && response.status() === 503);
+    await page.click('#refresh-run');
+    await rejectedStatus;
+    await page.waitForFunction(() => /retry/i.test(document.getElementById('refresh-status')?.textContent || ''));
+    check('rejected refresh-status GET keeps the owned operation and Maintenance writes blocked',
+      await page.locator('#refresh-run').isDisabled()
+        && await page.locator('[data-mnt-plan-plc]').first().isDisabled()
+        && /retry/i.test(await page.locator('#refresh-status').innerText()));
+    const readsAfterError = refreshRequests.filter(request => request.method === 'GET').length;
+    await page.waitForTimeout(1700);
+    check('refresh-status read retries after non-2xx JSON and keeps invalid success state blocked',
+      refreshRequests.filter(request => request.method === 'GET').length > readsAfterError
+        && await page.locator('#refresh-run').isDisabled()
+        && await page.locator('[data-mnt-plan-plc]').first().isDisabled());
+    releaseStatusStage();
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.', null, { timeout: 8000 });
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
+    check('owned refresh completes after status recovery and then unblocks writes',
+      await page.locator('#refresh-run').isEnabled()
+        && await page.locator('[data-mnt-plan-plc]').first().isEnabled());
+    await page.unroute('**/api/refresh', rejectStatus);
 
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does
