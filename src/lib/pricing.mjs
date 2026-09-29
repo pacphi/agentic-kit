@@ -99,6 +99,14 @@ export const PRICES = {
   'claude-opus-4-7': anthropic(5, 25),
   'claude-opus-4-6': anthropic(5, 25),
   'claude-opus-4-5': anthropic(5, 25),
+  // Sonnet 5.5 (released 2026-09-28) launched at the SAME per-token rate as
+  // Sonnet 5 — $2/$10, cache read at the standard 0.1x ($0.20), no per-entry
+  // multiplier override needed (unlike Opus 5.5's 0.05x). It still needs its
+  // own key: without one it resolves via the token-boundary prefix matcher to
+  // the 'claude-sonnet-5' entry above, which is a numeric no-op today but
+  // would silently mis-price it the moment Anthropic's rates diverge
+  // (platform.claude.com/docs/en/about-claude/pricing, verified 2026-09-28).
+  'claude-sonnet-5-5': anthropic(2, 10, { asOf: '2026-09-28' }),
   // Anthropic canceled the September 1 increase; $2/$10 is now standard.
   // https://platform.claude.com/docs/en/about-claude/pricing (2026-09-08).
   'claude-sonnet-5': anthropic(2, 10, { asOf: '2026-09-08' }),

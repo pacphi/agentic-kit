@@ -57,7 +57,7 @@ test('escalation steps up to the reasoning tier whichever host drives', () => {
   const codexLed = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' });
   for (const act of ['implementation', 'testing']) {
     assert.deepEqual(claudeLed[act].escalation, [{ host: 'claude', model: 'claude-opus-5-5' }], act);
-    assert.equal(codexLed[act].model, 'claude-sonnet-5', act);
+    assert.equal(codexLed[act].model, 'claude-sonnet-5-5', act);
     assert.deepEqual(codexLed[act].escalation, [{ host: 'codex', model: 'gpt-6-astra' }], act);
   }
 });
@@ -66,8 +66,8 @@ test('tier pairs mirror both ways, and flagship pins reach Astra through an expl
   assert.equal(swapHostModel('claude', 'claude-opus-5-5').model, 'gpt-6-astra');
   assert.equal(swapHostModel('codex', 'gpt-6-astra').model, 'claude-opus-5-5');
   assert.equal(swapHostModel('claude', 'claude-fable-5-1').model, 'gpt-6-astra');
-  assert.equal(swapHostModel('claude', 'claude-sonnet-5').model, 'gpt-6-sol');
-  assert.equal(swapHostModel('codex', 'gpt-6-sol').model, 'claude-sonnet-5');
+  assert.equal(swapHostModel('claude', 'claude-sonnet-5-5').model, 'gpt-6-sol');
+  assert.equal(swapHostModel('codex', 'gpt-6-sol').model, 'claude-sonnet-5-5');
   assert.equal(swapHostModel('claude', 'claude-haiku-4-5-20251001').model, 'gpt-6-luna');
   assert.equal(swapHostModel('codex', 'gpt-6-luna').model, 'claude-haiku-4-5-20251001');
 });

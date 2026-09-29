@@ -77,7 +77,7 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // WITHOUT saying "per-token" gets read as cost-per-task, which is the axis users
 // actually pay on. No workload benchmark is embedded in this catalog; notes
 // describe curated roles, not measured superiority.
-export const MODEL_CATALOG_VERIFIED = '2026-09-23';
+export const MODEL_CATALOG_VERIFIED = '2026-09-28';
 export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — compare total tokens, cache use and agentic turns on representative tasks';
 // Tier names are the pairing key for swapHostModel(): a codex tier only mirrors
 // to a claude model (and back) when BOTH catalogs use the same tier string.
@@ -91,7 +91,14 @@ export const MODEL_CATALOG = {
     // recommended default for most workloads, at a lower per-token rate than
     // Opus 5 and 0.05x cache reads. Opus 5 stays listed for user pins.
     { id: 'claude-opus-5-5', tier: 'reasoning', note: 'reasoning-oriented preset; compare agentic turns and per-task cost on representative work' },
-    { id: 'claude-sonnet-5', tier: 'balanced', note: 'balanced preset for review, specification and release work' },
+    // Sonnet 5.5 (released 2026-09-28) is the balanced-tier preset: same
+    // per-token price as Sonnet 5 ($2/$10), but Anthropic's first-party
+    // benchmarks show it strictly ahead on every axis checked (GDPval-AA,
+    // OSWorld, Terminal-Bench, CursorBench) and customer reports cite ~30%
+    // fewer tool calls per task — lower total cost at an unchanged rate. Own
+    // catalog entry per COST_AXIS_NOTE: this is Anthropic's own testing, not
+    // an ak-measured result (anthropic.com/claude-sonnet-5-5, verified 2026-09-28).
+    { id: 'claude-sonnet-5-5', tier: 'balanced', note: 'balanced preset for review, specification and release work' },
     { id: 'claude-fable-5-1', tier: 'flagship', note: 'flagship preset for demanding tasks; availability depends on the host and account' },
     { id: 'claude-haiku-4-5-20251001', tier: 'fast', note: 'fast-tier preset for high-volume mechanical work' },
     // Still current (no deprecation notice) and still pinnable — it is simply no
@@ -99,6 +106,7 @@ export const MODEL_CATALOG = {
     // its cost-per-task trade when a policy is still pointing at it.
     { id: 'claude-opus-4-8', tier: 'prior', note: 'prior-generation option retained for user pins; compare measured per-task results before switching' },
     { id: 'claude-opus-5', tier: 'prior', note: 'prior reasoning preset retained for user pins; compare measured per-task results before switching' },
+    { id: 'claude-sonnet-5', tier: 'prior', note: 'prior balanced preset retained for user pins; compare measured per-task results before switching' },
     { id: 'claude-mythos-5-1', tier: 'restricted', note: 'restricted-access option; entitlement must be established independently' },
     { id: 'claude-fable-5', tier: 'prior', note: 'prior flagship option retained for explicit selection' },
   ],
@@ -107,7 +115,7 @@ export const MODEL_CATALOG = {
     // catalog ranks these first and labels every GPT-5.6 model "Older", and
     // OpenAI's Codex docs make Sol the default preset
     // (learn.chatgpt.com/docs/models, verified 2026-09-23). Tier pairing with the
-    // claude catalog follows role: Sol ↔ Sonnet 5 (balanced, $2/$10 both),
+    // claude catalog follows role: Sol ↔ Sonnet 5.5 (balanced, $2/$10 both),
     // Luna ↔ Haiku (fast), and Astra ↔ Opus 5.5 (reasoning). Astra is the
     // reasoning tier so a Codex-driven seed gets what a Claude-driven one does:
     // reasoning work on the host's reasoning model and an escalation that steps
@@ -259,18 +267,18 @@ export function swapRoute(route) {
 // soft defaults, web-verified (see MODEL_CATALOG_VERIFIED); users override freely.
 const R = (host, model, escalation) => ({ host, model, ...(escalation ? { escalation } : {}) });
 export const DEFAULT_ROUTES = {
-  specification:       R('claude', 'claude-sonnet-5'),
+  specification:       R('claude', 'claude-sonnet-5-5'),
   architecture:        R('claude', 'claude-opus-5-5'),
   design:              R('claude', 'claude-opus-5-5'),
   implementation:      R('codex',  'gpt-6-sol', [{ host: 'claude', model: 'claude-opus-5-5' }]),
   testing:             R('codex',  'gpt-6-sol', [{ host: 'claude', model: 'claude-opus-5-5' }]),
-  review:              R('claude', 'claude-sonnet-5'),
+  review:              R('claude', 'claude-sonnet-5-5'),
   'security-scan':     R('codex',  'gpt-6-sol'),
   'security-analysis': R('claude', 'claude-opus-5-5'),
   documentation:       R('codex',  'gpt-6-luna'),
   debugging:           R('claude', 'claude-opus-5-5'),
   packaging:           R('codex',  'gpt-6-luna'),
-  release:             R('claude', 'claude-sonnet-5'),
+  release:             R('claude', 'claude-sonnet-5-5'),
 };
 
 // Curated aqe agent-type → activity map for the agentOverrides projection.
