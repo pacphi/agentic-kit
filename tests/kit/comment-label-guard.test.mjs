@@ -21,6 +21,23 @@ test('finds ordinary and member test titles including template segments', () => 
   assert.equal(inspectCommentLabels('test(`Task 3: ${value}`, () => {});').length, 1);
 });
 
+test('ignores ordinary member calls and parameterized test data', () => {
+  for (const source of [
+    '/Task/.test("Task 1");',
+    'const pattern = /Task/; pattern.test("Task 1");',
+    'const t = /Task/; t.test("Task 1");',
+    'test.log("Task 1");',
+    'describe.toString("Task 1");',
+    'other.test("Task 1");',
+    'test.each("Task 1")("ordinary title", () => {});',
+  ]) assert.deepEqual(inspectCommentLabels(source), [], source);
+});
+
+test('recognizes lexically declared nested Node test contexts', () => {
+  assert.equal(inspectCommentLabels('test("outer", async (context) => { await context.test("Task 1", async (child) => { await child.test("Task 2", () => {}); }); });').length, 2);
+  assert.deepEqual(inspectCommentLabels('other("outer", (context) => { context.test("Task 1"); });'), []);
+});
+
 test('ignores strings, URLs, regular expressions, template text and durable audit IDs', () => {
   const source = String.raw`
 const url = 'https://example.test/Task 1';
