@@ -26,7 +26,7 @@ import path from 'node:path';
 import { MANAGED_COMPANION_REGISTRY } from '../adapters/companion-registry.mjs';
 import { HOST_REGISTRY } from '../adapters/registries.mjs';
 import {
-  home, isWindows, globalRoot, npxCacheDir, claudeDir, codexPluginCacheDir,
+  home, isWindows, globalRoot, npxCacheDir, claudeDir, codexPluginCacheDir, xdgBase,
 } from '../paths.mjs';
 import { installedVersion, KIT_PKG } from '../versions.mjs';
 import { kbDir, present as brainPresent, installedVersion as brainVersion } from '../ruvnet-brain.mjs';
@@ -580,7 +580,7 @@ function vibiumCachePath({ env, platform }) {
   if (platform === 'win32') {
     return path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'vibium');
   }
-  return path.join(env.XDG_CACHE_HOME || path.join(home, '.cache'), 'vibium');
+  return path.join(xdgBase('XDG_CACHE_HOME', path.join(home, '.cache'), { env }), 'vibium');
 }
 
 const presentFile = (file, fsImpl) => {
