@@ -290,7 +290,9 @@ turns`.
 
 ```text
 eligible = responses > 0 OR positive Codex component usage OR retained OpenCode observations
-sessions = count of eligible records with non-null end >= cutoff (and end < previous-window end)
+current.sessions = count of eligible records with non-null end >= cutoff (no upper bound)
+windowStart = now - days × DAY_MS
+previous.sessions = count of eligible records with windowStart - days × DAY_MS <= end < windowStart
 responses = Σ over included sessions of accountedResponses (else responses)
 ```
 
@@ -299,7 +301,9 @@ responses = Σ over included sessions of accountedResponses (else responses)
 - Filter: `buildSessionRows` (`usage-aggregate.mjs:970-982`) accepts response-bearing records,
   positive Codex component usage or retained OpenCode observations. An unknown end or an end
   outside the requested window is excluded. Refused OpenCode acquisitions retain uncertainty
-  separately without becoming ordinary session rows.
+  separately without becoming ordinary session rows. The current projection supplies no
+  upper bound; `previousWindow` (`usage-aggregate.mjs:1274-1281`) supplies the exclusive
+  `windowStart` upper bound and derives both bounds from displayed `days` and `now`.
 - `responses` accumulation: Claude increments once per API message id — every
   transcript line of one message counts once, the last line's usage winning
   (`usage-parsers.mjs:708-753`); Codex increments per `agent_message` event
@@ -997,15 +1001,20 @@ mistake this split exists to prevent (`usage-aggregate.mjs:994`,
   (`claude`, `codex`, `opencode`). This is what the host cards render.
   It is a fact about the file's provenance on disk, and it proves nothing
   about which vendor served the tokens.
-- **`byProvider`** — the inference-provider string **as recorded**, ungated:
-  `s.provider ?? 'unknown'`. This map keeps its historical name and its
-  historical shape for callers that want the raw string, whatever its
-  evidence. A session that recorded no provider keys to `'unknown'`.
+- **`byProvider`** — OpenCode response, token and cost totals are split by the provider on each
+  assistant usage row, with missing row providers in `unknown`. `foldSessionUsageRows`
+  (`usage-aggregate.mjs:791-815`) accumulates these per-provider shares; the second pass applies
+  them at this call: `addTo(bucket(byProvider, provider), { ...s, ...usage })`
+  (`usage-aggregate.mjs:1083-1092`). Each response/token/cost share lands once, but one session
+  counts once under **each** provider it used. Provider session counts therefore need not sum
+  to the overall session count; they are not disjoint session populations.
 
-`byProvider` uses the served session row's recorded inference provider, or `unknown`.
-Codex session metadata/turn context and OpenCode assistant `providerID` can establish
-that value with observed provenance; Claude history normally leaves it absent. The
-Scorecard UI does not rank this map, but session details expose provider/provenance.
+When there are no per-row provider shares, the fallback uses the session's recorded provider,
+`s.provider ?? 'unknown'`, with its accounted response count at this call: `addTo`
+(`usage-aggregate.mjs:1091`).
+Codex session metadata/turn context and OpenCode assistant `providerID` supply observed metadata;
+Claude history normally leaves the session provider absent. These facts are not network
+attestation. The Scorecard UI does not rank this map, but session details expose provider/provenance.
 The source's former parser field is retained separately as `transcriptProvider`.
 
 **What this does not model:** a workflow that hands off between Claude and
@@ -1843,13 +1852,17 @@ evidence must never read as a posture.
 **Formula:**
 
 ```text
-source              = (session.sidechain || session.threadSource == 'subagent')
-                      ? 'subagent' : 'main'
+delegated           = isSubagentSession(session)
+                      OR session.threadSource IN ['guardian_review', 'agent_created_thread']
+source              = delegated ? 'subagent' : 'main'
 bySource[k].cost    = Σ over sessions with that source of session.cost
 centre of the donut = round(main / (main + subagent) × 100) %
 ```
 
-**Source:** `sourceKey` (`usage-aggregate.mjs:1013-1017`). Both rows are created,
+**Source:** `sourceKey` (`usage-aggregate.mjs:1013-1017`) uses the shared
+`isSubagentSession` predicate (`usage-context.mjs:20-23`) and explicitly includes guardian reviews
+and agent-created threads. The same source classification gates `humanPrompts`: only main-session
+prompts enter the autonomy denominator (`usage-aggregate.mjs:1051-1054`). Both rows are created,
 at this call to it, before the fold
 ("Both source rows always exist", `usage-aggregate.mjs:1044-1048`) so "no subagent sessions" renders
 as a zero rather than a row the UI silently drops. Claude's evidence is the
@@ -2152,7 +2165,7 @@ treatment `latHist` (§15) and the context chip (§16) already get.
 
 **Exceptions ride the session's first-billed day.** The per-day series uses the
 same attribution as the session count — `byDay[s._day].exceptions += s.exceptions`
-(`usage-aggregate.mjs:1055-1039`) — which is *not* the moment a turn dropped: a session spanning midnight lands all of its
+(`usage-aggregate.mjs:1106`) — which is *not* the moment a turn dropped: a session spanning midnight lands all of its
 exceptions on the day its tokens first billed. That keeps the reliability trend
 and the session trend drawn on one convention — the alternative, attributing
 each exception to its own timestamp, would have made the two lines disagree
@@ -2169,15 +2182,12 @@ measurement behind §10 breaks 33 such placeholder turns down as `server_error`
 placeholder shape, which is why the panel counts them together and §10 excludes
 them from the model ranking rather than showing a `$0` model row.
 
-**What this does not model:** the rate's denominator is *responses*, which
-includes the exception turns themselves (they increment `rec.responses` before
-the error branch returns, `usage-parsers.mjs:603`) — they were real engaged
-time, someone was genuinely waiting on them. A retry that eventually succeeded
-appears as one exception plus one successful response, not as a single
-recovered turn; nothing in either transcript links the two. And the worst-day
-flag names the day with the most exceptions without inventing a threshold for
-what counts as a spike, because any constant chosen here would be a judgement
-the data never made.
+**What this does not model:** the rate's denominator is accounted responses. Claude API-error
+placeholders increment `rec.exceptions` and return before response, usage or punchcard accounting
+(`recordClaudeAssistantTurn`, `usage-parsers.mjs:749-777`); they do not enter that denominator.
+A later successful retry can contribute one response alongside the earlier exception, but the
+metric does not pair them into a single recovered turn. The worst-day flag names the day with
+the most exceptions without inventing a threshold for what counts as a spike.
 
 ---
 
@@ -2557,8 +2567,8 @@ parity: it does not apply ledger fallback or allocate costs per turn/day/model.
   `byModel` on the first run after the change, purely because the cache
   predated it; every unit test still passed, since tests only exercise a
   fresh parse. `SCHEMA_VERSION` went to `4` specifically to force the one-time
-  re-parse; the constant now reads `24` (`usage-index.mjs:198`), each bump since
-  having forced its own re-parse the same way.
+  re-parse. That is the historical v4 migration; the current `SCHEMA_VERSION` is `26`
+  (`usage-index.mjs:198`), with the present compatibility contract stated above.
   Re-querying the same live server after the bump returned
   `totals.exceptions: 20` with `<synthetic>` absent from `byModel` —
   measured, not projected.

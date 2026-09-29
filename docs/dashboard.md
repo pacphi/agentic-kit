@@ -285,7 +285,8 @@ each with its percentile markers laid over the bars. A percentile that lands in 
 top bucket renders with a `≥` prefix — the bucket has no upper edge, so the honest claim is a floor
 rather than a point. A window holding no samples reads `not measured` instead of a row of zero bars.
 **Response latency is the gap between a prompt and the response that answered it. It is not
-time-to-first-token**, which no local transcript records.
+time-to-first-token**. Codex can separately record host-reported first-token timing; that
+observation does not rename or replace the completion-latency metric.
 
 **How you run** answers permission posture, who drove, and who served. Posture is a closed
 four-value vocabulary — guarded, auto-edit, plan, unrestricted — mapped from each host's own
