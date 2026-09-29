@@ -325,7 +325,7 @@ test('OpenCode sessions come from the store, and a broken store degrades with it
     withDb: () => ({ ok: false, error: { kind: 'io', message: 'SQLITE_CORRUPT' } }),
   });
   assert.equal(broken.status, 'degraded');
-  assert.equal(broken.reason, 'SQLITE_CORRUPT');
+  assert.equal(broken.reason, 'io', 'health exposes the error category, not raw database error text');
   assert.equal(broken.complete, false);
 });
 

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
 import { tempDir } from './helpers/temp-dir.mjs';
+import { selectOpencodeSource } from '../../src/lib/usage-opencode-source.mjs';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const indexUrl = new URL('../../src/lib/usage-index.mjs', import.meta.url).href;
@@ -147,6 +148,7 @@ test('degraded OpenCode retains old timezone evidence without contributing stale
   entry.dbFile = path.join(dir, 'broken.db');
   cache.entries['opencode://oc-fixture'] = entry;
   fs.writeFileSync(entry.dbFile, 'not a database');
+  entry.sourceIdentity = selectOpencodeSource({ roots: { opencode: entry.dbFile } }).sourceIdentity;
   fs.writeFileSync(file, JSON.stringify(cache));
   const same = run(dir, zones[0]);
   assert.ok(same.stable.sessions.some((s) => s.id === 'oc-fixture'));

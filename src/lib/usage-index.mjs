@@ -43,8 +43,9 @@ import { configDir, claudeDir, codexDir } from './paths.mjs';
 import { readClaudeWindowLog, statClaudeWindowLedger } from './claude-window-ledger.mjs';
 import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
+import { selectOpencodeSource } from './usage-opencode-source.mjs';
 import {
-  defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
+  listSessionsResult as listOpencodeSessionsResult,
   parseSession as parseOpencodeSession, sessionExistsResult as opencodeSessionExistsResult,
   usageNotReportedWarnings,
 } from './usage-opencode.mjs';
@@ -198,7 +199,8 @@ export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields;
 // rows where every reported cost happened to be trusted.
 const OPENCODE_PARSE_SEMANTICS = 'cost-trust-v2';
 const compatibleOpencodeCache = (candidate, entry) => candidate.provider !== 'opencode'
-  || entry?.parseSemantics === OPENCODE_PARSE_SEMANTICS;
+  || (entry?.parseSemantics === OPENCODE_PARSE_SEMANTICS
+    && entry?.sourceIdentity === candidate.sourceIdentity && !!candidate.sourceIdentity);
 
 /** Local buckets depend on the full zone's historical rules, not today's offset.
  * Include the runtime rule-data version; an upgrade can change past buckets.
@@ -661,7 +663,7 @@ function scanKey(o = {}) {
   return JSON.stringify([
     Number(o.days) || 14, Number(o.lookbackDays) || 0,
     !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '', o.claudeWindowConfigDir || '',
-    localTimeContext(),
+    localTimeContext(), selectOpencodeSource({ roots: o.roots }),
   ]);
 }
 
@@ -747,8 +749,10 @@ export async function buildIndex(o = {}) {
  *  with defaults — its mere presence (vs `undefined`) is what makes an
  *  override hermetic; see the codex ledger comment below. */
 function discoverOpencodeSource(rawRoots, cutoff) {
-  const ocDb = rawRoots === undefined ? defaultOpencodeDbPath() : (rawRoots?.opencode ?? null);
-  if (!ocDb || !fs.existsSync(ocDb)) return { health: { status: 'absent', reason: null }, candidates: [], ocDb };
+  const selection = selectOpencodeSource({ roots: rawRoots });
+  const ocDb = selection.dbFile;
+  if (!ocDb) return { health: selection.health, candidates: [], ocDb };
+  if (!fs.existsSync(ocDb)) return { health: { status: 'absent', reason: null }, candidates: [], ocDb };
   const listed = listOpencodeSessionsResult({ dbFile: ocDb, cutoffMs: cutoff });
   if (!listed.ok) {
     const health = listed.error.kind === 'absent'
@@ -756,10 +760,10 @@ function discoverOpencodeSource(rawRoots, cutoff) {
     return { health, candidates: [], ocDb };
   }
   const candidates = listed.value.map((e) => ({
-    file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
+    file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb, sourceIdentity: selection.sourceIdentity,
     stat: { mtimeMs: e.mtimeMs, size: e.size, updatedMs: e.updatedMs },
   }));
-  return { health: { status: 'ok', reason: null }, candidates, ocDb };
+  return { health: selection.health, candidates, ocDb };
 }
 
 /** Codex's own per-file bookkeeping for one scan candidate: file counts, the
@@ -877,7 +881,7 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, claudeR
     && compatibleOpencodeCache(c, hit)
     && (c.provider !== 'codex' || hit.parseStats));
   const key = { localTimeContext: timeContext, mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null),
-    ...(c.provider === 'opencode' ? { parseSemantics: OPENCODE_PARSE_SEMANTICS } : {}) };
+    ...(c.provider === 'opencode' ? { parseSemantics: OPENCODE_PARSE_SEMANTICS, sourceIdentity: c.sourceIdentity } : {}) };
   let session = cacheHit ? hit.session : null;
   let parseStats = cacheHit ? hit.parseStats : null;
   const failure = {};
@@ -953,19 +957,22 @@ function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb,
  *  caller to apply; see carryForwardCachedEntries for why a kept entry is
  *  pushed back into `records` (unlike claude/codex's carry-forward). */
 function carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb) {
-  const dbFile = e.dbFile ?? ocDb;
+  if (!ocDb) return null;
+  const selection = selectOpencodeSource({ roots: { opencode: ocDb } });
+  if (!selection.sourceIdentity || e.sourceIdentity !== selection.sourceIdentity) return null;
+  const dbFile = ocDb;
   const exists = opencodeHealth.status === 'degraded'
     ? null
     : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
   if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
     return { entry: { ...e, dbFile }, health: opencodeHealth,
-      pushRecord: compatibleOpencodeCache({ provider: 'opencode' }, e) };
+      pushRecord: compatibleOpencodeCache({ provider: 'opencode', sourceIdentity: selection.sourceIdentity }, e) };
   }
   if (exists && !exists.ok && exists.error.kind !== 'absent') {
     return {
       entry: { ...e, dbFile },
       health: { status: 'degraded', reason: exists.error.kind },
-      pushRecord: compatibleOpencodeCache({ provider: 'opencode' }, e),
+      pushRecord: compatibleOpencodeCache({ provider: 'opencode', sourceIdentity: selection.sourceIdentity }, e),
     };
   }
   return null;
@@ -1273,7 +1280,7 @@ export async function readSession(id, o = {}) {
 
   // opencode sessions live in the SQLite store, not a JSONL file — resolve
   // them before the file-locating path (pseudo-key opencode://<id>).
-  const ocDb = o.roots === undefined ? defaultOpencodeDbPath() : (o.roots?.opencode ?? null);
+  const ocDb = selectOpencodeSource({ roots: o.roots }).dbFile;
   const ocExists = ocDb && fs.existsSync(ocDb)
     ? opencodeSessionExistsResult({ dbFile: ocDb, id }) : null;
   if (ocExists?.ok && ocExists.value) {

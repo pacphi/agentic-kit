@@ -32,7 +32,7 @@ import path from 'node:path';
 import { claudeDir, codexDir } from '../paths.mjs';
 import { resolveProjectLabel } from '../live/index.mjs';
 import { withDb } from '../sqlite.mjs';
-import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
+import { selectOpencodeSource } from '../usage-opencode.mjs';
 import { presenceOf, statNode, UNKNOWN, walkTree } from './walk.mjs';
 import { inspectProjectIdentity } from './project-identity.mjs';
 import { mergeSessionSurfaces, sessionSurfaceSighting } from './session-surfaces.mjs';
@@ -423,12 +423,14 @@ export function scanTranscriptCwds(root, host, {
  * from there rather than guessed at. The store is opened READ-ONLY and only
  * that one column is selected.
  *
- * An absent store means OpenCode was never used on this machine (a real zero);
+ * An absent selected store contributes no observed projects;
  * a store that will not open, or an older schema without `directory`, is
  * reported degraded with its reason rather than silently contributing nothing.
  */
-export function scanOpencodeDirectories({ dbFile = defaultOpencodeDbPath(), withDb: withDbImpl = withDb } = {}) {
+export function scanOpencodeDirectories({ dbFile = undefined, selection = selectOpencodeSource(dbFile === undefined ? {} : { roots: { opencode: dbFile } }), withDb: withDbImpl = withDb } = {}) {
+  dbFile = selection.dbFile;
   const base = { host: 'opencode', root: dbFile, status: 'ok', reason: null, sessions: 0, sightings: [], complete: true };
+  if (!dbFile) return { ...base, ...selection.health, complete: selection.health.status === 'absent' };
   const result = withDbImpl(dbFile, (db) => db.prepare(
     'SELECT directory, COUNT(*) AS sessions, MAX(COALESCE(time_updated, time_created)) AS lastMs'
     + " FROM session WHERE directory IS NOT NULL AND directory <> '' GROUP BY directory",
@@ -438,7 +440,7 @@ export function scanOpencodeDirectories({ dbFile = defaultOpencodeDbPath(), with
     return {
       ...base,
       status: absent ? 'absent' : 'degraded',
-      reason: absent ? null : (result.error?.message ?? 'store unreadable'),
+      reason: absent ? null : (result.error?.kind ?? 'store-unreadable'),
       complete: absent,
     };
   }
@@ -513,7 +515,7 @@ function gitPresence(projectPath, fsImpl) {
 export function discoverProjectSources({
   claudeRoot = path.join(claudeDir(), 'projects'),
   codexRoot = path.join(codexDir(), 'sessions'),
-  opencodeDbFile = defaultOpencodeDbPath(),
+  opencodeDbFile,
   walk = walkTree,
   fsImpl = fs,
   now = Date.now,

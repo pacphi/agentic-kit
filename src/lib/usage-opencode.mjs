@@ -34,10 +34,12 @@ import {
 } from './usage-parsers.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { xdgBase } from './paths.mjs';
+export { selectOpencodeSource } from './usage-opencode-source.mjs';
 import { observeUsageProject } from './usage-project-evidence.mjs';
 import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 
-/** The live opencode store. Overridable via roots in tests. */
+/** Conventional footprint census location, not an authoritative transcript source.
+ * Usage and project discovery must use selectOpencodeSource instead. */
 export function defaultOpencodeDbPath() {
   const home = xdgBase('XDG_DATA_HOME', null);
   return home
