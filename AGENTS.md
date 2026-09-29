@@ -338,8 +338,10 @@ repository (point `TMPDIR` elsewhere). A completed run removes only its own vali
 canonical, nonsymlink, current-owner root. It then lists sibling suite roots: missing, invalid,
 foreign or uncertain owner metadata means keep. Sibling handling is list-only on macOS, Linux
 and Windows because no installed probe proves all descendants have exited; even a dead owner
-is insufficient. Interrupted runs remove and collect nothing. Listing/removal errors preserve
-the suite's exit code; removal errors may leave a partially removed own root. The runner also
+is insufficient. Interrupted runs remove and collect nothing. Sibling listing/collection errors
+do not change the suite's exit code. Own-root inspection failure retains the root; inspection,
+removal or safety-refusal failure returns hygiene exit 4 unless a command or tripwire failure
+already takes precedence. Removal errors may leave a partially removed own root. The runner also
 drops `FORCE_COLOR` (Claude Code shells set it), because
 tests read plain text from pipes. Tests make temporary folders with `tempDir()` from
 `tests/kit/helpers/temp-dir.mjs`, and spawned children get their environment from `spawnEnv()` in

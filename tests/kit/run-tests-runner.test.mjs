@@ -185,21 +185,63 @@ test('a signalled command retains its run root and performs no sibling collectio
   assert.ok(fs.existsSync(sibling));
 });
 
-test('own-root listing and removal failures preserve the suite exit code', (t) => {
-  const { home, repo, env } = sandbox(t);
-  const probe = stub(home, 'cleanup-errors.mjs', `import fs from 'node:fs';
+// Inject failures only at this subprocess's disposable temp boundary.
+function cleanupProbe(home) {
+  return stub(home, 'cleanup-errors.mjs', `import fs from 'node:fs';
+    import os from 'node:os'; import path from 'node:path';
     import { runGuarded } from ${JSON.stringify(new URL('../../scripts/run-tests.mjs', import.meta.url).href)};
-    const readdir = fs.readdirSync;
+    const [repo, mode, code, tripwire] = process.argv.slice(2);
+    const parent = fs.realpathSync(os.tmpdir());
+    const own = (p) => path.dirname(String(p)) === parent && /^ak-suite-[A-Za-z0-9]{6}$/.test(path.basename(String(p)));
+    const readdir = fs.readdirSync, remove = fs.rmSync, lstat = fs.lstatSync;
     fs.readdirSync = (p, ...args) => {
-      if (String(p).includes('ak-suite-') && !String(p).includes('/repo')) throw Error('listing denied');
+      if ((mode === 'inspection' && own(p)) || (mode === 'sibling' && p === parent)) throw Error('EACCES');
       return readdir(p, ...args);
     };
-    fs.rmSync = () => { throw Error('EBUSY'); };
-    process.exitCode = runGuarded([['-e', 'process.exit(' + process.argv[3] + ')']], { repoRoot: process.argv[2] });`);
+    fs.rmSync = (p, ...args) => {
+      if (mode === 'removal' && own(p)) throw Error('EBUSY');
+      return remove(p, ...args);
+    };
+    let ownStats = 0;
+    fs.lstatSync = (p, ...args) => {
+      const stat = lstat(p, ...args);
+      if (own(p)) {
+        ownStats++;
+        if (mode === 'refusal' && ownStats >= 3) stat.isDirectory = () => false;
+        if (mode === 'identity' && ownStats >= 4) stat.birthtimeMs += 1;
+      }
+      return stat;
+    };
+    const child = "const fs=require('fs'),path=require('path'),os=require('os');"
+      + (mode === 'inspection' ? "fs.writeFileSync(path.join(os.tmpdir(),'leftover'),'retain me');" : '')
+      + (tripwire === 'yes' ? "fs.mkdirSync(path.join(process.env.XDG_CONFIG_HOME,'agentic-kit'),{recursive:true});fs.writeFileSync(path.join(process.env.XDG_CONFIG_HOME,'agentic-kit','kit.json'),'{}');" : '')
+      + 'process.exit(' + code + ')';
+    process.exitCode = runGuarded([['-e', child]], { repoRoot: repo });`);
+}
+
+for (const mode of ['inspection', 'removal', 'refusal', 'identity']) {
+  test(`own-root ${mode} failure fails hygiene and retains command/tripwire precedence`, (t) => {
+    for (const [commandCode, tripwire, expected] of [[0, 'no', 4], [7, 'no', 7], [0, 'yes', 3]]) {
+      const { home, repo, env } = sandbox(t);
+      const r = spawnSync(process.execPath, [cleanupProbe(home), repo, mode, String(commandCode), tripwire], { env, encoding: 'utf8' });
+      assert.equal(r.status, expected, r.stderr);
+      const roots = fs.readdirSync(env.TMPDIR).filter((name) => /^ak-suite-[A-Za-z0-9]{6}$/.test(name));
+      assert.equal(roots.length, 1, r.stderr);
+      if (mode === 'inspection') {
+        assert.match(r.stderr, /could not list own run root/);
+        assert.equal(fs.readFileSync(path.join(env.TMPDIR, roots[0], 'leftover'), 'utf8'), 'retain me');
+      } else if (mode === 'removal') assert.match(r.stderr, /may be partially removed/);
+      else assert.match(r.stderr, /kept own run root/);
+    }
+  });
+}
+
+test('sibling listing failure stays nonfatal and does not mask command failure', (t) => {
   for (const code of [0, 7]) {
-    const r = spawnSync(process.execPath, [probe, repo, String(code)], { env, encoding: 'utf8' });
+    const { home, repo, env } = sandbox(t);
+    const r = spawnSync(process.execPath, [cleanupProbe(home), repo, 'sibling', String(code), 'no'], { env, encoding: 'utf8' });
     assert.equal(r.status, code, r.stderr);
-    assert.match(r.stderr, /could not list own run root/);
-    assert.match(r.stderr, /may be partially removed/);
+    assert.match(r.stderr, /could not list run roots/);
+    assert.deepEqual(fs.readdirSync(env.TMPDIR), []);
   }
 });

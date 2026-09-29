@@ -48,7 +48,7 @@ export function commandsFor(mode, env = process.env) {
  * @param {{ env?: NodeJS.ProcessEnv, repoRoot?: string, platform?: string, homedir?: string, log?: (s: string) => void }} [o]
  * @returns {number} exit code: 2 when the suite temp root sits inside a git repository,
  *   else the first failing command's, else 3 on a real-state change, else 4 on leftover
- *   temp folders, else 0
+ *   temp folders or failed own-root inspection/cleanup, else 0
  */
 export function runGuarded(commands, {
   env = process.env, repoRoot = REPO, platform = process.platform, homedir = os.homedir(), log = console.error,
@@ -64,14 +64,18 @@ export function runGuarded(commands, {
   const identity = fs.lstatSync(tempRoot);
   const removeOwnRoot = () => {
     const safe = removableRunRoot(tempRoot, { tmpdir, homedir, requireOwner: false });
-    if (!safe.ok) { log(`kept own run root ${tempRoot}: ${safe.reason}`); return; }
+    if (!safe.ok) { log(`kept own run root ${tempRoot}: ${safe.reason}`); return false; }
     try {
       const current = fs.lstatSync(tempRoot);
       if (current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeMs !== identity.birthtimeMs) {
-        log(`kept own run root ${tempRoot}: directory identity changed`); return;
+        log(`kept own run root ${tempRoot}: directory identity changed`); return false;
       }
       fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });
-    } catch (error) { log(`own run root removal failed; may be partially removed ${tempRoot}: ${error.message}`); }
+      return true;
+    } catch (error) {
+      log(`own run root removal failed; may be partially removed ${tempRoot}: ${error.message}`);
+      return false;
+    }
   };
   const enclosing = enclosingRepository(tempRoot);
   if (enclosing) {
@@ -97,16 +101,21 @@ export function runGuarded(commands, {
     if (r.status !== 0) { code = r.status ?? 1; break; }
   }
   let leftovers = [];
+  let ownHygieneFailed = false;
   try { leftovers = fs.readdirSync(tempRoot).filter((name) => !IGNORED_IN_ROOT.has(name)); }
-  catch (error) { log(`could not list own run root ${tempRoot}: ${error.message}`); }
-  removeOwnRoot();
+  catch (error) {
+    log(`could not list own run root; kept ${tempRoot}: ${error.message}`);
+    ownHygieneFailed = true;
+  }
+  // Unknown contents must remain available for inspection, never count as clean.
+  if (!ownHygieneFailed && !removeOwnRoot()) ownHygieneFailed = true;
   try { collectAbandonedRoots({ tmpdir, selfRoot: tempRoot, homedir, log }); }
   catch (error) { log(`could not list sibling run roots: ${error.message}`); }
   if (leftovers.length) log(`temp folders left behind by the run (${leftovers.length}):\n  ${leftovers.join('\n  ')}`);
   const result = compareSnapshots(before, snapshotRoots(roots), { strict: isStrict(env) });
   const report = formatReport(result);
   if (report) log(report);
-  return code || (result.failing.length ? 3 : 0) || (leftovers.length ? 4 : 0);
+  return code || (result.failing.length ? 3 : 0) || (leftovers.length || ownHygieneFailed ? 4 : 0);
 }
 
 /** The nearest folder at or above `dir` that holds a `.git` entry, or null. */
