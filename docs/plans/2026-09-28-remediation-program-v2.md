@@ -10,11 +10,20 @@ Windows timing evidence. #251 is done, and the alpha.60 release commit is on `ma
 Publication and global installation were not verified in the execution-plan baseline.
 The historical decision batch and schedule below remain as scope/evidence references;
 the approved execution section governs wherever their authority or timing differs.
-At the 2026-09-29 checkpoint, V3 #276, V5 #274, V4 B1 #273, V4 C3 #277, and
-V4 C4 #278 had merged to `develop@989c5e56`. Remaining V4 implementation
-units were accepted on an isolated branch; its final gates, whole-branch
-review, PR CI and integration remained open. V6 and V7 still have work. The
-final `develop` → `main` PR has not been opened.
+At the 2026-09-29 closeout checkpoint, reviewed V1–V6 and main watcher reconciliation
+are integrated through `develop@88ce597f444d487a34d9871a447cf8942f76f760` with all
+13 develop CI checks passing. V7 guard and evidence units are independently accepted;
+shared-file integration, final gates and closeout PR CI remain acceptance conditions.
+The [246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md),
+[integration receipt](../archive/2026-09-29-remediation-v2-integration-evidence.md),
+[ordered rulings](../archive/2026-09-29-remediation-v2-rulings.md),
+[Windows evidence](../archive/2026-09-29-windows-ci-evidence.md) and
+[AQE proof](../archive/2026-09-29-aqe-released-artifact-receipt.md) retain the limits.
+The dated 19:20 UTC three-PR timing snapshot includes a 358-second Windows leg;
+refresh this separate gate after closeout PR CI.
+The final develop → main PR and human approval remain pending. This plan stays
+active; no release, installation, real-store mutation, deletion or personal-memory
+write follows from documentation completion. Attended time was not instrumented.
 
 ### Approved execution and precedence
 

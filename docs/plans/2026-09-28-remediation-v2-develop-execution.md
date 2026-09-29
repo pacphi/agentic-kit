@@ -7,20 +7,25 @@
 ## Status
 
 **Active and confirmed** — the maintainer approved this execution plan on 2026-09-28.
-Bootstrap reconciliation is in progress. Approval covers isolated implementation work,
+Bootstrap and V1–V6 are integrated; V7 is in final validation. Approval covers isolated implementation work,
 unit commits, feature PRs into `develop`, and conditional squash integration; the final
-`develop` → `main` PR remains open for human review. Releases, installation, real-data
+`develop` → `main` PR will be left open for human review. Releases, installation, real-data
 operations and cleanup remain separately gated. Baseline inspected: `main@94890a00`.
 
-**2026-09-29 execution update:** Bootstrap, V3 #276, V5 #274, V4 B1 #273,
-V4 C3 #277, and V4 C4 #278 have merged to `develop@989c5e56`; their relevant
-CI receipts passed. Remaining V4 implementation units are accepted on the
-isolated branch, and its temporary C1 CI job has been removed. V4's ADR/C6
-alignment is underway. The final V4 full gates, whole-branch review, feature
-PR CI including Windows, and integration are still pending. V6 and V7 remain
-separate work. The final `develop` → `main` PR and operational gates have not
-occurred. Historical baseline rows below describe planning-time state, not
-current completion.
+**2026-09-29 execution update:** Reviewed V1–V6 and main watcher reconciliation
+are integrated through `develop@88ce597f444d487a34d9871a447cf8942f76f760` with all
+13 develop CI checks passing. V7 guard and evidence units are independently accepted;
+shared-file integration, final gates and closeout PR CI remain acceptance conditions.
+The [246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md),
+[integration receipt](../archive/2026-09-29-remediation-v2-integration-evidence.md),
+[ordered rulings](../archive/2026-09-29-remediation-v2-rulings.md),
+[Windows evidence](../archive/2026-09-29-windows-ci-evidence.md) and
+[AQE proof](../archive/2026-09-29-aqe-released-artifact-receipt.md) retain the limits.
+The dated 19:20 UTC three-PR timing snapshot includes a 358-second Windows leg.
+The controller will refresh that separate gate after closeout PR CI.
+The final develop → main PR and human approval remain pending. This plan stays
+active; no release, installation, real-store mutation, deletion or personal-memory
+write follows from documentation completion. Attended time was not instrumented.
 
 **Goal:** Complete all remaining v2 remediation through feature PRs into `develop`, then
 open one aggregate `develop` → `main` PR for human review.
@@ -79,30 +84,31 @@ The original program's "not yet started" status and main-only flow are stale. Re
 them in the bootstrap PR, retaining historical evidence rather than replaying completed work.
 
 ADR-0063 is **Accepted**, updated 2026-09-29, with CLI and V3 dashboard delivery
-recorded; V4 A3 refines its offline retry limitation on the feature branch.
+recorded; V4 A3's offline retry limitation was refined and integrated in #275.
 ADR-0048 is **Accepted**, updated 2026-09-28, with human evaluation gates
 outstanding; V3 records their approved v5 deferral.
-ADR-0060 is **Proposed**, updated 2026-09-27, with discovery partly implemented; V6 implements
-its approved remaining scope and records acceptance and the actual delivered subset.
+ADR-0060 is **Accepted**, updated 2026-09-29, with its delivered V6 contracts recorded.
+Dedicated Cowork storage remains uncovered under #257; observed provider metadata is not
+network attestation.
 
 ## Phase A: establish the integration baseline
 
 Owner: controller. Dependencies: plan confirmation. Size: S, high confidence.
 
-- [ ] Refresh GitHub and local refs; inventory worktrees, dirty paths, claims and open PRs.
+- [x] Refresh GitHub and local refs; inventory worktrees, dirty paths, claims and open PRs.
   Preserve unrelated work. Check the ignored v1 reconciliation, N-5 list, reviews and ledger
   referenced by the spec are available; copy their relevant facts into scoped worker briefs.
-- [ ] Create `develop` from verified current main in a dedicated integration worktree.
+- [x] Create `develop` from verified current main in a dedicated integration worktree.
   Record base commit, user authority, controller and allowed actions in the execution ledger.
-- [ ] Create a bootstrap feature branch from develop. Commit this plan and reconcile the
+- [x] Create a bootstrap feature branch from develop. Commit this plan and reconcile the
   source program's Status, decisions, branch targets and definition of done.
-- [ ] Add `develop` to `.github/workflows/ci.yml` push validation. Review other workflow
+- [x] Add `develop` to `.github/workflows/ci.yml` push validation. Review other workflow
   filters and concurrency keys so develop integration is tested without enabling publishing.
   Check repository rules/check requirements; proposed changes to repository protection must
   be explicit. Enforce the same merge gate in the controller even if develop is unprotected.
-- [ ] Validate docs layout, Markdown, links and workflow syntax; open bootstrap PR to develop.
+- [x] Validate docs layout, Markdown, links and workflow syntax; open bootstrap PR to develop.
   Merge only after review and CI. Subsequent feature branches start at this integrated base.
-- [ ] Reconcile V1/V2 completion and #262 run evidence. Capture source revision, run URL,
+- [x] Reconcile V1/V2 completion and #262 run evidence. Capture source revision, run URL,
   OS/Node, job duration and result. Do not substitute a two-run observation for ten runs or
   claim the old three-consecutive-PR-run rule was historically met without its evidence.
 
@@ -132,8 +138,8 @@ number must not overwrite a schema bump that has already landed.
 
 V6 Unit 21 implements static `statusLine` command classification for direct helper
 invocations and treats shell wrappers, inline programs, and chains as `custom`.
-Its focused and unit gates passed; the unit commit is pending independent review.
-V6's UI copy remains with V3 until that stream integrates.
+It and the V6 UI are independently reviewed and integrated through #282. Usage schema
+25 → 26 and the bounded accounting/coverage contracts are documented in the usage guide.
 
 ### Scheduling and team shape
 
@@ -172,16 +178,16 @@ If routing or isolation cannot be demonstrated, report the limitation before usi
 
 ## Phase C: integrate and finish V6's UI
 
-- [ ] Review every unit commit after its RED/GREEN evidence. Allow at most five task fix
+- [x] Review every unit commit after its RED/GREEN evidence. Allow at most five task fix
   rounds, then raise the specific unresolved issue rather than looping indefinitely.
-- [ ] Freeze the candidate branch, integrate the latest develop and resolve conflicts in
+- [x] Freeze the candidate branch, integrate the latest develop and resolve conflicts in
   its own worktree with no other writer. Run required full gates and whole-branch review.
-- [ ] Queue one feature PR merge at a time. Required evidence covers exact head/base SHAs;
+- [x] Queue one feature PR merge at a time. Required evidence covers exact head/base SHAs;
   a changed base invalidates the previous integration result and requires appropriate reruns.
-- [ ] Squash-merge only after required CI, including Windows, and independent review pass.
+- [x] Squash-merge only after required CI, including Windows, and independent review pass.
   Verify the squash commit's tree equals the reviewed, develop-integrated feature tree.
   Run/check develop CI before releasing dependent streams.
-- [ ] After V3 integrates, complete V6's labels across Usage, Projects, Maintenance and
+- [x] After V3 integrates, complete V6's labels across Usage, Projects, Maintenance and
   Intelligence plus imported-copy counts in UI and `ak system`; keep these in the V6 PR.
 
 Task validation uses the narrowest meaningful tests first. Before V5 introduces `focus`,
@@ -199,17 +205,24 @@ incur cost are excluded unless explicitly approved.
 
 ## Phase D: V7 close-out and final human review
 
+This checkpoint records completed implementation and prepared issue drafts. The final
+review PR will carry subsequent CI, timing and issue-action receipts; unchecked publication
+gates below are deliberately not claimed ahead of those actions. A scheduled attempt at
+`94890a00` returned seven HTTP 503 responses without parsed session URLs; successful routine
+execution remains unverified. The later watcher fixes were validated synthetically and in
+read-only PR preview, with no live trigger by this program.
+
 Dependencies: V3–V6 merged and develop green. Branch: `chore/v2-close-out`. Size: S/M.
 
-- [ ] Apply the tree-wide comment-label guard after competing code edits finish.
-- [ ] Reconcile every original Appendix A/B row to an exact PR/evidence record, explicit
+- [x] Apply the tree-wide comment-label guard after competing code edits finish.
+- [x] Reconcile every original Appendix A/B row to an exact PR/evidence record, explicit
   declined/superseded ruling, named open issue, or approved post-merge operation. No row
   disappears because V1/V2 had already landed.
-- [ ] Complete #262's ten-run before/after analysis or keep its evidence gate visibly open.
+- [x] Complete #262's ten-run before/after analysis or keep its evidence gate visibly open.
   Classify source/runtime changes in samples; never cherry-pick green runs into a false series.
-- [ ] Verify upstream watch behavior on the applicable branch/runtime. A first real release
+- [x] Verify upstream watch behavior on the applicable branch/runtime. A first real release
   dispatch may remain observation-pending until an actual release event; do not fabricate one.
-- [ ] Prepare issue updates (#239/#240/#254/#257/#262) with evidence. Distinguish integrated
+- [x] Prepare issue updates (#239/#240/#254/#257/#262) with evidence. Distinguish integrated
   on develop from shipped on main; close only when the issue's own completion condition holds.
 - [ ] Run docs alignment and archive completed branch plans with `scripts/docs-relocate.mjs`.
   Keep this program's plan active while main approval and operational work remain pending.

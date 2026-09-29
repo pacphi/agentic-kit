@@ -209,9 +209,21 @@ and [exclusive platform initialization](https://github.com/proffesor-for-testing
 (the 3.14.4 recheck did not exercise `goap_execute`),
 [RVF recovery loop](https://github.com/proffesor-for-testing/agentic-qe/issues/574),
 and [local-embedding audit findings](https://github.com/proffesor-for-testing/agentic-qe/issues/615).
-The newer 3.14.5 registry version does not establish that the repeated-init
-settings rewrite reported in [AQE #778](https://github.com/proffesor-for-testing/agentic-qe/issues/778)
-has been fixed; the disposable reproduction used 3.14.4.
+A 2026-09-29 disposable probe of an npm-integrity-verified AQE 3.14.5 tarball found that
+[#655](https://github.com/proffesor-for-testing/agentic-qe/issues/655)'s selected compact
+guidance path emits a 315-byte owned sentinel and preserves a foreign `AGENTS.md`
+prefix/suffix across two repeated calls. Full/none and complete receipt/platform
+conformance remain unverified.
+[#753](https://github.com/proffesor-for-testing/agentic-qe/issues/753)'s fresh native
+macOS witness append produced valid 4001-row chains in one sequential and three
+synchronized two-process rounds; only one concurrent round demonstrably interleaved. That
+does not justify removing the kit's stray-store live-holder refusal or claim old-fork
+repair, signature validation, import safety, or Windows/Linux behavior.
+[#778](https://github.com/proffesor-for-testing/agentic-qe/issues/778) still reproduces
+settings churn on 3.14.5 across three same-option init runs; its source fix merged after
+this release was published. A later released-artifact retest is pending. See the [dated artifact
+receipt](archive/2026-09-29-aqe-released-artifact-receipt.md) for source binding and
+limits.
 
 The Codex QE-Court investigation in
 [agentic-kit #108](https://github.com/pacphi/agentic-kit/issues/108) is a
