@@ -33,6 +33,18 @@ test('a quiet run has no notice; an action run mentions the maintainer first', (
   assert.match(body, /\nThe full record: `node scripts\/upstream-watch\.mjs ledger --recorded-since 2026-10-02T14:17:00Z`\n$/);
 });
 
+test('one action uses singular wording and the latest fired session for an id', () => {
+  const records = [
+    rec('released', { version: '1.0.0', branch: 'upstream/ruvnet-ruflo-1' }),
+    rec('fired', { branch: 'upstream/ruvnet-ruflo-1', session: 'https://claude.ai/code/session_old' }),
+    rec('fired', { branch: 'upstream/ruvnet-ruflo-1', session: 'https://claude.ai/code/session_new' }),
+  ];
+  const body = renderNotice({ records, mention: 'pacphi', date: '2026-10-02', recordedAt: '2026-10-02T14:17:00Z' });
+  assert.match(body, /^@pacphi upstream watch: 1 item needs you/);
+  assert.match(body, /Routine session: https:\/\/claude\.ai\/code\/session_new/);
+  assert.doesNotMatch(body, /session_old/);
+});
+
 test('thread ids never autolink; only a dispatch pull request number does', () => {
   const body = renderNotice({ records: [rec('reply', { by: 'x', at: '10:00:00Z' }, 'a/b#5'), rec('dispatch-pr', { branch: 'upstream/a-b-5', pr: 261 }, 'a/b#5')], mention: 'pacphi', date: '2026-10-02', recordedAt: '2026-10-02T14:17:00Z' });
   const prose = body.replace(/`[^`]*`/g, '');
