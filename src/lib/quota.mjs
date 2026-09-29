@@ -143,9 +143,16 @@ function directStatusLineScript(command) {
   // wrapper bodies for plausible paths; none establishes the executed target.
   const direct = command.trim().match(/^(?:(?:node|node\.exe)(?:\s+--no-warnings)?\s+)?("[^"]+"|'[^']+'|[^\s"']+\.([cm]?js))$/i);
   if (!direct) return null;
-  const token = direct[1].replace(/^(?:"([^"]*)"|'([^']*)')$/, (_, double, single) => double ?? single);
-  if (!/\.[cm]?js$/i.test(token) || /[`;|&()<>{}]/.test(token.replace(/^\$\{HOME\}/, '$HOME'))
-    || token.includes('$(')) return null;
+  const raw = direct[1];
+  const quote = raw[0] === '"' || raw[0] === "'" ? raw[0] : null;
+  const token = quote ? raw.slice(1, -1) : raw;
+  if (!/\.[cm]?js$/i.test(token) || token.startsWith('-')) return null;
+  // A quoted path keeps literal punctuation. In bare command text, shell
+  // operators, globs, and a leading comment marker do not name a script.
+  if (!quote && (token.startsWith('#')
+    || token.includes('[') || token.includes(']')
+    || /[`;|&()<>{}*?]/.test(token.replace(/^\$\{HOME\}/, '$HOME')))) return null;
+  if (quote === '"' && (token.includes('`') || token.includes('$('))) return null;
   return token;
 }
 

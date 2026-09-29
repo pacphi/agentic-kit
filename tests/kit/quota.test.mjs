@@ -253,6 +253,36 @@ test('a JavaScript path in an argument or inline program does not prove the foot
   }
 });
 
+test('option-shaped targets and unquoted comments cannot identify the project helper', () => {
+  const settingsFile = '/synthetic/settings.json';
+  let command;
+  const reads = [];
+  const fsImpl = {
+    readFileSync(file) {
+      reads.push(file);
+      if (file === settingsFile) return JSON.stringify({ statusLine: cmd(command) });
+      throw new Error('unexpected script read');
+    },
+    statSync() { throw new Error('unexpected script stat'); },
+  };
+  for (command of [
+    'node --eval=./.claude/helpers/statusline.cjs',
+    'node --no-warnings=./.claude/helpers/statusline.cjs',
+    'node #/.claude/helpers/statusline.cjs',
+    'node "--eval=./.claude/helpers/statusline.cjs"',
+  ]) {
+    assert.equal(classifyClaudeTeeChannel({ settingsFile, fsImpl, home: '/synthetic' }), 'custom', command);
+  }
+  assert.deepEqual(reads, Array(4).fill(settingsFile));
+});
+
+test('a quoted footer path keeps literal shell punctuation', () => {
+  const fx = teeFixture({ scripts: { 'My & Tools/#statusline.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, 'My & Tools/#statusline.cjs');
+  fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(`node "${script}"`) }));
+  assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'kit-footer');
+});
+
 test('direct quoted helper invocation remains a footer with a Node option', () => {
   const fx = teeFixture({ scripts: { 'My Tools/status line.cjs': FOOTER_SCRIPT } });
   const script = path.join(fx.home, 'My Tools/status line.cjs');
