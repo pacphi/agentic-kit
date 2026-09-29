@@ -46,6 +46,17 @@ test('a notice too long for GitHub lists what fits and says how many more', () =
   assert.ok(body.length <= NOTICE_MAX, String(body.length));
   assert.match(body, /\n\d+ more; see the ledger\.\n/);
   assert.ok(body.includes('`owner/repo#1`') && !body.includes('`owner/repo#3000`'));
+  const items = records.filter(isActionRecord);
+  const bullets = items.map((item) => `- ${sentence(item)}`);
+  const head = `@pacphi upstream watch: ${items.length} items need you (2026-10-02).`;
+  const foot = 'The full record: `node scripts/upstream-watch.mjs ledger --recorded-since 2026-10-02T14:17:00Z`';
+  let expected;
+  for (let count = bullets.length; count > 0; count--) {
+    const more = bullets.length - count;
+    const candidate = `${[head, '', ...bullets.slice(0, count), ...(more ? ['', `${more} more; see the ledger.`] : []), '', foot].join('\n')}\n`;
+    if (candidate.length <= NOTICE_MAX) { expected = candidate; break; }
+  }
+  assert.equal(body, expected, 'the optimized truncation keeps the exact previous body');
 });
 
 // A commit message is plain text: GitHub turns `owner/repo#n` or `#n` there into

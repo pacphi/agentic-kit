@@ -80,10 +80,13 @@ export function renderNotice({ records, mention, date, recordedAt }) {
   const bullets = items.map((item) => `- ${sentence(item)}${item.event === 'released' && sessions.has(item.id) ? ` Routine session: ${sessions.get(item.id)}` : ''}`);
   const head = `@${mention} upstream watch: ${items.length} ${items.length === 1 ? 'item needs' : 'items need'} you (${date}).`;
   const foot = `The full record: \`node scripts/upstream-watch.mjs ledger --recorded-since ${recordedAt}\``;
+  const lengths = [0];
+  for (const bullet of bullets) lengths.push(lengths.at(-1) + bullet.length);
   for (let count = bullets.length; count > 0; count--) {
     const more = bullets.length - count;
-    const body = `${[head, '', ...bullets.slice(0, count), ...(more ? ['', `${more} more; see the ledger.`] : []), '', foot].join('\n')}\n`;
-    if (body.length <= NOTICE_MAX) return body;
+    const suffix = more ? `${more} more; see the ledger.` : '';
+    const length = head.length + foot.length + lengths[count] + suffix.length + count + 4 + (more ? 2 : 0);
+    if (length <= NOTICE_MAX) return `${[head, '', ...bullets.slice(0, count), ...(more ? ['', suffix] : []), '', foot].join('\n')}\n`;
   }
   return `${[head, '', `${bullets.length} items; see the ledger.`, '', foot].join('\n')}\n`;
 }
