@@ -340,3 +340,32 @@ for (const fail of [false, true]) {
     assert.deepEqual(result.records.filter((item) => item.event === 'dispatch-pr').map((item) => item.id), ['proffesor-for-testing/agentic-qe#10']);
   });
 }
+
+for (const status of [500, 503]) {
+  for (const failure of [new DOMException('body timed out', 'TimeoutError'), new DOMException('body aborted', 'AbortError'), new TypeError('body stream network failure')]) {
+    test(`HTTP ${status} body ${failure.name} propagates without another POST`, async () => {
+      let calls = 0;
+      const waits = [];
+      const dispatcher = createDispatcher({
+        env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+        fetchImpl: async () => { calls++; return { status, json: async () => { throw failure; } }; },
+        sleep: async (ms) => { waits.push(ms); },
+      });
+      await assert.rejects(dispatcher.fire('x'), (error) => error === failure);
+      assert.equal(calls, 1);
+      assert.deepEqual(waits, []);
+    });
+  }
+  test(`HTTP ${status} complete malformed JSON retains the bounded status retry`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return new Response('not JSON', { status }); },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status} without a session`));
+    assert.equal(calls, 3);
+    assert.deepEqual(waits, [2000, 4000]);
+  });
+}

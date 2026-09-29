@@ -69,7 +69,12 @@ export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env
           method: 'POST', headers: { ...FIRE_HEADERS, authorization: `Bearer ${token}` }, body: JSON.stringify({ text }),
           signal: AbortSignal.timeout(FIRE_TIMEOUT_MS),
         });
-        const body = await response.json().catch(() => null);
+        const body = await response.json().catch((error) => {
+          // Only a complete non-JSON response uses the status-only fallback.
+          // A body-stream failure is ambiguous and must not cause another POST.
+          if (error instanceof SyntaxError) return null;
+          throw error;
+        });
         const session = body?.claude_code_session_url;
         if (response.status === 200 && typeof session === 'string') return session;
         const requestId = diagnostic(response.headers?.get?.('request-id'), token);
