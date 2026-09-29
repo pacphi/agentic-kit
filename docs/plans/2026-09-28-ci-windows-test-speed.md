@@ -3,6 +3,12 @@
 > **For agentic workers:** Implement each task with a failing test first, focused
 > verification, and one unit commit. Keep writing ownership in one worktree.
 
+## Status
+
+Active. Tasks 1–3 merged via PR #267 (`ab2fc5cb`, 2026-09-29). Task 4 — ten consecutive CI runs
+proving the five-minute criterion, and closing #262 with that table — is still open, now tracked
+as branch V1 in [remediation program v2](2026-09-28-remediation-program-v2.md).
+
 **Goal:** Return complete CI test feedback from every OS/Node matrix leg within
 five minutes while preserving store-integrity and coverage gates.
 

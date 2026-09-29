@@ -2,8 +2,10 @@
 
 ## Status
 
-Approved in conversation on 2026-09-28. Implemented locally on
-`fix/ci-windows-test-speed-262`; Windows CI timing proof remains pending.
+Approved 2026-09-28; implemented and merged via PR #267 (`ab2fc5cb`, 2026-09-29). Two runs at the
+merged head showed Windows legs at 3:21–4:22 (down from 11:28–12:56 before). The ten-consecutive-run
+stability proof and closing #262 remain open, tracked as branch V1 in
+[remediation program v2](2026-09-28-remediation-program-v2.md).
 
 ## Outcome
 
