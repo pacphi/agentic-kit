@@ -205,6 +205,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $text = Get-Content -Raw (Join-Path $env:RUNNER_TEMP 'c1-aqe-live-lock.log')
           if ($text -notmatch '"liveLock":true' -or $text -notmatch '"lockHeld":true') { throw 'AQE proof lacked the native contention JSON receipt' }
+      - name: Diagnose Windows Ruflo transport
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          AK_RUFLO_WINDOWS_DIAGNOSTIC: '1'
+        run: |
+          $env:AK_RUFLO_PACKAGE_ROOT = Join-Path $env:npm_config_prefix 'node_modules/ruflo'
+          node scripts/run-tests.mjs focus tests/live/ruflo-windows-transport.test.mjs 2>&1 | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'c1-windows-transport.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Real Ruflo memory routing (Linux and Windows)
         if: matrix.memory
         shell: pwsh
