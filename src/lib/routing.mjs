@@ -132,7 +132,7 @@ export const MODEL_CATALOG = {
 //   divergedRoutes()  — the defaults moved and a seeded route did not. Which
 //                       side is better is activity-dependent, so it is reported
 //                       neutrally and only ever changed by an explicit
-//                       `ak x host refresh`.
+//                       `ak host reset-routes`.
 //   RETIRED_MODELS    — the model stops answering. There is no trade to weigh
 //                       and nothing for a user to decide; a route left pointing
 //                       here is a future hard failure, so ak substitutes at read

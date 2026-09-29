@@ -1,8 +1,14 @@
 // ak status — read-only dashboard. Each row: subsystem, level, message,
 // and (for drift) a fix plus who performs it (`repair`: 'sync' or 'manual',
 // see status/row.mjs). --json emits the raw rows; --hint (set by bare
-// invocation) appends exactly one suggested next action.
-import { glyph, dim, bold, warn } from '../lib/output.mjs';
+// invocation) appends exactly one suggested next action. --refresh[=live|machine]
+// runs the shared refresh stages first (ADR-0063) and reports the rows its
+// local re-check collected; --only names the live checks to run (ADR-0055).
+import { glyph, dim, bold, ok, warn, fail, humanOutputToStderr, reportFailure, sanitizeForTerminal } from '../lib/output.mjs';
+import {
+  REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
+  formatElapsed,
+} from '../lib/refresh.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { collectIntegrationFacts } from '../lib/providers.mjs';
@@ -17,51 +23,94 @@ export { renderHostDetailRows, collectDejaVuRows };
 
 export const options = {
   json: { type: 'boolean', default: false },
-  deep: { type: 'boolean', default: false },
   hint: { type: 'boolean', default: false },
-  refresh: { type: 'boolean', default: false },
-  live: { type: 'boolean', default: false },
+  ...REFRESH_OPTIONS,
 };
 
 export const help = `ak status — read-only dashboard of what's true and what's drifted
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
-…). Without --live it changes no configuration and runs no live check; it
-shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --live\`
-remembered, with its age. It may refresh its own local evidence cache under
+…). Without --refresh it changes no configuration and runs no live check; it
+shows the last result \`ak sync\` or \`ak status --refresh=live\` remembered,
+with its age. It may refresh its own local evidence cache under
 \`<state>/agentic-kit/evidence/\` so later checks stay fast. A bare \`ak\` runs
 this plus one suggested next action.
 A row's "→" fix is what \`ak sync\` performs; "→ manual:" marks a step you run
 yourself (sync never plans it). --json rows carry the same distinction as
 \`repair\`: "sync", "manual", or null when there is no fix.
 
-Usage: ak status [options]
+Usage: ak status [--json] [--refresh[=live|machine]] [--project-trees]
+                 [--only CHECK[,CHECK...]]
 
 Options:
-  --deep      run the slower probes (spawns CLIs) for a fuller picture
-  --json      emit the raw rows as JSON (suppresses the drift nudge)
-  --refresh   re-probe cached evidence (ruflo components, native runtime, host
-              setup, deja-vu, version drift, and the rest of the checks a
-              plain \`ak status\` reuses from a fresh cache)
-  --live      first run the quick, free live checks from \`ak x verify\` in
-              parallel (AQE embedding request for a kit-managed backend, Codex
-              MCP when Codex is enabled, provider wiring, security packages,
-              deja-vu when enabled, and a memory round trip in a temp dir), each
-              bounded by a timeout that reads inconclusive; remembers the
-              results. A failed check is a warning, so the exit code is unchanged
+  --json                    emit the raw rows as JSON (suppresses the drift
+                            nudge); with --refresh the JSON also lists each
+                            stage under "refresh", no stage lines print, and
+                            anything a stage itself prints goes to stderr;
+                            with --refresh=live it also carries "live", each
+                            check's result and the lines it printed
+  --refresh[=live|machine]  refresh first, then report (the strengths below)
+  --project-trees           with --refresh=machine: also measure the working
+                            trees of your projects
+  --only CHECK[,CHECK...]   with --refresh=live: run exactly these checks
+                            (comma-separated or repeated) instead of the quick
+                            set, and print each check's own lines under it
+
+Refresh strengths (each runs its stages in this order, one line per stage):
+  --refresh          Refreshing Maintenance evidence, Rebuilding the inventory,
+                     Re-checking local evidence and versions (re-probes the
+                     cached evidence a plain \`ak status\` reuses: ruflo
+                     components, native runtime, host setup, deja-vu, version
+                     drift and the rest)
+  --refresh=live     the same, plus Running live checks before the re-check:
+                     the quick, free checks below that apply, in parallel,
+                     each bounded by a minute that reads inconclusive, one
+                     line per check; the results are remembered
+  --refresh=machine  Measuring the machine first (minutes: it walks the disk),
+                     then the --refresh stages, rebuilding the inventory from
+                     the new measurement; it runs no live checks
+The Maintenance and inventory stages save what they find under
+\`<state>/agentic-kit/maintenance/\`. A failed machine measurement skips those
+two stages; the local re-check always runs.
+
+Live checks (quick and free):
+  aqe-embedding  the AQE live embedding request (a backend the kit manages)
+  mcp            Codex MCP initialize/tools-list (when Codex is enabled)
+  providers      kit config matches installed CLIs; ruflo/aqe see the wiring
+                 (checked from the project root, whatever folder you run in)
+  security       security packages load; defend flags injection, passes clean
+  deja-vu        content-free structural proof of CLI, doctor, wiring and
+                 index (when deja-vu is enabled or ak owns it)
+  memory         store, retrieve and purge a value in a temporary folder
+Slow proofs run only when named with --only, up to six minutes each:
+  learning       train a cycle in a temporary folder; assert patterns persist
+  harvest        record an outcome and distill through Ruflo, in an isolated
+                 store
+  aqe            storage, embedding configuration and provenance, and the
+                 browser payload
+  memory-routes  the memory round trip, plus whether CLI and MCP see each
+                 other's writes (remembered as the memory check)
+A named check runs even when it would not apply; its result is remembered only
+when it applies. learning and harvest are never remembered.
+
+The exit code is 1 when a row fails or a refresh stage fails, and 2 for a
+usage error. A failed live check is a warning and leaves the exit code as it
+was. With --only, only the named checks decide the exit code: 1 when one
+failed, was inconclusive or did not run, else 0; rows and stage failures still
+print and appear in --json. With --json, a usage error or an error is still
+one JSON object on stdout, { error, exitCode }, plus "recovery" (the commands
+that move it aside) when kit.json cannot be read; the message goes to stderr.
 
 Examples:
-  ak status           quick dashboard
-  ak status --deep    thorough check
-  ak status --live    run the quick live checks, then report
-  ak status --json    machine-readable rows`;
-
-/** `--live`: the quick, free `ak x verify` checks, loaded only when asked for
- *  so plain status never pays for the verify suites. */
-async function runDefaultLiveChecks({ cfg, cwd }) {
-  const { runLiveChecks, liveChecksFor } = await import('./x/verify.mjs');
-  return runLiveChecks({ cfg, cwd, checks: liveChecksFor(cfg) });
-}
+  ak status                    quick dashboard
+  ak status --refresh          re-check the cached evidence, then report
+  ak status --refresh=live     also run the quick live checks, then report
+  ak status --refresh=machine  also measure the machine (slow), then report
+  ak status --refresh=live --only security,memory
+                               run two checks; exit 1 unless both pass
+  ak status --refresh=live --only learning
+                               the slow learning proof
+  ak status --json             machine-readable rows`;
 
 // Generalizes the HOST_DETAIL_RENDERERS contract (status/host-detail.mjs) to
 // every section: a section owns its own error handling when it needs an
@@ -91,7 +140,12 @@ async function runSections(sections, ctx, rows) {
   }
 }
 
-/** @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean }} opts */
+/** `versionEvidence` carries version results a caller already holds (ak sync's
+ *  cache-only reads for the parts --skip names, and its --dry-run preview,
+ *  ADR-0063); the versions, self, ruvnet-brain and ruvector sections use them
+ *  instead of looking up their own.
+ *  @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean,
+ *   versionEvidence?: { drift?: any[], self?: any, brain?: any, ruvector?: any, cfg?: any } }} opts */
 export async function collect({
   pkgRoot,
   cwd = process.cwd(),
@@ -99,6 +153,7 @@ export async function collect({
   dejaVuPlanOptions = {},
   refresh = false,
   record = true,
+  versionEvidence,
 }) {
   const rows = [];
   const cfg = loadKitConfig();
@@ -121,7 +176,7 @@ export async function collect({
     cwd, cfg, refresh, record, source,
   });
   const ctx = {
-    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source,
+    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source, versionEvidence,
   };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);
@@ -144,19 +199,136 @@ export async function collect({
   return rows;
 }
 
-export async function run({ flags, pkgRoot, runLive = runDefaultLiveChecks }) {
-  // Live checks run BEFORE collect(), never inside it: the dashboard calls
-  // collect() and must stay probe-free.
-  if (flags.live && !flags.json) console.log(dim('running live checks (quick, free; each bounded by a timeout)…'));
-  const live = flags.live ? await runLive({ cfg: loadKitConfig(), cwd: process.cwd() }) : null;
-  const rows = await collect({ pkgRoot, refresh: !!flags.refresh });
+/**
+ * Run the refresh stages, then take the rows from the local re-check. Live
+ * checks run as a stage, never inside collect(): the dashboard calls
+ * collect() and must stay probe-free. A failed re-check falls back to the
+ * plain rows and says so in one more row.
+ */
+async function refreshedRows({ request, stages, pkgRoot, onStage }) {
+  const refresh = await runRefresh({ ...request, stages, onStage });
+  const local = refresh.stages.find(({ id }) => id === 'local');
+  let rows = local?.result;
+  if (local?.state !== 'done' || !Array.isArray(rows)) {
+    rows = await collect({ pkgRoot, refresh: false });
+    rows.push(row('refresh', 'warn', `local re-check failed: ${local?.detail ?? 'no rows'}`));
+  }
+  const live = refresh.stages.find(({ id }) => id === 'live')?.result ?? null;
+  return { rows, refresh, live };
+}
+
+const entryGlyph = (level) => (level === 'info' ? dim('ℹ') : glyph(level));
+
+const NOT_REMEMBERED = 'not remembered: this check does not apply to your setup';
+
+/** One line per live check; with --only, the lines each check printed are
+ *  indented under it (its heading is the check line itself). A named check
+ *  that does not apply says its result was not remembered. */
+function printLiveChecks(results, { detail }) {
+  for (const { id, status, reason, elapsedMs = 0, entries = [], applies } of results) {
+    const notes = [reason, applies === false ? NOT_REMEMBERED : null].filter(Boolean).join('; ');
+    (status === 'passed' ? ok : warn)(`${id} ${status} (${formatElapsed(elapsedMs)})${notes ? ` — ${notes}` : ''}`);
+    if (!detail) continue;
+    for (const { level, text } of entries) {
+      if (level !== 'heading') console.log(`    ${entryGlyph(level)} ${sanitizeForTerminal(text)}`);
+    }
+  }
+}
+
+/** The human renderer: the shared stage lines, with the live checks' own
+ *  lines printed under the live stage's line. The live stage is wrapped to
+ *  keep its results, which the stage events do not carry. */
+function humanStages(stages, { only }) {
+  if (typeof stages.live !== 'function') return { stages, onStage: printRefreshStage };
+  let results = null;
+  const live = async (ctx) => {
+    const outcome = await stages.live(ctx);
+    results = outcome?.result;
+    return outcome;
+  };
+  const onStage = (event) => {
+    printRefreshStage(event);
+    if (event.id === 'live' && event.state === 'done' && Array.isArray(results)) {
+      printLiveChecks(results, { detail: only.length > 0 });
+    }
+  };
+  return { stages: { ...stages, live }, onStage };
+}
+
+/** Under --json with a refresh, every human line (stage output, warnings)
+ *  goes to stderr while the stages run, so stdout carries one JSON object. */
+async function runRefreshed({ flags, pkgRoot, request, deps }) {
+  const stages = deps.refreshStages ?? cliRefreshStages({ cwd: process.cwd(), pkgRoot });
+  if (!flags.json) {
+    const human = humanStages(stages, request);
+    return report(flags, await refreshedRows({ request, pkgRoot, ...human }), request);
+  }
+  return report(flags, await humanOutputToStderr(() => refreshedRows({ request, stages, pkgRoot, onStage: undefined })), request);
+}
+
+/** A refresh takes no positional. `ak status --refresh live` parses as a bare
+ *  refresh plus the argument `live`, so it is refused rather than silently
+ *  run at the wrong strength; a strength name gets its one-token spelling. */
+function strayArgumentError(positionals) {
+  const [first] = positionals;
+  if (first === undefined) return null;
+  const spelling = REFRESH_STRENGTHS.includes(first) ? ` — write --refresh=${first}` : '';
+  return `unexpected argument '${first}'${spelling}`;
+}
+
+/** @param {{ flags: Record<string, any>, positionals?: string[], pkgRoot?: string,
+ *   deps?: { refreshStages?: Record<string, Function> } }} input */
+export async function run({ flags, positionals = [], pkgRoot, deps = {} }) {
+  const request = refreshRequestFromFlags(flags);
+  if ('error' in request) return usageError(flags, request.error);
+  if (!request.strength) return report(flags, { rows: await collect({ pkgRoot, refresh: false }) });
+  const stray = strayArgumentError(positionals);
+  if (stray) return usageError(flags, stray);
+  return runRefreshed({ flags, pkgRoot, request, deps });
+}
+
+/** A usage error: exit 2. Under --json stdout carries one JSON object,
+ *  `{ error, exitCode: 2 }`, and the message goes to stderr. */
+function usageError(flags, message) {
+  reportFailure({ json: flags.json === true, payload: { error: message, exitCode: 2 }, human: () => fail(`ak status: ${message}`) });
+  return 2;
+}
+
+/** The JSON summary of a refresh: each stage without its result. */
+const refreshSummary = ({ strength, ok, stages }) => ({
+  strength, ok, stages: stages.map(({ id, label, state, detail, elapsedMs }) => ({ id, label, state, detail, elapsedMs })),
+});
+
+/** Whether a check `--only` named did not pass (failed, inconclusive, or no
+ *  result at all). */
+const namedCheckFailed = (only, live) => only.some((id) => live?.find((r) => r.id === id)?.status !== 'passed');
+
+/** Print the rows (or the one JSON object) and return the exit code. With
+ *  --only the named checks alone decide it: 1 when one did not pass, else 0
+ *  (rows and failed stages still print and reach --json). Without it: 1 when a
+ *  row fails or a refresh stage failed, else 0; a failed live check is a
+ *  warning only. */
+function report(flags, { rows, refresh = null, live = null }, { only = [] } = {}) {
   const worst = worstLevel(rows);
+  const code = only.length > 0
+    ? (namedCheckFailed(only, live) ? 1 : 0)
+    : (worst === 'fail' || (refresh && !refresh.ok) ? 1 : 0);
 
   if (flags.json) {
-    console.log(JSON.stringify({ overall: worst, rows, ...(live ? { live } : {}) }, null, 2));
-    return worst === 'fail' ? 1 : 0;
+    console.log(JSON.stringify({
+      overall: worst, rows, ...(refresh ? { refresh: refreshSummary(refresh) } : {}), ...(live ? { live } : {}),
+    }, null, 2));
+    return code;
   }
 
+  printRows(rows);
+  // health-history: alarm on any backslide since the previous sync snapshot.
+  for (const reg of detectRegression(loadRing(loadKitConfig()))) warn(`regression: ${reg.message}`);
+  if (flags.hint) printHint(rows, worst);
+  return code;
+}
+
+function printRows(rows) {
   console.log(bold('ak status'));
   let last = '';
   for (const r of rows) {
@@ -166,22 +338,36 @@ export async function run({ flags, pkgRoot, runLive = runDefaultLiveChecks }) {
     const fix = r.fix ? dim(`  → ${r.repair === 'manual' ? 'manual: ' : ''}${r.fix}`) : '';
     console.log(`  ${glyph(r.level)} ${label.padEnd(11)} ${r.message}${fix}`);
   }
+}
 
-  // health-history: alarm on any backslide since the previous sync snapshot.
-  for (const reg of detectRegression(loadRing(loadKitConfig()))) warn(`regression: ${reg.message}`);
-
-  if (flags.hint) {
-    const bySync = rows.filter((r) => r.fix && r.repair !== 'manual');
-    const manual = rows.filter((r) => r.fix && r.repair === 'manual');
-    console.log('');
-    if (worst === 'ok') console.log(`${glyph('ok')} all healthy — nothing to do`);
-    else if (!bySync.length && manual.length) {
-      console.log(`${manual.length} item(s) need attention — run the "→ manual:" step(s) above yourself; ak sync does not perform them`);
-    } else {
-      const more = manual.length ? dim(` · ${manual.length} more need a manual step (→ manual:)`) : '';
-      console.log(`${bySync.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}${more}`);
-    }
-    console.log(dim('📊 ak dashboard — open the local web dashboard (http://127.0.0.1:7431)'));
+/** --hint: exactly one suggested next action, as the lines to print (pure —
+ *  no console I/O, so a test can assert on content without capturing
+ *  stdout). A row at warn/fail with no fix at all — `ak sync` cannot touch
+ *  it and there is no manual step either — is counted separately: when
+ *  every warn/fail row is like that, the hint names the count and says so,
+ *  never suggesting `ak sync` for nothing it would touch; when some rows do
+ *  have a fix, the no-fix count is appended to whichever message applies. */
+export function hintLines(rows, worst) {
+  const bySync = rows.filter((r) => r.fix && r.repair !== 'manual');
+  const manual = rows.filter((r) => r.fix && r.repair === 'manual');
+  const noFix = rows.filter((r) => (r.level === 'warn' || r.level === 'fail') && !r.fix);
+  const lines = [''];
+  if (worst === 'ok') {
+    lines.push(`${glyph('ok')} all healthy — nothing to do`);
+  } else if (!bySync.length && !manual.length) {
+    lines.push(`${noFix.length} item(s) need attention and have no automatic fix — see the rows above`);
+  } else if (!bySync.length && manual.length) {
+    const more = noFix.length ? dim(` · ${noFix.length} more have no fix (see above)`) : '';
+    lines.push(`${manual.length} item(s) need attention — run the "→ manual:" step(s) above yourself; ak sync does not perform them${more}`);
+  } else {
+    const manualMore = manual.length ? dim(` · ${manual.length} more need a manual step (→ manual:)`) : '';
+    const noFixMore = noFix.length ? dim(` · ${noFix.length} more have no fix (see above)`) : '';
+    lines.push(`${bySync.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}${manualMore}${noFixMore}`);
   }
-  return worst === 'fail' ? 1 : 0;
+  lines.push(dim('📊 ak dashboard — open the local web dashboard (http://127.0.0.1:7431)'));
+  return lines;
+}
+
+function printHint(rows, worst) {
+  for (const line of hintLines(rows, worst)) console.log(line);
 }

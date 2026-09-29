@@ -1,5 +1,5 @@
-// `ak status --live` (decision 9b, #237 S4): an opt-in run of the quick, free
-// `ak x verify` checks — the same functions, no second copy — in parallel, each
+// `ak status --refresh=live` (decision 9b, #237 S4; ADR-0063): an opt-in run of
+// the quick, free live checks (src/lib/live-checks.mjs) in parallel, each
 // under its own timeout (a timeout reads inconclusive, never failed), recorded
 // in the live-check evidence store. Plain `ak status` and the dashboard never
 // run them; they show the remembered results with their age.
@@ -7,17 +7,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   sandboxHome, assertSandboxed, captureLog, rmrf,
-  sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
+  sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot, spawnEnv,
 } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-status-live');
 delete process.env.AQE_EMBEDDER_ENDPOINT;
 const paths = await import('../../src/lib/paths.mjs');
 const evidence = await import('../../src/lib/live-check-evidence.mjs');
-const verify = await import('../../src/commands/x/verify.mjs');
+const verify = await import('../../src/lib/live-checks.mjs');
 const status = await import('../../src/commands/status.mjs');
+const refresh = await import('../../src/lib/refresh.mjs');
+const { loadKitConfig } = await import('../../src/lib/config.mjs');
 const exec = await import('../../src/lib/exec.mjs');
 const output = await import('../../src/lib/output.mjs');
 const liveSection = (await import('../../src/commands/status/sections/live-checks.mjs')).default;
@@ -41,11 +45,11 @@ test('the default set is the quick, free checks that apply to this configuration
   assert.ok(ids({ ...managed, aqeEmbedding: { mode: 'in-process' } }).includes('aqe-embedding'));
   assert.ok(ids({ ...cfg, integrations: { tools: { dejaVu: { enabled: true } } } }).includes('deja-vu'));
   for (const slow of ['learning', 'harvest']) {
-    assert.ok(!verify.liveChecksFor(cfg).some((check) => check.id === slow), `${slow} is slow; never in --live`);
+    assert.ok(!verify.liveChecksFor(cfg).some((check) => check.id === slow), `${slow} is slow; never in the live stage`);
   }
 });
 
-test('checks run in parallel and their results are remembered as status-live', async () => {
+test('checks run in parallel and their results are remembered as status-refresh-live', async () => {
   reset();
   let started = 0;
   let release;
@@ -62,7 +66,7 @@ test('checks run in parallel and their results are remembered as status-live', a
   assert.equal(out, '', 'check output is captured, not printed into the status table');
   const security = evidence.readLiveCheck('security', {
     inputsKey: evidence.liveCheckInputsKey('security', { cfg, cwd: PROJECT }) });
-  assert.equal(security.source, 'status-live');
+  assert.equal(security.source, 'status-refresh-live');
   assert.equal(security.status, 'failed');
   assert.equal(security.invalidated, false);
   assert.equal(evidence.readLiveCheck('memory', {}).status, 'passed');
@@ -146,7 +150,7 @@ test('the provider check never initializes AQE in a project that has none', { sk
 test('the live-checks section shows only remembered results, each with its age', async () => {
   reset();
   assert.deepEqual(await liveSection.collect({ cfg, cwd: PROJECT }), [], 'no evidence, no rows');
-  const record = (id, status, reason, at = Date.now() - 3 * 60_000) => evidence.recordLiveCheck({ id, status, reason, source: 'status-live',
+  const record = (id, status, reason, at = Date.now() - 3 * 60_000) => evidence.recordLiveCheck({ id, status, reason, source: 'status-refresh-live',
     inputsKey: evidence.liveCheckInputsKey(id, { cfg, cwd: PROJECT }) }, { now: at });
   record('security', 'failed', '@claude-flow/security missing');
   record('memory', 'passed', null);
@@ -154,18 +158,52 @@ test('the live-checks section shows only remembered results, each with its age',
   const rows = await liveSection.collect({ cfg, cwd: PROJECT });
   assert.deepEqual(rows.map((r) => [r.subsystem, r.level, r.fix]),
     [['live-checks', 'warn', null], ['live-checks', 'ok', null]], 'aqe-embedding stays in its own row');
-  assert.match(rows[0].message, /^security: last live check failed 3m ago \(ak status --live\): @claude-flow\/security missing$/);
+  assert.match(rows[0].message, /^security: last live check failed 3m ago \(ak status --refresh=live\): @claude-flow\/security missing$/);
   assert.match(rows[1].message, /^memory: last live check passed 3m ago/);
 });
 
-// ── the command ──────────────────────────────────────────────────────────────
+test('a result the configuration no longer matches points at the live refresh', async () => {
+  reset();
+  evidence.recordLiveCheck({ id: 'memory', status: 'passed', reason: null, source: 'status-refresh-live', inputsKey: 'another-configuration' });
+  const [memory] = await liveSection.collect({ cfg, cwd: PROJECT });
+  assert.match(memory.message, /^memory: configuration changed since the last live check \(just now\); re-check with ak status --refresh=live$/);
+});
 
+// ── the command ──────────────────────────────────────────────────────────────
+// `--refresh=live` runs the CLI stage set with the live checks as a spy. The
+// collector, Maintenance service and management facade are fakes: the real
+// ones write <state>/agentic-kit/maintenance/. The local stage is the real
+// status re-check, so the rows show what the live stage remembered. That
+// re-check resolves the npm global root afresh, past `_setGlobalRootForTest`,
+// so npm_config_prefix points it at the same fake tree (the live-check key of
+// `security` and `memory` is the installed ruflo version found there).
+
+const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+// Self-contained so the child script below can embed its source text.
+const fakeServices = () => ({
+  collector: { refreshDeep: async () => ({ ok: true, persisted: { ok: true } }) },
+  maintenance: { scan: async () => ({ scan: {} }) },
+  management: { refreshInventory: async () => ({}), rebuildAfterMeasurement: async () => ({}) },
+});
+const fakeRoot = () => fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+
+/** status.run from the project, with the CLI stages built there (so the live
+ *  checks see the same cwd `ak status` passes them). */
 async function runStatus(flags, runLive) {
-  const prior = process.cwd();
+  const prior = { cwd: process.cwd(), prefix: process.env.npm_config_prefix };
+  const root = fakeRoot();
+  paths._setGlobalRootForTest(root);
+  process.env.npm_config_prefix = path.dirname(root);
   process.chdir(PROJECT);
-  try { return await captureLog(() => status.run({ flags, pkgRoot: path.resolve('.'), runLive })); }
-  finally { process.chdir(prior); }
+  try {
+    const refreshStages = refresh.cliRefreshStages({ cwd: process.cwd(), pkgRoot: PKG_ROOT, deps: { ...fakeServices(), runLive } });
+    return await captureLog(() => status.run({ flags, pkgRoot: PKG_ROOT, deps: { refreshStages } }));
+  } finally {
+    process.chdir(prior.cwd);
+    if (prior.prefix === undefined) delete process.env.npm_config_prefix; else process.env.npm_config_prefix = prior.prefix;
+  }
 }
+const failedRows = (out) => (/^ {2}✗ /m.test(out) ? 1 : 0);
 
 test('plain status never runs a live check', async () => {
   writeKitConfig(HOME, cfg);
@@ -174,26 +212,56 @@ test('plain status never runs a live check', async () => {
   assert.equal(calls, 0);
 });
 
-test('status --live runs the checks before collecting, so the rows show them', async () => {
+test('status --refresh=live runs the checks before the local re-check, so the rows show them', async () => {
   writeKitConfig(HOME, cfg);
   reset();
+  // The config on disk when the checks run. The local re-check after them may
+  // restamp a failed version lookup's `last` (versions.mjs), so it is read now.
+  const onDisk = loadKitConfig();
+  let seenCfg;
   const runLive = async ({ cfg: seen, cwd }) => {
+    seenCfg = seen;
     assert.equal(cwd, fs.realpathSync(PROJECT));
-    evidence.recordLiveCheck({ id: 'security', status: 'failed', reason: 'defend ambiguous', source: 'status-live',
+    evidence.recordLiveCheck({ id: 'security', status: 'failed', reason: 'defend ambiguous', source: 'status-refresh-live',
       inputsKey: evidence.liveCheckInputsKey('security', { cfg: seen, cwd }) });
     return [{ id: 'security', status: 'failed', reason: 'defend ambiguous', elapsedMs: 5 }];
   };
-  const { out } = await runStatus({ live: true }, runLive);
-  assert.match(out, /security: last live check failed just now \(ak status --live\): defend ambiguous/);
+  const { out, result } = await runStatus({ refresh: 'live' }, runLive);
+  assert.deepEqual(seenCfg, onDisk, 'the live checks get the kit config');
+  assert.match(out, /^Running live checks…\n✓ Running live checks \(\d+ ms\): 1 failed$/m,
+    'the start of the live checks is announced, then their result');
+  assert.match(out, /security: last live check failed just now \(ak status --refresh=live\): defend ambiguous/);
+  assert.equal(result, failedRows(out), 'a failed live check is a warning; only a failing row sets the exit code');
 });
 
-test('status --live --json prints one JSON object that carries the live results', async () => {
+test('status --refresh=live --json prints one JSON object that carries the live results', () => {
   writeKitConfig(HOME, cfg);
-  const { out } = await runStatus({ live: true, json: true },
-    async () => [{ id: 'memory', status: 'passed', reason: null, elapsedMs: 9 }]);
-  const parsed = JSON.parse(out);
+  const moduleUrl = (rel) => pathToFileURL(path.join(PKG_ROOT, rel)).href;
+  const root = fakeRoot();
+  const script = `
+    const paths = await import(${JSON.stringify(moduleUrl('src/lib/paths.mjs'))});
+    paths._setGlobalRootForTest(${JSON.stringify(root)});
+    const status = await import(${JSON.stringify(moduleUrl('src/commands/status.mjs'))});
+    const refresh = await import(${JSON.stringify(moduleUrl('src/lib/refresh.mjs'))});
+    const { exitWhenFlushed } = await import(${JSON.stringify(moduleUrl('src/lib/output.mjs'))});
+    const runLive = async () => [{ id: 'memory', status: 'passed', reason: null, elapsedMs: 9 }];
+    const fakeServices = ${fakeServices.toString()};
+    const refreshStages = refresh.cliRefreshStages({ cwd: process.cwd(), pkgRoot: ${JSON.stringify(PKG_ROOT)},
+      deps: { ...fakeServices(), runLive } });
+    exitWhenFlushed(await status.run({ flags: { refresh: 'live', json: true }, pkgRoot: ${JSON.stringify(PKG_ROOT)},
+      deps: { refreshStages } }));
+  `;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: PROJECT, env: spawnEnv(HOME, { NO_COLOR: '1', npm_config_prefix: path.dirname(root) }), encoding: 'utf8', timeout: 120_000,
+  });
+  assert.ok(child.stdout.trim().startsWith('{'), `stdout is not a JSON object:\n${child.stdout}\n--- stderr:\n${child.stderr}`);
+  const parsed = JSON.parse(child.stdout);
+  assert.equal(child.status, parsed.overall === 'fail' ? 1 : 0, child.stderr);
+  assert.equal(parsed.refresh.ok, true);
   assert.deepEqual(parsed.live, [{ id: 'memory', status: 'passed', reason: null, elapsedMs: 9 }]);
-  assert.ok(Array.isArray(parsed.rows));
+  assert.ok(Array.isArray(parsed.rows) && parsed.rows.length > 0);
+  assert.deepEqual(parsed.refresh.stages.map(({ id, state }) => [id, state]),
+    [['maintenance', 'done'], ['inventory', 'done'], ['live', 'done'], ['local', 'done']]);
 });
 
 test.after(() => rmrf(HOME, PROJECT));

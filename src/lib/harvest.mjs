@@ -19,7 +19,8 @@
 // docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md).
 //
 // NEVER starts a daemon, NEVER backgrounds anything. `runner` is injectable so
-// `ak x verify harvest` can drive it against an isolated temporary store.
+// `ak status --refresh=live --only harvest` can drive it against an isolated
+// temporary store.
 import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
@@ -30,8 +31,8 @@ const DEFAULT_TASK_ID = 'ak-harvest';
 
 /** Where harvest runs and which store it pins: the store ak's launcher uses
  *  from `cwd` (rufloMemoryLocation: the repository, else the folder, else the
- *  one flat user-level store, B3-D1). An explicit `root` (verify's isolated
- *  store) is a project root: `<root>/.swarm/memory.db`. */
+ *  one flat user-level store, B3-D1). An explicit `root` (a live check's
+ *  isolated store) is a project root: `<root>/.swarm/memory.db`. */
 function harvestLocation(cwd, root) {
   if (root) return { kind: 'project', root, dir: path.join(root, '.swarm'), db: paths.projectMemoryDb(root) };
   return rufloMemoryLocation(cwd);
@@ -63,7 +64,8 @@ export function distillSkipReason(out) {
 // The skip reasons that mean "nothing to distill yet" (@claude-flow/cli 3.45.0
 // services/memory-distillation.js): no store, no entries, or AgentDB's target
 // tables not created yet. Every fresh store takes the last path, including
-// `ak x verify harvest`'s isolated one, so it stays a warning. Any other
+// `ak status --refresh=live --only harvest`'s isolated one, so it stays a
+// warning. Any other
 // reason (an exception, a corrupt store, no native SQLite, a judge this run
 // did not enable) means distillation could not run.
 const NOTHING_TO_DISTILL = [/^no-db$/, /^no memory_entries$/, /^target table \S+ missing\b/];

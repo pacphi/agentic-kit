@@ -2,6 +2,7 @@ import { CSS } from './styles.mjs';
 import { JS } from './client.mjs';
 import { LIVE_CSS, LIVE_HTML, LIVE_JS } from './live-view.mjs';
 import { HOST_PARTICIPATION_HTML } from './host-participation-view.mjs';
+import { CONNECTION_CHECK_DISCLOSURE } from '../host-connection-disclosure.mjs';
 
 // ── Intelligence: machine-wide rollup + project picker ──────────────────────
 // Scoped to this file (not styles.mjs) since page.mjs is the only owner of
@@ -157,7 +158,7 @@ export function renderPage({ name, version }) {
   <p id="host-health-connection"></p>
   <p id="host-health-integrations"></p>
   <p id="host-health-eligibility"></p>
-  <p class="health-disclosure">Sends one short request using your selected host and provider. Normal provider billing and native context usage apply. Native startup may initialize dependencies and update local cache or session files. Agent tools are restricted; this check does not repair your setup.</p>
+  <p class="health-disclosure">${escapeHtml(CONNECTION_CHECK_DISCLOSURE)}</p>
   <label class="health-consent"><input type="checkbox" id="host-health-consent"> Run one connection check with these settings.</label>
   <div class="health-actions"><button type="button" id="host-health-refresh">Check again</button><button type="button" id="host-health-connect" disabled>Check connection</button></div>
   <p id="host-health-message" role="status" aria-live="polite"></p>

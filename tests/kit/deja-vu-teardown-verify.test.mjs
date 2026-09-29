@@ -15,7 +15,8 @@ import { isolateProject } from './helpers/project-isolation.mjs';
 const HOME = sandboxHome('ak-deja-teardown-verify');
 const paths = await import('../../src/lib/paths.mjs');
 const uninstall = await import('../../src/commands/uninstall.mjs');
-const verify = await import('../../src/commands/x/verify.mjs');
+const verify = await import('../../src/lib/live-checks.mjs');
+const status = await import('../../src/commands/status.mjs');
 const { createDejaVuLifecycleAdapter } = await import('../../src/lib/adapters/deja-vu.mjs');
 assertSandboxed(paths, HOME);
 isolateProject('ak-deja-vu-teardown-verify');
@@ -68,10 +69,10 @@ function lifecycleAdapter({ facts, undo } = {}) {
   return { adapter, calls };
 }
 
-test('help exposes explicit deja-vu teardown scopes and the content-free verify suite', () => {
+test('help exposes explicit deja-vu teardown scopes and the content-free deja-vu check', () => {
   assert.match(uninstall.help, /--remove-deja-vu\s+uninstall the Kit-owned deja-vu package/);
   assert.match(uninstall.help, /--purge-deja-vu-data\s+delete only the derived deja-vu index/);
-  assert.match(verify.help, /deja-vu\s+content-free structural proof/);
+  assert.match(status.help, /deja-vu\s+content-free structural proof/);
 });
 
 test('deja-vu verify cleanly skips disabled, unowned integration without probing it', async () => {

@@ -65,3 +65,30 @@ test('ak setup --dry-run never invokes npm (the drift nudge is skipped)', { skip
     rm(home, project, fakeBinDir);
   }
 });
+
+// Regression: a run-level usage refusal (exit 2, e.g. a rejected --refresh
+// strength) reached the drift nudge exactly like a successful run —
+// `mod.run()`'s own exit code was never checked — so a rejected
+// `ak status --refresh=bogus` spent a network call a parse error never did.
+// Same injection pattern as the --dry-run test above: a fake npm shim on
+// PATH that only records whether it was invoked.
+test('a run-level usage refusal (exit 2) never invokes npm (the drift nudge is skipped)', { skip: process.platform === 'win32' }, () => {
+  const { home, project } = sandbox();
+  const marker = path.join(home, 'npm-was-invoked');
+  const fakeBinDir = fakeNpmBin(marker);
+  try {
+    const r = spawnSync(process.execPath, [BIN, 'status', '--refresh=bogus'], {
+      encoding: 'utf8',
+      cwd: project,
+      env: spawnEnv(home, {
+        NO_COLOR: '1',
+        PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
+      }),
+    });
+    assert.equal(r.status, 2, `expected a usage refusal exit 2, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /not a refresh strength/, 'must reach the usage-error path, not fail before it');
+    assert.ok(!fs.existsSync(marker), 'npm must never be invoked after a run-level usage refusal (the post-command drift nudge must be skipped)');
+  } finally {
+    rm(home, project, fakeBinDir);
+  }
+});

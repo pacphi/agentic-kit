@@ -38,7 +38,7 @@ const OWN_SGR_RE = new RegExp(
  * those six color codes and render itself, say, red. It could not move the
  * cursor, clear the screen, conceal text, ring the bell, or emit an OSC
  * title/clipboard sequence — the primitives the review actually demonstrated.
- * `--deep`'s raw transcript text is also stripped at `clipText`. This is the
+ * `--show-text`'s raw transcript text is also stripped at `clipText`. This is the
  * last line, not the only one.
  *
  * @param {unknown} value
@@ -61,7 +61,7 @@ const s = sanitizeForTerminal;
 // A live check that runs beside others (or whose verdict needs its first
 // failure line) captures the ok/warn/fail/info/heading lines it prints, scoped
 // by AsyncLocalStorage so parallel checks never mix their lines. `echo` also
-// prints them, as a sequential `ak x verify` run does.
+// prints them, as a sequential `ak status --refresh=live` run does.
 const captureScope = new AsyncLocalStorage();
 
 /**
@@ -142,6 +142,46 @@ export async function withProgress(label, thunk, {
     if (timer) clearInterval(timer);
     if (tty) out.write('\r\x1b[K'); // erase the ticker line
   }
+}
+
+/** Under --json, send everything written to stdout during `fn` (ok/warn/fail/
+ *  info lines, the plan listing, prompts, progress) to stderr instead, and
+ *  let the step tracer collect it while `capture.chunks` is set. stdout is
+ *  restored even when `fn` throws, so the one JSON result lands on it alone. */
+export async function humanOutputToStderr(fn) {
+  const capture = { chunks: null };
+  const restore = stdoutToStderr(capture);
+  try {
+    return await fn(capture);
+  } finally {
+    restore();
+  }
+}
+
+/** Send stdout writes to stderr (collected in `capture.chunks` while it is
+ *  set) until the returned function restores stdout. */
+function stdoutToStderr(capture) {
+  const stdoutWrite = process.stdout.write;
+  // stderr.write is looked up on every call, so a caller's own wrapper still sees it.
+  const toStderr = (...args) => {
+    capture.chunks?.push(String(args[0]));
+    return Reflect.apply(process.stderr.write, process.stderr, args);
+  };
+  process.stdout.write = /** @type {typeof process.stdout.write} */ (/** @type {unknown} */ (toStderr));
+  return () => { process.stdout.write = stdoutWrite; };
+}
+
+/** Report a failure the way the invocation asked for it. Without --json,
+ *  `human` prints as usual. With it, everything `human` prints goes to stderr
+ *  and stdout carries `payload` as the one JSON object, so a `--json` caller
+ *  always gets JSON, even for a rejected option or an unreadable kit.json
+ *  (ADR-0063). `human` must be synchronous.
+ *  @param {{ json: boolean, payload: Record<string, unknown>, human: () => void }} input */
+export function reportFailure({ json, payload, human }) {
+  if (!json) { human(); return; }
+  const restore = stdoutToStderr({ chunks: null });
+  try { human(); } finally { restore(); }
+  console.log(JSON.stringify(payload, null, 2));
 }
 
 /** How long the drain below is allowed to take before the process exits

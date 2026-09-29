@@ -189,13 +189,27 @@ After 6a.
 
 ---
 
-## Wave 4 — session surface and usage accuracy
+## Restructure (maintainer, 2026-09-28)
 
-### Branch 7: `feat/session-surface`
+After about 28 attended hours, the maintainer cut the remaining program to three pull requests:
+
+- **Branch 6b** absorbs 6c (the dashboard's single Refresh control).
+- **Branches 7 and 8** become one branch, `fix/usage-accuracy`: the session-surface items first, then the capture backlog, on the same parsers.
+- **Branch 9** is trimmed and runs in parallel with 6b in `../agentic-kit-b9`. Its items 4, 5 and 8 moved to issues #254, #256 and #255; Branch 7's optional item 7 (Cowork) moved to #257.
+
+The controller now pushes, opens pull requests, squash-merges when CI is green and the final review is clean, and removes each merged branch and worktree. Merged means verified contained in main; anything holding unmerged work is listed for the maintainer. Local main is fast-forwarded before each branch starts.
+
+## Wave 4 — session surface and usage accuracy (one branch: `fix/usage-accuracy`)
+
+### Branch 7: `feat/session-surface` (merged into `fix/usage-accuracy`)
 
 After Branch 1; its UI part after Branch 6b. Requires ADR-0060 accepted.
 
-**Open decisions to ask first (ADR-0060 open questions):** whether "Cloud session" appears in local views; whether to show "on 3P"; how ADR-0057's role lenses consume surface and initiator.
+**Decided (maintainer, 2026-09-28, ADR-0060's open questions):**
+
+- "Cloud session" stays in the shared label table but appears in a view only when at least one such session was recorded.
+- For "on 3P", discover and record the actual third-party provider (Amazon Bedrock, Google Vertex, OpenRouter, any other host of Claude models) whenever the evidence allows, and show it in the detail view.
+- ADR-0057's role lenses are deferred to v5: this branch builds only the shared vocabulary module that any later lens can read.
 
 1. One vocabulary module (raw value → surface → initiator → label); remove the five copies of the origin enum.
 2. Usage cache schema bump carrying surface, initiator and raw evidence.
@@ -203,11 +217,11 @@ After Branch 1; its UI part after Branch 6b. Requires ADR-0060 accepted.
 4. Counting rules (Claude by `sessionId`, excluding `subagents/` and `bridge-session` files).
 5. Runtime census symmetry: `Claude.app` and `ChatGPT.app` are desktop applications, not hosts; bundled CLIs attributed to their sessions.
 6. UI: one label per value across Usage, System → Projects, Maintenance and Intelligence (`unknown` has one label; Intelligence's designation split by axis).
-7. Optional: Cowork transcripts as a discovery source.
+7. Moved to #257: Cowork transcripts as a discovery source.
 
-### Branch 8: `fix/usage-capture-backlog`
+### Branch 8: `fix/usage-capture-backlog` (merged into `fix/usage-accuracy`)
 
-After Branch 7 (shared parsers).
+Runs after Branch 7's items, in the same branch (shared parsers).
 
 One unit commit per item, each starting with a reproduction on real data (counts only): O-7 session-level `byProvider` last-wins; X-7 unpriced auto-review models (classification lands in Branch 7); X-8 unread Codex fields (effort, time to first token, compaction); C-6 Claude `cost-state` as a reconciliation signal; C-8 cross-file message-id dedup; C-9 local-timezone day bucketing frozen in the cache; C-11 unknown-record counter; O-6/O-9–O-12 OpenCode items; the statusLine classifier reading managed settings; a shell wrapper around the footer helper classed as `custom`.
 
@@ -220,14 +234,22 @@ One unit commit per item, each starting with a reproduction on real data (counts
 1. M1b: a failed source's banner outlives its Discovery row after restart.
 2. N4: the two-store memory warning gains an acknowledgment path (the stores stay separate by Ruflo's design, ruvnet/ruflo#2786).
 3. N5: verify and correct the partial Codex parsing advisory.
-4. L4b: capture a browser network trace of the stuck "CONNECTING" stream; fix with evidence or close.
-5. F1: the worker early-warning monitor from #239 — a new capability, so a short design (brainstorm and spec) precedes its code.
+4. Moved to #254: L4b, the browser network trace for the stuck "CONNECTING" stream.
+5. Moved to #255: F1, the worker early-warning monitor from #239.
 6. A per-machine acknowledgment for hook-contract changes.
 7. Prune ak's per-write settings safety copies (undo uses receipts).
-8. Live: a file re-entering the window at restart is read from its start; observe the plain-folder bind on a real machine; the structured live-events path has fixture evidence only because nothing produces such a file yet — document it as experimental or add a producer.
+8. Moved to #256: the live-view observations (re-entering files, plain-folder bind, structured live-events).
 9. The committed rendered test for the About install-edit line.
 10. Complete the `docs/adr/README.md` index table past ADR-0052.
 11. Status wording when both the repository root and the folder are unsuitable.
+12. Test temp-folder cleanup: research first, then implement. On 2026-09-28 the shared temp folder held about 34,000 `ak-*` entries under 120 test prefixes (largest: `ak-usage`, `ak-adapter-conformance-cli`, `ak-quota`, `ak-live-service`), all dated 2026-09-25 to 2026-09-27 11:47. That is before the guarded runner (`scripts/run-tests.mjs`, #245) gave each run its own temp root, and none are newer. Three runner roots (`ak-suite-*`, 2026-09-27) survive from runs stopped before they finished: the runner removes its root only after a complete run, and nothing later collects an abandoned one. Focused `node --test <file>` runs, which every task brief uses, bypass the runner and still write to the shared temp folder. Requirement (maintainer, 2026-09-28): suites clean up after themselves, only after a complete run, never prematurely or naively. Analyse before building: which tests leak on failure paths; how concurrent gate runs in parallel worktrees share the temp folder; how a root is proven abandoned (its owning process is gone, not merely old); and Windows file locks. Then implement and prove: a later complete run collects abandoned runner roots without touching a live concurrent run; focused runs get the same per-run root and leftover report; and the pre-runner backlog gets a reviewed one-time clean-up, listed by literal path for the maintainer (deletion rule). Exit: a full run and a focused run each leave the shared temp folder unchanged, including after an interrupted run.
+13. Branch 6a leftovers (maintainer, 2026-09-28; the `drift()` failed-fetch bug moved into Branch 6b instead):
+    - (moved to 6b Task 14) fix ADR-0063's sentence that says `setup.mjs` was extended and then lists `ak setup` as unaffected;
+    - test the evidence re-record sites in `x/daemon-gc.mjs`, `setup.mjs` and `x/host.mjs`;
+    - (moved to 6b Task 11) guard `refreshPlanHosts` in `sync.mjs` with a try/catch that reports a failed probe;
+    - replace ephemeral task and fix-round labels in test comments with durable references;
+    - make `paths.mjs` and `knownFileSpecs()` ignore a relative `XDG_*` value, as the XDG Base Directory spec requires (a relative `XDG_STATE_HOME` makes `dashboard.test.cjs` fail every time);
+    - teach the real-state tripwire's concurrent-writer list the live session's Ruflo files (`.claude-flow/`, `.claude/proven-config.json`, `.claude/.proven-config-version`).
 
 Housekeeping (no branch; each with the maintainer's go-ahead): delete the merged remote `feat/managed-ruflo-components`; retire `../agentic-kit-wt-213` after a final diff against `main`; review and drop the three stashes; decide dependabot #231; the three unreceipted Ruflo install edits stay documented (reinstall restores them).
 
@@ -244,8 +266,8 @@ These predate the workstream and need a go or no-go before any plan: the Environ
 | 0 | 0 | — |
 | 1 | 1, 2, 3, 4 | 1, 2 and 4 alongside 3 |
 | 2 | 5 | — (after 3) |
-| 3 | 6a, 6b | — (after 3 and 5) |
-| 4 | 7, 8 | 7's non-UI part alongside 6a |
-| 5 | 9 | alongside 8 |
+| 3 | 6a, 6b (with 6c folded in) | — (after 3 and 5) |
+| 4 | `fix/usage-accuracy` (7 + 8) | — (after 6b merges) |
+| 5 | 9 (trimmed) | alongside 6b, from 2026-09-28 |
 
-Each branch ends with: the full gate set with the real-state tripwire, an adversarial review, the documentation gate, CI including Windows on a pushed branch (with go-ahead), and a pull request for the maintainer to merge.
+Each branch ends with: the full gate set with the real-state tripwire, an adversarial review, the documentation gate, CI including Windows on a pushed branch, and a pull request the controller squash-merges when CI is green and the final review is clean (see the Restructure section above).

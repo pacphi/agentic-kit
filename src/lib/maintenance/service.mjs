@@ -58,7 +58,7 @@ function scanRequiredModel({ status = 'not-scanned', now = Date.now } = {}) {
     observedUsage: { status: 'not-measured', statement: 'Usage evidence is unavailable.' },
     consumerHosts: { basis: 'not-measured', hosts: [], count: 0, truncated: false },
     impact: { summary: 'Scanning changes no installed resource.', bytes: null, files: null, dependencies: 'unknown', preserved: ['All installed resources'] },
-    nextAction: { operation: 'scan', label, providerId: 'system.deep-scan', providerVersion: '1', safetyClass: 'never-automatic', rollback: 'reversible', restart: 'not-required', executable: false, recommendation: label, steps: ['Use Rescan in System to measure files and native provider inventories.', 'Return to Maintenance when the scan completes.'], preserved: ['All installed resources'], blockedReason: 'A current saved scan is required before Maintenance can recommend changes.' },
+    nextAction: { operation: 'scan', label, providerId: 'system.deep-scan', providerVersion: '1', safetyClass: 'never-automatic', rollback: 'reversible', restart: 'not-required', executable: false, recommendation: label, steps: ['Run `ak maintain --refresh=machine` to measure the machine.', 'Return to Maintenance when the scan completes.'], preserved: ['All installed resources'], blockedReason: 'A current saved scan is required before Maintenance can recommend changes.' },
   };
   return deepFreeze({
     schemaVersion: 1, mode: 'control-plane', capabilities: NO_CONTROL_CAPABILITIES,

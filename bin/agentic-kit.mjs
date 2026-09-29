@@ -4,8 +4,9 @@
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { fail, dim, exitWhenFlushed } from '../src/lib/output.mjs';
+import { fail, dim, exitWhenFlushed, reportFailure } from '../src/lib/output.mjs';
 import { nodeRuntimeError } from '../src/lib/node-runtime.mjs';
+import { normalizeBareRefresh } from '../src/lib/refresh.mjs';
 
 const runtimeError = nodeRuntimeError();
 if (runtimeError) {
@@ -56,7 +57,6 @@ const PLUMBING = Object.assign(Object.create(null), {
   'skills': () => import('../src/commands/x/skills.mjs'),
   'codex-context': () => import('../src/commands/x/codex-context.mjs'),
   'statusline': () => import('../src/commands/x/statusline.mjs'),
-  'verify': () => import('../src/commands/x/verify.mjs'),
 });
 
 const HELP = `agentic-kit — machine-level setup, healing, and verification for ruflo + agentic-qe
@@ -64,20 +64,20 @@ const HELP = `agentic-kit — machine-level setup, healing, and verification for
 Usage (ak = alias of agentic-kit):
   ak                 status + suggested next action
   ak setup           first-time setup (machine and/or this project)    [--project] [--minimal] [--yes]
-  ak status          read-only dashboard: what's true, what's drifted  [--json] [--deep] [--live]
+  ak status          read-only dashboard: what's true, what's drifted  [--json] [--refresh[=live|machine]]
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade] [--skip SUBSYSTEM] [--json]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak usage           offline scorecard, prompt patterns, provider cache  [status|score|prompts|refresh openrouter]
   ak telemetry       export, validate and aggregate fleet evidence   [export|validate|aggregate|schema|metrics]
   ak models          inspect/refresh model lifecycle evidence  [status|refresh|diff|explain|plan]
-  ak system          what this stack occupies on your machine   [--deep] [--json]
-  ak maintain        inventory, guidance, discovery, guarded one-action plans  [inventory|guidance|plan|apply|...] [--json]
+  ak system          what this stack occupies on your machine   [--refresh[=live|machine]] [--json]
+  ak maintain        findings, guidance, discovery, guarded one-action plans  [--refresh[=live|machine]] [inventory|guidance|plan|apply|...] [--json]
   ak about           what agentic-kit installs and configures, and why  [--category N]
   ak audit hooks     read-only host-neutral hook inventory + remediation plan [--host HOST] [--json]
   ak heal hooks      dry-run hook healing plan; explicit apply/verify/undo     [--host HOST] [--json]
   ak run             execute a host-neutral activity pipeline  [template "task"] [--dry-run]
-  ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off]
+  ak host            manage agent hosts, routing, and provider bindings  [status|pick|reset-routes|off|check-connection]
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
 
   When in doubt: ak sync
@@ -100,16 +100,32 @@ Plumbing (power users) — each takes --help:
   ak x dashboard [--port N]    local health and guarded maintenance dashboard (localhost only)
   ak x harvest [--dry-run]     opt-in learning-write: replay experiences into the substrate
   ak x mcp [status|pick|off]   MCP registration + tool-family deny rules
-  ak x host [status|pick|refresh|off]   manage hosts, routing, and provider bindings
+  ak x host [status|pick|reset-routes|off|check-connection]   manage hosts, routing, and provider bindings
   ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
   ak x skills plan             read-only project skill evidence + remediation plan
   ak x codex-context [status|max|off]   manage native Codex context capacities
   ak x statusline [status|codex native|codex extended|codex off]   manage Codex's native user status line
-  ak x verify [learning|security|aqe|providers|harvest|all]   deep proofs (slow, spawns real CLIs)
   ak x improvement-eval [...]  causal self-improvement eval (route Q-learner)`;
 
 /** True if the arg list is asking for help rather than an action. */
 const wantsHelp = (args) => args.includes('--help') || args.includes('-h');
+
+/** A bare `--refresh` is the local refresh strength (ADR-0063). parseArgs
+ *  cannot express an optional value, so for a command whose refresh option
+ *  takes one the exact token becomes `--refresh=` before parsing. */
+const refreshArgs = (mod, args) => (mod.options?.refresh?.type === 'string' ? normalizeBareRefresh(args) : args);
+
+/** The tokens before a `--` terminator: everything after it is a positional,
+ *  never an option (a `--json` there does not ask for JSON). */
+const optionTokens = (args) => (args.includes('--') ? args.slice(0, args.indexOf('--')) : args);
+
+/** A command's own help, or its flag list when it has none. */
+const commandHelp = (cmd, mod) => mod.help ?? `ak ${cmd} — flags: ${
+  Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`;
+
+/** True once the command's options parsed with --json set, so a fatal error
+ *  reported after that point still answers with one JSON object. */
+let jsonRequested = false;
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -160,8 +176,7 @@ async function main() {
   // Per-command help — intercepted BEFORE run() so mutating commands
   // (setup, sync, uninstall) never fire on `ak <cmd> --help`.
   if (wantsHelp(rest)) {
-    console.log(mod.help ?? `ak ${cmd} — flags: ${
-      Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`);
+    console.log(commandHelp(cmd, mod));
     return 0;
   }
 
@@ -171,7 +186,7 @@ async function main() {
   let parsed;
   try {
     parsed = parseArgs({
-      args: rest,
+      args: refreshArgs(mod, rest),
       options: mod.options ?? {},
       allowPositionals: true,
       strict: true,
@@ -182,12 +197,19 @@ async function main() {
       console.error('Telemetry failed: invalid command options.');
       return 2;
     }
-    fail(`ak ${cmd}: ${err.message}`);
-    console.log(mod.help ?? `ak ${cmd} — flags: ${
-      Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`);
+    // Under --json a rejected option still answers with one JSON object (the
+    // command's own empty result when it defines one, as `ak sync` does); the
+    // message and the help go to stderr. A retired spelling gets the parser's
+    // generic message, with no hint (ADR-0063).
+    reportFailure({
+      json: Boolean(mod.options?.json) && optionTokens(rest).includes('--json'),
+      payload: mod.jsonUsageError?.(err.message) ?? { error: err.message, exitCode: 2 },
+      human: () => { fail(`ak ${cmd}: ${err.message}`); console.log(commandHelp(cmd, mod)); },
+    });
     return 2;
   }
   const { values, positionals } = parsed;
+  jsonRequested = values.json === true;
 
   // Experimental host-adapter bootstrap (Wave 4, adapter door) — the single
   // place every command passes through. Gated on the env var BEFORE anything
@@ -220,7 +242,11 @@ async function main() {
   // setup and host own complete mutation/reporting flows. Running the generic
   // nudge after a declined trust preflight could write version-cache state and
   // violate their "before any changes" boundary.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store'].includes(cmd)) {
+  // Also skipped when the command itself refused to run (exit code 2, a
+  // parser or command-level usage error): a rejected `ak status --refresh=bogus`
+  // never got as far as doing anything, so it must not spend network calls a
+  // parse error never used to.
+  if (code !== 2 && !values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {
@@ -243,28 +269,25 @@ async function main() {
   return code ?? 0;
 }
 
-const shellQuote = (value) => process.platform === 'win32'
-  ? `'${String(value).replaceAll("'", "''")}'`
-  : `'${String(value).replaceAll("'", "'\"'\"'")}'`;
-
-function reportFatal(err) {
-  if (err?.name === 'KitConfigError' && typeof err.configPath === 'string') {
-    const backup = `${err.configPath}.invalid`;
-    fail(err.message);
-    console.log('Recovery (the original is preserved):');
-    if (process.platform === 'win32') {
-      console.log(`  Move-Item -LiteralPath ${shellQuote(err.configPath)} -Destination ${shellQuote(backup)}`);
-    } else {
-      console.log(`  mv -- ${shellQuote(err.configPath)} ${shellQuote(backup)}`);
-    }
-    console.log('  ak status');
-    console.log(`Then compare ${backup} with the regenerated defaults and restore only the intended values.`);
-    return;
-  }
-  fail(err?.stack ?? String(err));
+/** A command that threw. An unreadable kit.json gets its recovery commands;
+ *  anything else its stack. Under --json stdout carries one JSON object,
+ *  `{ error, exitCode: 1 }` plus `recovery` for kit.json, and the human lines
+ *  go to stderr. The config module loads here, not at startup, so the bin
+ *  stays cheap to start. */
+async function reportFatal(err) {
+  const config = await import('../src/lib/config.mjs').catch(() => null);
+  const recovery = config?.configErrorRecovery(err) ?? null;
+  reportFailure({
+    json: jsonRequested,
+    payload: { error: err?.message ?? String(err), exitCode: 1, ...(recovery ? { recovery } : {}) },
+    human: () => {
+      fail(recovery ? err.message : err?.stack ?? String(err));
+      for (const line of recovery ? config.configRecoveryLines(recovery) : []) console.log(line);
+    },
+  });
 }
 
 main().then(
   (code) => exitWhenFlushed(code),
-  (err) => { reportFatal(err); exitWhenFlushed(1); },
+  (err) => reportFatal(err).finally(() => exitWhenFlushed(1)),
 );

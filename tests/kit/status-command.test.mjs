@@ -8,11 +8,12 @@ import { normalizeStatusObservations } from './helpers/status-observations.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
-  sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
+  sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot, spawnEnv,
 } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-status');
@@ -528,7 +529,7 @@ test('the AQE readiness hint is a manual step, never a sync plan item', async ()
   seedHome();
   fs.mkdirSync(paths.projectAqeDir(PROJECT), { recursive: true });
   try {
-    const hint = rowsFor(await collect(), 'aqe').find((r) => /ak x verify aqe/.test(r.fix ?? ''));
+    const hint = rowsFor(await collect(), 'aqe').find((r) => /ak status --refresh=live --only aqe/.test(r.fix ?? ''));
     assert.ok(hint, 'the initialized-project hint must surface');
     assert.equal(hint.repair, 'manual');
   } finally {
@@ -797,6 +798,228 @@ test('run() without --hint suggests nothing (bare rows only)', async () => {
     assert.ok(!/need attention — run/.test(out));
     assert.match(out, /ak status/);
   } finally { process.chdir(cwd); }
+});
+
+// ── --refresh[=live|machine] (ADR-0063) ──────────────────────────────────────
+// Every run below injects its stages (a real base refresh builds the
+// Maintenance service, which writes <state>/agentic-kit/maintenance/). A
+// --json run spawns a child so its real stdout and stderr can be read apart:
+// status swaps process.stdout.write under --json with a refresh, which must
+// not happen inside the test runner's own process.
+
+const BIN = path.join(PKG_ROOT, 'bin', 'agentic-kit.mjs');
+const moduleUrl = (rel) => pathToFileURL(path.join(PKG_ROOT, rel)).href;
+
+/** Fake stages that print through the shared helpers, as real stages can. */
+const FAKE_STAGES = `{
+  machine: async () => { output.info('measuring (fake)'); return { ok: FAIL_MACHINE ? false : true, detail: FAIL_MACHINE ? 'walk failed' : null }; },
+  maintenance: async () => { output.ok('maintenance evidence (fake)'); return { ok: true, detail: 'checked 1 of 1 providers' }; },
+  inventory: async () => { output.warn('inventory rebuilt (fake)'); return { ok: true }; },
+  live: async () => {
+    output.warn('memory: could not remember this live check result; ak status will not show it');
+    return { ok: true, result: [{ id: 'memory', status: 'passed', reason: null, elapsedMs: 9 }] };
+  },
+  local: async () => {
+    if (FAIL_LOCAL) throw new Error('re-check exploded');
+    output.info('re-checking (fake)');
+    return { ok: true, result: [row('versions', 'ok', 'fake versions row')] };
+  },
+}`;
+
+/** status.run({ flags, deps: { refreshStages } }) in a sandboxed child. */
+function statusChild(flags, { failMachine = false, failLocal = false } = {}) {
+  const script = `
+    const paths = await import(${JSON.stringify(moduleUrl('src/lib/paths.mjs'))});
+    paths._setGlobalRootForTest(${JSON.stringify(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }))});
+    const status = await import(${JSON.stringify(moduleUrl('src/commands/status.mjs'))});
+    const output = await import(${JSON.stringify(moduleUrl('src/lib/output.mjs'))});
+    const { row } = await import(${JSON.stringify(moduleUrl('src/commands/status/row.mjs'))});
+    const FAIL_MACHINE = ${failMachine};
+    const FAIL_LOCAL = ${failLocal};
+    const refreshStages = ${FAKE_STAGES};
+    output.exitWhenFlushed(await status.run({ flags: ${JSON.stringify(flags)}, pkgRoot: ${JSON.stringify(PKG_ROOT)},
+      deps: { refreshStages } }));
+  `;
+  return spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: PROJECT, env: spawnEnv(HOME, { NO_COLOR: '1' }), encoding: 'utf8', timeout: 120_000,
+  });
+}
+
+/** stdout must hold exactly one JSON value; JSON.parse rejects anything else. */
+function oneJson(child) {
+  assert.ok(child.stdout.trim().startsWith('{'), `stdout is not a JSON object:\n${child.stdout}\n--- stderr:\n${child.stderr}`);
+  return JSON.parse(child.stdout);
+}
+
+/** The real CLI in a sandboxed child. */
+const akStatus = (...args) => spawnSync(process.execPath, [BIN, 'status', ...args], {
+  cwd: PROJECT, env: spawnEnv(HOME, { NO_COLOR: '1' }), encoding: 'utf8', timeout: 120_000,
+});
+
+/** A line printRefreshStage would print, in any state. */
+const STAGE_LINE = /^(?:[✓⚠ℹ] +)?(?:Measuring the machine|Refreshing Maintenance evidence|Rebuilding the inventory|Running live checks|Re-checking local evidence and versions)\b/m;
+
+test('--refresh --json prints one JSON object that lists each stage in order; no stage lines, stage output on stderr', () => {
+  seedHome();
+  const child = statusChild({ refresh: '', json: true });
+  const parsed = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(Object.keys(parsed), ['overall', 'rows', 'refresh']);
+  assert.equal(parsed.overall, 'ok');
+  assert.deepEqual(parsed.rows, [{ subsystem: 'versions', level: 'ok', message: 'fake versions row', fix: null, repair: null }],
+    'the rows are the local stage\'s re-check');
+  assert.equal(parsed.refresh.strength, 'local');
+  assert.equal(parsed.refresh.ok, true);
+  assert.deepEqual(parsed.refresh.stages.map(({ id, state }) => [id, state]),
+    [['maintenance', 'done'], ['inventory', 'done'], ['local', 'done']]);
+  for (const stage of parsed.refresh.stages) {
+    assert.deepEqual(Object.keys(stage), ['id', 'label', 'state', 'detail', 'elapsedMs'], 'no stage result leaks into the JSON');
+  }
+  assert.equal(parsed.refresh.stages[0].label, 'Refreshing Maintenance evidence');
+  assert.equal(parsed.refresh.stages[0].detail, 'checked 1 of 1 providers');
+  assert.match(child.stderr, /^✓ maintenance evidence \(fake\)$/m, 'what a stage itself prints goes to stderr');
+  assert.match(child.stderr, /inventory rebuilt \(fake\)/);
+  assert.doesNotMatch(child.stderr, STAGE_LINE, 'the per-stage lines are not printed under --json');
+});
+
+test('--refresh=live --json stays one JSON object when a live result cannot be remembered', () => {
+  seedHome();
+  const child = statusChild({ refresh: 'live', json: true });
+  const parsed = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(parsed.live, [{ id: 'memory', status: 'passed', reason: null, elapsedMs: 9 }]);
+  assert.deepEqual(parsed.refresh.stages.map(({ id }) => id), ['maintenance', 'inventory', 'live', 'local']);
+  assert.match(child.stderr, /memory: could not remember this live check result; ak status will not show it/);
+  assert.doesNotMatch(`${child.stdout}${child.stderr}`, STAGE_LINE, 'no live start line and no stage lines under --json');
+});
+
+test('a failed refresh stage exits 1; a failed machine stage skips maintenance and inventory', () => {
+  seedHome();
+  const child = statusChild({ refresh: 'machine', json: true }, { failMachine: true });
+  const parsed = oneJson(child);
+  assert.equal(child.status, 1, child.stderr);
+  assert.equal(parsed.refresh.ok, false);
+  assert.deepEqual(parsed.refresh.stages.map(({ id, state }) => [id, state]),
+    [['machine', 'failed'], ['maintenance', 'skipped'], ['inventory', 'skipped'], ['local', 'done']]);
+  assert.equal(parsed.refresh.stages[0].detail, 'walk failed');
+  assert.equal(parsed.overall, 'ok', 'the rows themselves are healthy; the exit code comes from the refresh');
+});
+
+test('--refresh=machine --json on a terminal keeps the elapsed-time ticker off stdout', () => {
+  // The machine stages run under withProgress, whose ticker writes to stdout
+  // whenever stdout is a terminal; under --json that write must land on stderr.
+  const script = `
+    process.stdout.isTTY = true;
+    const status = await import(${JSON.stringify(moduleUrl('src/commands/status.mjs'))});
+    const refresh = await import(${JSON.stringify(moduleUrl('src/lib/refresh.mjs'))});
+    const { exitWhenFlushed } = await import(${JSON.stringify(moduleUrl('src/lib/output.mjs'))});
+    const wait = () => new Promise((resolve) => setTimeout(resolve, 20));
+    const deps = {
+      collector: { refreshDeep: async () => { await wait(); return { ok: true, persisted: { ok: true } }; } },
+      maintenance: { scan: async () => ({ scan: {} }) },
+      management: { refreshInventory: async () => ({}), rebuildAfterMeasurement: async () => { await wait(); return {}; } },
+      collect: async () => [{ subsystem: 'versions', level: 'ok', message: 'fake versions row', fix: null, repair: null }],
+    };
+    const refreshStages = refresh.cliRefreshStages({ cwd: process.cwd(), pkgRoot: ${JSON.stringify(PKG_ROOT)}, deps });
+    exitWhenFlushed(await status.run({ flags: { refresh: 'machine', json: true }, positionals: [],
+      pkgRoot: ${JSON.stringify(PKG_ROOT)}, deps: { refreshStages } }));
+  `;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: PROJECT, env: spawnEnv(HOME, { NO_COLOR: '1' }), encoding: 'utf8', timeout: 120_000,
+  });
+  const parsed = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(parsed.refresh.stages.map(({ id, state }) => [id, state]),
+    [['machine', 'done'], ['maintenance', 'done'], ['inventory', 'done'], ['local', 'done']]);
+  assert.match(child.stderr, /⏳ Measuring the machine/);
+  assert.match(child.stderr, /⏳ Rebuilding the inventory/);
+});
+
+test('a failed local re-check falls back to the plain rows and says so', () => {
+  seedHome();
+  const child = statusChild({ refresh: '', json: true }, { failLocal: true });
+  const parsed = oneJson(child);
+  assert.equal(child.status, 1, child.stderr);
+  assert.equal(parsed.refresh.stages.at(-1).state, 'failed');
+  const note = parsed.rows.filter((r) => r.subsystem === 'refresh');
+  assert.deepEqual(note, [{ subsystem: 'refresh', level: 'warn', message: 'local re-check failed: re-check exploded', fix: null, repair: null }]);
+  assert.ok(parsed.rows.length > 1, 'the plain status rows are still reported');
+});
+
+test('--refresh prints one line per finished stage, then the status table', async () => {
+  seedHome();
+  const calls = [];
+  const refreshStages = Object.fromEntries(['maintenance', 'inventory', 'local'].map((id) => [id, async (ctx) => {
+    calls.push([id, ctx.strength]);
+    return id === 'local'
+      ? { ok: true, result: [{ subsystem: 'versions', level: 'ok', message: 'fake versions row', fix: null, repair: null }] }
+      : { ok: true, detail: null };
+  }]));
+  const cwd = process.cwd();
+  process.chdir(PROJECT);
+  let r;
+  try {
+    r = await captureLog(() => status.run({ flags: { refresh: '' }, pkgRoot: PKG_ROOT, deps: { refreshStages } }));
+  } finally { process.chdir(cwd); }
+  assert.equal(r.result, 0, r.out);
+  assert.deepEqual(calls, [['maintenance', 'local'], ['inventory', 'local'], ['local', 'local']]);
+  const lines = r.out.split('\n');
+  assert.match(lines[0], /^✓ Refreshing Maintenance evidence \(\d+ ms\)$/);
+  assert.match(lines[1], /^✓ Rebuilding the inventory/);
+  assert.match(lines[2], /^✓ Re-checking local evidence and versions/);
+  assert.match(r.out, /ak status\n.*versions +fake versions row/);
+});
+
+test('plain status runs no refresh stage', async () => {
+  seedHome();
+  let calls = 0;
+  const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
+  const cwd = process.cwd();
+  process.chdir(PROJECT);
+  let r;
+  try {
+    r = await captureLog(() => status.run({ flags: {}, positionals: ['extra'], pkgRoot: PKG_ROOT, deps: { refreshStages } }));
+  } finally { process.chdir(cwd); }
+  assert.equal(calls, 0);
+  assert.notEqual(r.result, 2, 'plain status still ignores a positional, as it always has');
+});
+
+test('a refresh with a stray argument is a usage error that names the one-token spelling', async () => {
+  let calls = 0;
+  const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
+  const runWith = (positionals) => captureLog(() => status.run({
+    flags: { refresh: '' }, positionals, pkgRoot: PKG_ROOT, deps: { refreshStages },
+  }));
+  const spaced = await runWith(['live']);
+  assert.equal(spaced.result, 2);
+  assert.equal(spaced.out, "✗ ak status: unexpected argument 'live' — write --refresh=live");
+  const other = await runWith(['report']);
+  assert.equal(other.result, 2);
+  assert.equal(other.out, "✗ ak status: unexpected argument 'report'");
+  assert.equal(calls, 0, 'no stage runs');
+
+  const cli = akStatus('--refresh', 'machine');
+  assert.equal(cli.status, 2, cli.stdout + cli.stderr);
+  assert.match(cli.stdout, /^✗ ak status: unexpected argument 'machine' — write --refresh=machine$/m);
+});
+
+test('the retired --deep and --live get the parser\'s generic unknown-option error', () => {
+  for (const flag of ['--deep', '--live']) {
+    const r = akStatus(flag);
+    assert.equal(r.status, 2, `${flag}: ${r.stdout}${r.stderr}`);
+    const error = r.stdout.split('\n').find((l) => l.includes('Unknown option')) ?? '';
+    assert.match(error, new RegExp(`^✗ ak status: Unknown option '${flag}'\\. To specify a positional argument`));
+    assert.doesNotMatch(`${r.stdout}${r.stderr}`, /did you mean|is now|renamed|retired|no longer/i, 'no alias and no hint');
+  }
+});
+
+test('the CLI rejects an unknown strength, and reads a bare --refresh without consuming the next token', () => {
+  const bogus = akStatus('--refresh=bogus');
+  assert.equal(bogus.status, 2, bogus.stdout + bogus.stderr);
+  assert.match(bogus.stdout, /✗ ak status: .*=live or =machine/);
+  const bare = akStatus('--refresh', '--project-trees');
+  assert.equal(bare.status, 2, bare.stdout + bare.stderr);
+  assert.match(bare.stdout, /✗ ak status: --project-trees needs --refresh=machine/);
 });
 
 test('a corrupt kit.json is reported instead of silently replaced with defaults', async () => {

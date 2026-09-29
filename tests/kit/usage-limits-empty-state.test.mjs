@@ -88,6 +88,11 @@ test('each Codex failure class renders its own cause and next check', () => {
     [{ reason: 'timeout' }, /did not answer in time/, /next refresh/],
     [{ reason: 'rpc-error', rpcCode: -32600 }, /refused the rate-limit request \(RPC error -32600\)/, /codex login status/],
     [{ reason: 'no-limit-windows' }, /reported no plan limit window/, /API-key/],
+    // ADR-0010: presence-gated reasons (providers.mjs recordedHostPresence) —
+    // no app-server call was ever attempted for either, so their copy
+    // describes absence/staleness of host evidence, not a refresh failure.
+    [{ reason: 'host-not-found' }, /not installed on this machine/, /quota is not requested/],
+    [{ reason: 'host-unconfirmed' }, /not checked for Codex/, /status check finds it/],
   ];
   for (const [codexUnavailable, cause, next] of cases) {
     const html = codexText({ codexUnavailable });
@@ -110,4 +115,20 @@ test('a stale Codex answer served after a failed refresh says the refresh failed
   assert.match(els['u-lim-codex-note'].textContent, /last refresh failed: exited \(code 2\)/);
   const fresh = renderLimitsWith(empty({ codex, codexUnavailable: null }));
   assert.doesNotMatch(fresh['u-lim-codex-note'].textContent, /refresh failed/);
+});
+
+// Fix round 1: a cached figure served under a presence-gated reason (no spawn
+// was ever attempted) must say "not refreshed", never "last refresh failed" —
+// that phrase implies an attempt that did not happen.
+test('a cached Codex figure served under a presence-gated reason says "not refreshed", never "failed"', () => {
+  const codex = { provider: 'codex', fetchedAt: Date.now() - 3_600_000, planType: 'plus',
+    lanes: [{ id: 'codex', name: 'codex', windows: [{ label: 'weekly', usedPercent: 40, windowMinutes: 10080 }] }] };
+  const notFound = renderLimitsWith(empty({ codex, codexUnavailable: { reason: 'host-not-found' } }));
+  assert.match(notFound['u-lim-codex'].innerHTML, /class="mrow"/, 'the cached meters still render');
+  assert.match(notFound['u-lim-codex-note'].textContent, /not refreshed: codex not found/);
+  assert.doesNotMatch(notFound['u-lim-codex-note'].textContent, /failed/);
+
+  const unconfirmed = renderLimitsWith(empty({ codex, codexUnavailable: { reason: 'host-unconfirmed' } }));
+  assert.match(unconfirmed['u-lim-codex-note'].textContent, /not refreshed: not checked yet/);
+  assert.doesNotMatch(unconfirmed['u-lim-codex-note'].textContent, /failed/);
 });

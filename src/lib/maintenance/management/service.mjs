@@ -30,7 +30,7 @@ import {
   activity, auditInterruption, dispositions, exportReceiptMethod, receipt, recordDisposition, reconcile,
 } from './service-activity.mjs';
 import {
-  acceptRecipe, apply, checklist, planAction, prepareUndo, preferences, procedure, recipes, refreshRecipes,
+  acceptRecipe, apply, checklist, planAction, prepareUndo, preferences, procedure, recipes,
   savePreferences, setPreferredShell, undo, withdrawRecipe,
 } from './service-actions.mjs';
 
@@ -56,17 +56,16 @@ function freezeUnlessPathCarrying(name, fn) {
  * @param {{ maintenance?: any, collector?: any, modelStore?: any, hookReadModel?: any,
  *   loadConfig?: () => any, saveConfig?: (cfg: any) => void, controlRoot?: string,
  *   fsImpl?: typeof fs, now?: () => number, installationKey?: string,
- *   platform?: string, env?: NodeJS.ProcessEnv, walk?: Function, fetchImpl?: typeof fetch,
+ *   platform?: string, env?: NodeJS.ProcessEnv, walk?: Function,
  *   paths?: object, wslDistributions?: any[],
- *   recipeRegistry?: { url: string, allowlist: string[], publisherId: string },
  *   providerOptions?: object, collectIntegrationFacts?: Function }} [options]
  */
 export function createManagementService({
   maintenance = null, collector = null, modelStore = null, hookReadModel = null,
   loadConfig = loadKitConfig, saveConfig = saveKitConfig, controlRoot = maintenanceControlDir(),
   fsImpl = fs, now = Date.now, installationKey = undefined, platform = process.platform,
-  env = process.env, walk = walkTree, fetchImpl = undefined, paths = DEFAULT_PATHS,
-  wslDistributions = [], recipeRegistry = null, providerOptions = {},
+  env = process.env, walk = walkTree, paths = DEFAULT_PATHS,
+  wslDistributions = [], providerOptions = {},
   collectIntegrationFacts: collectIntegrationFactsOption = collectIntegrationFacts,
 } = {}) {
   const resolvedCollector = collector ?? createSystemCollector();
@@ -89,10 +88,8 @@ export function createManagementService({
     platform,
     env,
     walk,
-    fetchImpl,
     paths,
     wslDistributions,
-    recipeRegistry,
     providerOptions,
     collectIntegrationFacts: collectIntegrationFactsOption,
   });
@@ -131,7 +128,6 @@ export function createManagementService({
     prepareUndo: prepareUndo(ctx),
     undo: undo(ctx),
     recipes: recipes(ctx),
-    refreshRecipes: refreshRecipes(ctx),
     acceptRecipe: acceptRecipe(ctx),
     withdrawRecipe: withdrawRecipe(ctx),
     procedure: procedure(ctx),

@@ -237,6 +237,11 @@ test('INV-001: refreshInventory builds a valid inventory and persists it as last
   assert.equal(report.placementCount, 1);
 });
 
+test('the facade has no refreshRecipes method: recipe refresh has no user-reachable path (ADR-0048)', async (t) => {
+  const h = buildHarness(t);
+  assert.equal('refreshRecipes' in h.service, false);
+});
+
 test('PERF-001: report/inventory/placement/guidance never run the collector', async (t) => {
   const h = buildHarness(t);
   await h.service.refreshInventory();

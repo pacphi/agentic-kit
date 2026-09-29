@@ -62,6 +62,14 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0050](0050-dashboard-project-identity-and-context-reporting.md) | Dashboard project identity and context reporting | Implemented |
 | [0051](0051-supported-peer-delegation-and-host-realignment.md) | Supported peer delegation and scoped host realignment | Accepted; implemented locally |
 | [0052](0052-codex-usage-attribution.md) | Codex usage attribution: own usage, imports, segments, streaming | Accepted |
+| [0053](0053-host-setup-evidence-and-usage-diagnostics.md) | Qualified host health and separate usage diagnostics | Implemented |
+| [0054](0054-fleet-evidence-export.md) | Vendor-neutral fleet evidence export | Implemented |
+| [0055](0055-aqe-embedding-lifecycle.md) | AQE embedding lifecycle and qualified readiness | Implemented |
+| [0058](0058-managed-ruflo-components.md) | Managed ruflo components | Accepted (implementation in progress — see Implementation status) |
+| [0060](0060-session-surface-initiator-and-product-names.md) | Session surface, initiator and official product names | Proposed; §3 implemented for project discovery (2026-09-27), the rest staged follow-on |
+| [0061](0061-brain-reclaim-stuck-remediation.md) | RuvNet Brain "unresolved rollback state" remediation | Accepted |
+| [0062](0062-aqe-project-store-integrity.md) | AQE project store integrity | Accepted |
+| [0063](0063-evidence-store-and-refresh-vocabulary.md) | One evidence store and the refresh vocabulary | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -414,6 +422,8 @@ probes — native runtime, host setup, deja-vu, version drift, npm-global-root, 
 the ak launcher check — one shared envelope, one age rule per kind, and a `{refresh, record,
 source}` contract. A plain `ak status` and the dashboard's poll now spawn nothing when evidence is
 fresh (measured: 14 spawns cold, 0 warm, byte-identical payload), `--refresh` forces a live
-re-probe, and `record` controls only whether a fresh probe's result is persisted. It is the
-interim, no-suffix groundwork for Branch 6b's eventual `--refresh[=live|machine]` split; Maintenance's
-own scan controls and inventory store are untouched.
+re-probe, and `record` controls only whether a fresh probe's result is persisted. Branch 6b built
+the `--refresh[=live|machine]` flag syntax this groundwork was for, across `ak status`, `ak
+system` and `ak maintain`, and folded `ak x verify` into the `live` strength; Maintenance's own
+scan controls and inventory store are still untouched, and the dashboard's own Refresh/Reload
+controls remain future work.

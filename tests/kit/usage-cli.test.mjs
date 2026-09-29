@@ -508,12 +508,12 @@ test('ak usage prompts says no samples rather than zero when nothing was fingerp
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
-// ── prompts --deep: the exemplar tables ─────────────────────────────────────
+// ── prompts --show-text: the exemplar tables ────────────────────────────────
 
-test('ak usage prompts --deep joins verbatim text to the fingerprint findings', () => {
+test('ak usage prompts --show-text joins verbatim text to the fingerprint findings', () => {
   const sb = sandbox();
   const { reAsk, persona } = writePromptsCorpus(sb);
-  const result = ak(['usage', 'prompts', '--deep'], sb);
+  const result = ak(['usage', 'prompts', '--show-text'], sb);
   assert.equal(result.status, 0, result.stderr);
   for (const heading of [
     'Top short prompts',
@@ -531,14 +531,14 @@ test('ak usage prompts --deep joins verbatim text to the fingerprint findings', 
 
 // The deep pass reads transcripts and prints their text to the terminal. That
 // is the whole privacy boundary: nothing it reads may be written anywhere.
-test('ak usage prompts --deep writes nothing and mutates nothing', () => {
+test('ak usage prompts --show-text writes nothing and mutates nothing', () => {
   const sb = sandbox();
   writePromptsCorpus(sb);
   // Warm the index first, so the cache the aggregate tier rewrites is already
   // present and the comparison below isolates what the DEEP pass does.
   assert.equal(ak(['usage', 'prompts'], sb).status, 0);
   const before = treeDigest(sb.home);
-  const result = ak(['usage', 'prompts', '--deep'], sb);
+  const result = ak(['usage', 'prompts', '--show-text'], sb);
   assert.equal(result.status, 0, result.stderr);
   const after = treeDigest(sb.home);
   assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort(),
@@ -551,14 +551,14 @@ test('ak usage prompts --deep writes nothing and mutates nothing', () => {
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
-test('ak usage prompts --deep --json carries exemplars under an explicit key', () => {
+test('ak usage prompts --show-text --json carries exemplars under an explicit key', () => {
   const sb = sandbox();
   const { reAsk } = writePromptsCorpus(sb);
   const shallow = ak(['usage', 'prompts', '--json'], sb);
   assert.equal(shallow.status, 0, shallow.stderr);
   assert.equal(Object.hasOwn(JSON.parse(shallow.stdout), 'exemplars'), false,
     'the aggregate tier must never carry text, so it must not carry an exemplars key either');
-  const deep = ak(['usage', 'prompts', '--deep', '--json'], sb);
+  const deep = ak(['usage', 'prompts', '--show-text', '--json'], sb);
   assert.equal(deep.status, 0, deep.stderr);
   const value = JSON.parse(deep.stdout);
   assert.deepEqual(Object.keys(value.exemplars).sort(),
@@ -573,17 +573,29 @@ test('ak usage prompts --deep --json carries exemplars under an explicit key', (
 
 // ── the help surface ────────────────────────────────────────────────────────
 
-test('ak usage --help documents prompts, its windows, and what --deep prints', () => {
+test('ak usage --help documents prompts, its windows, and what --show-text prints', () => {
   const sb = sandbox();
   const result = ak(['usage', '--help'], sb);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /ak usage prompts \[--window 7\|14\|30\|all\] \[--deep\] \[--json\]/);
+  assert.match(result.stdout, /ak usage prompts \[--window 7\|14\|30\|all\] \[--show-text\] \[--json\]/);
   assert.match(result.stdout, /default all/, 'the unusual default has to be stated where it is read');
-  assert.match(result.stdout, /--deep/);
+  assert.match(result.stdout, /--show-text/);
   // The one thing a reader must not have to discover by accident.
   assert.match(result.stdout, /CONTAIN PROMPT TEXT/,
-    '--deep --json puts prompt text in the payload; the help must say so before someone redirects it');
+    '--show-text --json puts prompt text in the payload; the help must say so before someone redirects it');
+  assert.doesNotMatch(result.stdout, /--deep\b/, 'no legacy spelling in help');
   assert.equal(fs.existsSync(sb.sentinel), false);
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+test('the retired --deep flag gets the parser\'s generic unknown-option error', () => {
+  const sb = sandbox();
+  writePromptsCorpus(sb);
+  const result = ak(['usage', 'prompts', '--deep'], sb);
+  assert.equal(result.status, 2, `${result.stdout}${result.stderr}`);
+  const error = result.stdout.split('\n').find((l) => l.includes('Unknown option')) ?? '';
+  assert.match(error, /^✗ ak usage: Unknown option '--deep'\. To specify a positional argument/);
+  assert.doesNotMatch(error, /did you mean|is now|renamed|retired|no longer/i, 'no alias and no hint');
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
@@ -609,7 +621,7 @@ test('ak --help advertises the offline reports, not only the provider cache', ()
 });
 
 // ── the mask boundary, pinned on every path text can reach a terminal ───────
-// `--deep` is the only tier that prints prompt text, and `maskSecrets` is the
+// `--show-text` is the only tier that prints prompt text, and `maskSecrets` is the
 // only thing standing between a pasted credential and the operator's scrollback.
 // There are FIVE distinct routes to a printed exemplar and every one masks
 // today; none was pinned, so a mask dropped from any single route would have
@@ -669,7 +681,7 @@ function writeMaskCorpus(sb) {
   return { fallbackFile: file('mask-fallback') };
 }
 
-/** The lines of one `--deep` section, up to the next section heading. */
+/** The lines of one `--show-text` section, up to the next section heading. */
 function section(stdout, title) {
   const lines = stdout.split('\n');
   const start = lines.findIndex((l) => l.trim() === title);
@@ -679,7 +691,7 @@ function section(stdout, title) {
   return (end === -1 ? rest : rest.slice(0, end)).join('\n');
 }
 
-test('ak usage prompts --deep masks secrets on every path text can reach the terminal', () => {
+test('ak usage prompts --show-text masks secrets on every path text can reach the terminal', () => {
   const sb = sandbox();
   const { fallbackFile } = writeMaskCorpus(sb);
   // Warm the index while the fallback transcript is still a readable file.
@@ -687,7 +699,7 @@ test('ak usage prompts --deep masks secrets on every path text can reach the ter
   fs.rmSync(fallbackFile);
   fs.mkdirSync(fallbackFile);
 
-  const result = ak(['usage', 'prompts', '--deep'], sb);
+  const result = ak(['usage', 'prompts', '--show-text'], sb);
   assert.equal(result.status, 0, result.stderr);
 
   // The whole-output claim first: the raw key never reaches a terminal at all.

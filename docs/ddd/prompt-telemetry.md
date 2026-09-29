@@ -38,8 +38,8 @@ Native transcript turn -> provenance gate -> privacy-bounded fingerprint
 Parser-time extraction is required because the fingerprint/cluster projection deliberately has
 no prompt text. Existing selected-session transcript access remains a separate content plane.
 Changing the closed facet contract therefore bumps the usage cache schema and reparses retained
-sources. Dashboard Delivery receives only fingerprints and aggregates; the explicit local `--deep`
-CLI remains ADR-0039's explicit text-bearing prompt-analysis path; it does not replace the
+sources. Dashboard Delivery receives only fingerprints and aggregates; the explicit local `--show-text`
+CLI flag remains ADR-0039's explicit text-bearing prompt-analysis path; it does not replace the
 existing authenticated transcript reader.
 
 The intent/topic facet contract was introduced by cache schema v18. Current usage schema v20

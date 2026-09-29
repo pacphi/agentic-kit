@@ -1,6 +1,7 @@
 # ADR-0063 — One evidence store and the refresh vocabulary
 
 - **Status:** Accepted
+- **Updated:** 2026-09-28 — Branch 6b delivered the CLI refresh vocabulary
 - **Date:** 2026-09-28
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (`/api/system/summary` projection),
@@ -96,9 +97,16 @@ still forces a real `refresh`/`record` when the user asked for one.
   use cached evidence when `!stale && !invalidated`; otherwise probe and record, whether or not
   `refresh` was requested. `refresh: true` always forces a fresh probe.
 - **Ruling B** — every new `refresh`/`record` parameter defaults to today's always-probe,
-  always-persist behavior, so no existing caller (heal, `ak x verify`, `ak setup`, the
-  post-command drift nudge) needed a code change merely to keep working exactly as before. Only
-  `status.mjs`'s `collect()` and `dashboard-server.mjs`'s in-process call (Task 9) pass `refresh`
+  always-persist behavior, so no existing caller (heal, the pre-6b verify checks folded into what
+  is now `ak status --refresh=live`, the post-command drift nudge) needed a code change merely to
+  keep working exactly as before. `ak setup` is not in that unaffected list: `setup.mjs`'s
+  `installEnabledAbsentHosts` was separately extended, in the same final-review round, to re-probe
+  and re-record `host-install-method`/`host-setup` evidence immediately after a successful install
+  (`hostInstallState(h, { refresh: true, record: true, source: 'setup' })` and
+  `collectIntegrationFacts({ cfg, refresh: true, record: true, source: 'setup' })`,
+  `setup.mjs:398,407`) — see "The `record` parameter" below for the same pattern applied to sync's
+  and `x/host.mjs`'s own install/repair/reap call sites. Only `status.mjs`'s `collect()` and
+  `dashboard-server.mjs`'s in-process call (Task 9) pass `refresh`
   explicitly as `false`, to prefer a fast warm-cache read. `sync.mjs`'s two internal `collect()`
   calls (building its plan, and its post-heal convergence re-check) do NOT pass `refresh` at all —
   a blanket `refresh: true` on either was tried in a later final-branch review round and reverted;
@@ -158,8 +166,11 @@ sites that mutate machine state (`sync.mjs`'s `hosts` and `daemons` steps, `setu
 were extended in the same final-review round to re-probe and re-record their own evidence
 immediately after a successful install/repair/reap — closing the "recorded before the repair,
 never after" half of the bug at its source, rather than relying solely on a later forced re-read to
-paper over it. Every other caller (`ak status`, the dashboard poll, `ak status --refresh`, `ak x
-verify`, `ak setup`) keeps `record: true` and persists as designed, unaffected by any of this.
+paper over it. Every caller not named above (`ak status`, the dashboard poll, `ak status
+--refresh`, the pre-6b verify checks now folded into `ak status --refresh=live`) keeps
+`record: true` and persists as designed, unaffected by this fix round; `ak setup` is named above,
+not here, because `setup.mjs`'s `installEnabledAbsentHosts` is one of the call sites this fix round
+extended.
 
 ### The `source` field
 
@@ -214,8 +225,10 @@ the one piece of this ADR's design most likely to surprise a future reader.
 - **The paid host connection-check proof** (`host-readiness.mjs`) — stays in-process, unpersisted,
   15-minute-capped, consent-gated. Untouched by this branch, by design (Decision 9).
 - **Maintenance scans** (`scan-store.mjs`, the machine-footprint deep snapshot) — stay in their own
-  files, entirely their own system, `--refresh=machine`'s eventual domain (Branch 6b). Not moved,
-  not touched.
+  files, entirely their own system. Branch 6b's `--refresh=machine` now drives them from the CLI
+  (its `maintenance` and `inventory` stages call the same `service.scan()` and
+  `management.rebuildAfterMeasurement()` this bullet names), but the storage itself is not moved
+  and not touched — see "Delivered in 6b" below.
 - **`ruflo-component` evidence** — does not route through the generic `readEvidence`/`writeEvidence`
   envelope at all; only its storage *location* moved under the shared `evidence/` directory (Task
   3). `apply.mjs`'s `classify()`, `snapshot.mjs`, and `status/sections/ruflo-components.mjs` access
@@ -244,35 +257,50 @@ envelope, since Task 2 moved `live-check-evidence.mjs`'s storage onto it. Readin
 shows this is not the case: `aqe-embedding.mjs`'s `verify` action calls `prepareAqeEmbedding()`
 directly and never calls `recordLiveCheck`/`rememberLiveCheck` — `prepareAqeEmbedding()` itself has
 no live-check-evidence import at all. The only two call sites that record the `aqe-embedding`
-live-check evidence row are `ak x verify`'s own `aqe-embedding` check
-(`src/commands/x/verify.mjs:625,697`, `source: 'verify'`/`'status-live'`) and `ak sync`'s
-post-sync check (`src/commands/sync.mjs:672`, `source: 'sync'`). `ak status`'s "last remembered
-live check" row (which Task 2's storage move does cover, via the shared `evidence/live-check/`
-directory) reflects whichever of those two last ran — `ak x aqe-embedding verify` run on its own
-updates neither `kit.json` nor the evidence store; it is a one-shot, unpersisted probe. This is a
-factual correction to the branch plan's own assumption, not a defect: `aqe-embedding.mjs`'s
-`verify` action was never meant to be a persisted check (it exists for a synthetic backend proof
-with no downloads or corpus writes), and nothing in this branch changed that.
+live-check evidence row are, since Branch 6b folded `ak x verify` into `ak status --refresh=live`
+and moved its checks into `src/lib/live-checks.mjs`, the quick `aqe-embedding` check and the full
+`aqe` proof's own embedding request (`live-checks.mjs`'s `CHECKS` table and `verifyAqe()`,
+`source: 'status-refresh-live'` by default) and `ak sync`'s post-sync check (`sync.mjs:711`,
+`source: 'sync'`). `ak status`'s "last remembered live check" row (which Task 2's storage move
+does cover, via the shared `evidence/live-check/` directory) reflects whichever of those two last
+ran; an evidence row recorded before 6b under the retired `verify`/`status-live` source ids still
+reads back, labelled "an earlier live check" (R13, `live-check-evidence.mjs`'s `SOURCE_LABEL`).
+`ak x aqe-embedding verify` run on its own still updates neither `kit.json` nor the evidence
+store; it is a one-shot, unpersisted probe. This is a factual correction to the branch plan's own
+assumption, not a defect: `aqe-embedding.mjs`'s `verify` action was never meant to be a persisted
+check (it exists for a synthetic backend proof with no downloads or corpus writes), and nothing in
+this branch or 6b changed that.
 
-### The interim `--refresh` boolean's scope
+### The `--refresh` flag's three strengths (delivered in 6b)
 
-Today `--refresh` covers ruflo-component evidence (pre-existing, unchanged by this branch),
-native-runtime/host-setup/companion-lifecycle (Tasks 4–5), version-drift (Task 6), and
-npm-global-root/daemon-sweep/ak-launcher/the deduped host-presence check (Task 7's sweep). This is
-the interim, no-suffix tier of Branch 6b's eventual `--refresh[=live|machine]` split; this branch
-builds only the boolean groundwork that split will sit on, not the flag syntax itself.
+`--refresh` is no longer the interim boolean this ADR originally described. `src/lib/refresh.mjs`
+now owns one flag, `--refresh[=live|machine]`, with three internal strengths
+(`REFRESH_STRENGTHS`: `local` — the bare `--refresh` and its explicit spelling `--refresh=local`
+— `live`, `machine`) and one ordered stage table (`REFRESH_STAGES`): `machine` (Measuring the
+machine) → `maintenance` (Refreshing Maintenance evidence) → `inventory` (Rebuilding the
+inventory) → `live` (Running live checks) → `local` (Re-checking local evidence and versions).
+`stagesFor(strength)` selects which stages a strength runs: `local` runs `maintenance`,
+`inventory`, `local` — the coverage this section used to enumerate flag-by-flag (ruflo-component
+evidence, native-runtime/host-setup/companion-lifecycle, version-drift, npm-global-root,
+daemon-sweep, ak-launcher, the deduped host-presence check) is now exactly what those three
+stages' implementations (`cliRefreshStages` in the same file) do; `live` adds the `live` stage;
+`machine` adds the `machine` stage and rebuilds the inventory with `rebuildAfterMeasurement`
+instead of `refreshInventory`. `local` always runs last, so its status rows include any fresh
+`live` results from the same invocation. A failed `machine` stage marks `maintenance` and
+`inventory` skipped (`MEASUREMENT_DEPENDENTS`); any other stage failure does not stop later
+stages.
 
-`--refresh` and `--live` are separate flags, but not perfectly independent in effect. `--refresh`
-never itself triggers a live (network-round-trip) check: `status.mjs`'s `run()` calls
-`collect({ refresh: !!flags.refresh })` and the `--live` suite as two unrelated steps, and neither
-threads into the other. The converse does not hold, though: `--live`'s own `providers` check
-(`verifyProviders` in `x/verify.mjs`, unchanged by this branch) calls
-`collectIntegrationFacts({ cwd, cfg })` with no `refresh` argument, so it defaults to `refresh:
-true` (Ruling B) and always re-probes and persists `host-setup` evidence as a side effect of
-`--live` — regardless of whether `--refresh` was also passed. This is pre-existing behavior this
-branch did not change (Task 4/5's fix round found this exact call site and confirmed it already
-defaulted correctly, so no code change was needed there); it means `--live` is not purely additive
-to `--refresh`'s local-probe question the way the flag names might suggest.
+`--refresh` and the old `--live` are no longer separate flags — `ak x verify` is retired, and its
+checks run only as the `live` stage inside this one flag (`ak status --refresh=live`, `--only
+<check>` to run exactly one). The residual quirk this section used to flag under the old two-flag
+design still holds, just inside one invocation now: the `live` stage's own `providers` check
+(`verifyProviders` in `src/lib/live-checks.mjs`, functionally unchanged by 6b in this respect)
+calls `collectIntegrationFacts({ cwd, cfg, source: 'verify' })` with no `refresh` argument, so it
+defaults to `refresh: true` (Ruling B) and independently re-probes and persists `host-setup`
+evidence as a side effect of the `live` stage — before the `local` stage that runs after it
+performs its own `collect({ refresh: true })`, which probes `host-setup` again. The second probe
+finds fresh evidence and changes nothing, so this is harmless, but `--refresh=live` still triggers
+two internal `host-setup` refreshes, not one; this branch did not change that.
 
 ### The dashboard poll's two cost fixes (Tasks 9 and 10)
 
@@ -350,7 +378,7 @@ fix would give an exact final figure for this specific machine, and was explicit
 controller/whoever finishes the branch, not attempted by Task 11 itself (branch rule: real-machine
 state is measured by the controller, not invented by a task).
 
-## Delivered in 6a vs. pending 6b
+## Delivered in 6a
 
 **Delivered in this branch:**
 
@@ -365,17 +393,120 @@ state is measured by the controller, not invented by a task).
 - A plain `ak status`/dashboard poll that spawns zero processes on a warm cache (measured: 14 → 0
   spawns), a dashboard poll that writes zero preference-store bytes when the view hasn't changed,
   and a `/api/system/summary` endpoint with four newly-projected sections.
-- The interim, no-suffix `--refresh` boolean covering every kind above.
+- The interim, no-suffix `--refresh` boolean covering every kind above — folded into Branch 6b's
+  `local` strength; see "Delivered in 6b" below.
 
-**Explicitly not built in this branch, still ahead in Branch 6b:**
+## Delivered in 6b
 
-- The `--refresh[=live|machine]` flag syntax itself (today there is only one boolean, covering the
-  "live" tier's kinds).
-- Any dashboard UI control naming this distinction.
-- Folding Maintenance's `scan-store.mjs`/deep-snapshot system, or ADR-0048's **Refresh evidence** /
-  **Re-measure machine** controls, into this evidence store — they remain their own system.
-- `ak x verify`'s command surface being re-expressed in terms of this evidence store beyond what it
-  already does today (recording the `live-check` rows it always has).
+Branch 6b (`feat/one-refresh-flag`) replaced the interim boolean above with the flag syntax this
+ADR originally deferred, folded `ak x verify` into it, and closed several vocabulary/wiring gaps
+the [issues 237–239 audit](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)'s
+Item 4 named. It closed CLI-only: the dashboard's own controls are untouched, and the dashboard
+half of this work moved to the next remediation program — see
+[the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)'s "Closing
+this branch" section, and "Ahead: the dashboard half" below.
+
+- **One flag, three strengths, one ordered stage table** — `--refresh[=live|machine]` across `ak
+  status`, `ak system` and `ak maintain [report]`; see "The `--refresh` flag's three strengths"
+  above for `REFRESH_STAGES`, its run order and the failed-`machine`-skips-`maintenance`/`inventory`
+  dependency rule, and `runRefresh`/`cliRefreshStages` (`src/lib/refresh.mjs`) for the shared
+  runner every one of the three commands calls.
+- **`--only <check>,...` is `ak status`'s alone.** It selects exactly the named live checks or
+  slow proofs instead of the quick default set, and is the only way a slow proof (`learning`,
+  `harvest`, the full `aqe` proof, `memory-routes`) runs; a named check that does not apply to the
+  configuration still runs and reports, but its result is not remembered. Without `--only`, a
+  failed live check stays a warning and the exit code follows the rows and stages alone; with
+  `--only`, the exit code is 1 when any named check did not pass — `failed`, `inconclusive`, or no
+  result at all (its status was never `'passed'`) — else 0 (`status.mjs`'s `namedCheckFailed`).
+  `ak system` and `ak maintain` both refuse a non-empty `--only` outright (exit 2): neither
+  renders live-check results or reports their verdict, so accepting the flag would silently run
+  past a failed named check.
+  A refresh stage that fails makes `ak status`, `ak system` and `ak maintain` exit 1; a usage
+  error is exit 2 everywhere the flag is accepted.
+- **The live-check fold and its source labels.** `ak x verify` is retired; its checks
+  (`aqe-embedding`, `mcp`, `providers`, `security`, `deja-vu`, `memory` — quick and free — and
+  `learning`, `harvest`, `aqe`, `memory-routes` — slow, `--only`-only) now live in
+  `src/lib/live-checks.mjs` and run as `--refresh=live`'s `live` stage. `memory` is the quick
+  store/retrieve/purge round trip; `memory-routes` additionally observes whether the CLI and MCP
+  see each other's writes, and its result is remembered under the `memory` evidence id, not its
+  own. A live-check evidence row now carries the source id `status-refresh-live`, labelled "ak
+  status --refresh=live"; a row recorded before this branch under the retired `verify` or
+  `status-live` source ids still reads back, labelled "an earlier live check" — the label never
+  names a retired command (`live-check-evidence.mjs`'s `SOURCE_LABEL`).
+- **The Codex quota presence gate.** `/api/limits` asks `codex app-server` for its
+  quota only when the last recorded `host-setup` evidence says Codex was found
+  (`quota.mjs`'s `readLimits`, via `recordedHostPresence` in `providers.mjs`) — never by probing.
+  `not-found` and `unconfirmed` (no record, older than 6h, or recorded under a different `PATH`)
+  each skip the spawn and report `codexUnavailable.reason` as `host-not-found` or
+  `host-unconfirmed`; the last cached Codex figure, if any, is still served with its age either
+  way. See [ADR-0010](0010-provider-mediated-quota-reads.md)'s own `Updated:` line.
+- **`ak sync --skip <part>` also skips that part's online version lookup.** `--skip versions`
+  (or `self`/`ruvnet-brain`/`ruvector`) reports the recorded value with no network call and no
+  write (`plan-versions.mjs`'s `skippedVersionEvidence`, `cacheOnly: true`), instead of silently
+  performing the lookup anyway.
+- **The `ak sync --dry-run` preview and its host-evidence limitation.** A dry run performs the
+  same forced online version lookups a real sync performs before planning (`previewPlanVersions`
+  in `src/commands/sync/plan-versions.mjs`), with `record: false` throughout and every `npm view`
+  pointed at a per-run npm cache under the OS temp folder (`fs.mkdtempSync`), removed in a
+  `finally` block once the lookups are done. When every lookup fails, it prints one line saying
+  versions were not checked online and that the plan uses the recorded ones. This preview does
+  **not** force host evidence fresh the way a real (non-dry-run) sync does:
+  `refreshPlanHosts` — the function a real sync calls before reading its plan, to catch a host
+  that changed since its 6h-TTL `host-setup` record last went stale — returns immediately under
+  `--dry-run` (`sync.mjs:121`), so the dry-run plan reads host-install/host-setup evidence exactly
+  as last recorded (probed fresh only if it is stale, invalidated, or missing, same as a plain `ak
+  status`), never force-refreshed. A host repaired or broken since that evidence was last
+  recorded can therefore be invisible to `--dry-run`'s preview even though a real sync would catch
+  it (`tests/kit/sync-command.test.mjs`'s `'--dry-run prints a plan and then changes nothing at
+  all'` and `'sync (non-dry) force-refreshes host evidence too, so a fresh-but-wrong cache cannot
+  hide a host that changed'` cover the contrast).
+- **The renames.** `ak host refresh` → `ak host reset-routes` (it only re-seeds routing, never a
+  refresh); `ak usage prompts --deep` → `--show-text`; `ak status --deep`/`--live`, `ak system
+  --deep` and `ak maintain scan`/`--deep`/`--refresh-inventory` are retired, with no alias and no
+  hint (Ruling R17 of
+  [the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)) — a
+  retired spelling gets the parser's generic unknown-command/unknown-option error.
+- **The recipe-refresh removal.** Every user-reachable path to a recipe-registry refresh (the
+  `ak maintain recipes` sub-verb, its v2 route and allowlist entry, the facade method, and the
+  service options that existed only for it) is removed; `ak maintain recipes` now supports only
+  `list`, `accept` and `withdraw`. The recipe store's verified-staging function
+  (`maintenance/management/recipes.mjs`'s `refreshRecipes`, with its allowlist/HTTPS/redirect/
+  signature checks) and its tests stay, as the library a future registry calls — ADR-0048 already
+  says so.
+- **`ak host check-connection <claude|codex|opencode>`.** The CLI twin of the dashboard's paid
+  connection-check dialog: it reuses `createHostReadinessReader` so it refuses for exactly the
+  hosts and reasons the dashboard would, prints the target and the shared disclosure text, asks
+  `[y/N]` on a TTY or refuses on a non-TTY without `--yes`, and `--dry-run` always stops before any
+  request, even with `--yes`. It is never reachable from any `--refresh` strength — a static
+  assertion in `tests/kit/refresh.test.mjs` pins that `refresh.mjs` never references
+  `checkConnection`/`host-health-connected`. See [ADR-0053](0053-host-setup-evidence-and-usage-diagnostics.md)'s
+  own `Updated:` line.
+- **`ak host pick`, `off` and `reset-routes` all take `--dry-run`**, printing what they would do
+  and stopping before any write; `ak host adapters` refuses `--dry-run` outright (exit 2) because
+  its verbs have no preview.
+
+## Ahead: the dashboard half
+
+6b closed CLI-only — see
+[the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)'s "Closing
+this branch" section. The dashboard's own controls are unchanged by this branch and remain future
+work for the next remediation program:
+
+- One dashboard **Refresh** control offering the same three strengths the CLI now has, and a
+  **Reload** control that only re-reads the current view.
+- A `POST /api/refresh` route driving that control through the same `runRefresh`/stage machinery
+  this branch built for the CLI, and the dashboard's existing read-only `GET` routes.
+- The eventual supersession of ADR-0048's **Refresh evidence** / **Re-measure machine** controls
+  and of [ADR-0025](0025-machine-footprint-metrics.md) §5's `GET ?refresh=deep` rationale, once
+  that dashboard work lands — neither is superseded by this branch, and both remain exactly as
+  their own ADRs describe them today.
+
+What stays out of scope regardless: this store's storage does not unify with Maintenance's own
+`scan-store.mjs`/deep-snapshot system (R1 — one flag and, eventually, one dashboard control drive
+the existing chain; the footprint snapshot and its storage stay where they are), and
+`src/lib/host-health-evidence.mjs` (ADR-0053's setup-proof input-fingerprint helper) is still not
+folded into this store — see "What is deliberately not folded into this store" above, unchanged
+by 6b.
 
 ## Relationship to ADR-0048
 
@@ -387,20 +518,31 @@ is the eventual "live" tier's technical precursor and this branch's own interim 
 is its no-suffix groundwork; ADR-0048's own controls, their backing code (`scan-store.mjs`), and
 their UI are unchanged by this branch. No file under Maintenance's own scan system was touched by
 Tasks 1–11. A reader should not infer that ADR-0048's controls now share code, storage, or an age
-rule with this ADR's evidence store — they do not, yet.
+rule with this ADR's evidence store — they do not, yet. Branch 6b gives those two controls CLI
+equivalents — `ak maintain --refresh` and `ak maintain --refresh=machine` — without changing the
+controls, their backing code, or their UI themselves; see "Delivered in 6b" above.
 
 ## Known limitations (recorded, not fixed, by this branch)
 
-1. **`ruvector.mjs`/`ruvnet-brain.mjs`'s `drift()` can silently drop a known update on a failed
-   forced fetch.** Both unconditionally `saveKitConfig()` after any non-fresh attempt, including a
-   failed one, overwriting a good cached `latest` with `null` (unlike `versions.mjs`'s
-   `driftReport()`, which correctly falls back to the cached value on failure). This is a
-   pre-existing defect in both library functions, not introduced by this branch — but Task 6's
-   wiring fix makes it reachable, for the first time, from `ak status --refresh`: an offline or
-   flaky-network `ak status --refresh` can now make a real "update available" row disappear from
-   status for up to 24h, with no error surfaced. Queued as a follow-up fix (mirror
-   `driftReport`'s cached-fallback-on-failure pattern in both libraries), out of this branch's
-   scope, ledgered in `progress.md` for a later branch (Branch 9 or a small standalone fix).
+1. **Resolved in Branch 6b: the failed-lookup rule is now the same in all four version-drift
+   functions.** This item originally recorded that `ruvector.mjs`/`ruvnet-brain.mjs`'s `drift()`
+   could silently drop a known update on a failed forced fetch, unlike `versions.mjs`'s
+   `driftReport()`/`selfDrift()`. Branch 6b fixed both (`fix(versions): a failed lookup keeps the
+   cached version and waits one TTL window before retrying`, and its follow-ups), so all four now
+   share one rule: on a total lookup failure, the cached `latest`/`best`/`installedRelease` value
+   is kept — never overwritten with `null` — and the TTL stamp (`last`) is restamped, so the next
+   unforced call waits one more TTL window before retrying (`force` bypasses this and retries
+   immediately). `observedAt` records the real time a value was last actually observed, not the
+   time of a failed retry: `ruvector.mjs`'s `drift()` keeps `observedAt: cached.observedAt ??
+   cached.last` on failure (`:70`); `ruvnet-brain.mjs`'s `drift()` does the same
+   (`:288`, `recordedRelease()`); `versions.mjs`'s `driftReport()`'s `lookUpLatest()` restamps
+   `observedAt` from the prior `last` only for packages that were never individually observed
+   (`:82`); its `selfDrift()`'s `selfRecord()` restamps on a *total* failure, including one with no
+   cached candidate at all — only a partial answer (something answered live but did not win), or a
+   total failure whose cached candidate is unusable (a `next` candidate on a stable install), saves
+   nothing (`:172-176`). None of the four applies this rule under `record: false` (`ak sync
+   --dry-run`, ADR-0063's own `record` parameter) or a cache-only read (`cacheOnly: true`, `ak
+   sync --skip <part>`): both skip the network and the write entirely, by design.
 2. **`globalRoot()`'s `record`-persistence structural fragility** — see "The `npm-global-root`
    exception" above.
 3. **Task 9's dashboard timeout bounds async hangs only** — see "The dashboard poll's two cost
@@ -432,11 +574,20 @@ rule with this ADR's evidence store — they do not, yet.
   byte-compatible-but-separate local envelope in `paths.mjs`. A future reader who assumes every
   file under `evidence/` was written by `readEvidence`/`writeEvidence` will be wrong for two of the
   ten directories (`npm-global-root` and `ruflo-component`).
-- `ak status`, `ak sync --dry-run`, and `ak x verify` are no longer *literally* read-only in the
-  strictest sense: a cold evidence cache means a first run under any of them writes a small,
-  private, inert cache file under `<state>/agentic-kit/evidence/`. This is intended (the
-  alternative is spawning on every dry-run/verify too, the exact problem this branch closes), and
-  is now stated precisely in `ak status --help` (see the docs section below) rather than left as
-  the previous, now-imprecise "it changes nothing" claim.
+- A plain `ak status` is no longer *literally* read-only in the strictest sense: a cold evidence
+  cache means a first run writes a small, private, inert cache file under
+  `<state>/agentic-kit/evidence/`. This is intended (the alternative is spawning on every plain
+  status call, the exact problem this branch closes), and is stated precisely in `ak status
+  --help` rather than left as an imprecise "it changes nothing" claim. `ak sync --dry-run` is not
+  an example of this: its plan-read `collect()` call and (as of Branch 6b) every online version
+  lookup it previews all pass `record: false`, so a dry run writes no evidence under
+  `<state>/agentic-kit/` — proven by a whole-HOME/whole-project byte-for-byte snapshot comparison
+  in `tests/kit/sync-command.test.mjs`. It is not silent at the OS level, though: `previewPlanVersions`
+  (`src/commands/sync/plan-versions.mjs`, Ruling R8) creates a per-run npm cache under the OS temp
+  folder for its redirected `npm view` calls and removes it in a `finally` block once the lookups
+  are done; a crash between those two points can leave one `ak-sync-preview-npm-*` folder behind.
+  `ak x verify` is retired; its replacement,
+  `ak status --refresh=live`, is an explicit refresh, not a read, and its writes are the point,
+  not a surprise.
 - The `record`-defaults-`false` exception for `npm-global-root` is a real asymmetry a future
   evidence-kind author needs to know about before assuming every kind defaults `record: true`.

@@ -386,7 +386,6 @@ The dashboard's v2 HTTP allowlist (`src/lib/dashboard/maintenance-security.mjs`'
     POST /api/maintenance/v2/plans
     POST /api/maintenance/v2/apply
     POST /api/maintenance/v2/undo
-    POST /api/maintenance/v2/recipes/refresh
     POST /api/maintenance/v2/recipes/accept
     POST /api/maintenance/v2/recipes/withdraw
     GET  /api/maintenance/v2/preferences
@@ -399,7 +398,7 @@ remain as a documented compatibility surface.
 
 The CLI (`src/commands/maintain.mjs`) exposes:
 
-    ak maintain scan [--deep] [--refresh-inventory] [--json]
+    ak maintain [report] [--refresh[=live|machine]] [--project-trees] [--json]
     ak maintain inventory [--scope S] [--view V] [--facet name=value ...]
     ak maintain show --placement ID [--reveal] [--json]
     ak maintain guidance [--lane LANE] [--json]
@@ -417,7 +416,7 @@ The CLI (`src/commands/maintain.mjs`) exposes:
     ak maintain apply --plan ID --digest SHA256 --actions ID --yes [--json]
     ak maintain undo --receipt ID --yes [--json]
     ak maintain recover --receipt ID [--json]
-    ak maintain recipes list|refresh|accept|withdraw [options]
+    ak maintain recipes list|accept|withdraw [options]
     ak maintain preferences [--set key=value ...] [--json]
 
 `--reveal` and `discovery` are the only human-output paths that may show an exact local path, and

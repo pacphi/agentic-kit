@@ -1,6 +1,6 @@
 // The user-facing halves of #54 and #55, exercised through a real CLI spawn.
 //
-// `ak x host status` is read-only, and `refresh` only ever writes kit.json +
+// `ak x host status` is read-only, and `reset-routes` only ever writes kit.json +
 // the sandbox project's llm-config.json, so both are safe to run for real here
 // (unlike `pick`, which can trigger installs). Everything is redirected at a
 // throwaway HOME — see provider-cli.test.mjs for why all four env vars matter.
@@ -133,6 +133,8 @@ test('x host status marks a diverged seeded route against its current default', 
   assert.ok(line, `routing table must list architecture:\n${r.all}`);
   assert.match(line, /diverges from default/i);
   assert.match(line, new RegExp(DEFAULT_ROUTES.architecture.model), 'the current default is shown inline');
+  assert.match(r.all, /ak host reset-routes/, 'the summary line names the opt-in reset command');
+  assert.doesNotMatch(r.all, /\bhost refresh\b/, 'no legacy spelling anywhere in status output');
   rm(home, project);
 });
 
@@ -154,47 +156,47 @@ test('x host status does not mark a user-pinned older model as diverged', () => 
   rm(home, project);
 });
 
-// ── #55: `ak x host refresh` ───────────────────────────────────────────────
+// ── #55: `ak x host reset-routes` ───────────────────────────────────────────
 
-test('x host refresh re-seeds only the activities named with --activity', () => {
+test('x host reset-routes re-seeds only the activities named with --activity', () => {
   const { home, project } = sandbox(divergedProviders());
-  const r = ak(['x', 'host', 'refresh', '--activity', 'architecture'], { cwd: project, home });
+  const r = ak(['x', 'host', 'reset-routes', '--activity', 'architecture'], { cwd: project, home });
   assert.equal(r.status, 0, r.all);
   const routing = readKit(home).routing.routes;
-  assert.equal(routing.architecture.model, DEFAULT_ROUTES.architecture.model, 'named route refreshed');
+  assert.equal(routing.architecture.model, DEFAULT_ROUTES.architecture.model, 'named route reset');
   assert.equal(routing.design.model, 'claude-opus-4-8', 'unnamed route deliberately left as it was');
   rm(home, project);
 });
 
-test('x host refresh leaves a user-pinned route untouched even when named', () => {
+test('x host reset-routes leaves a user-pinned route untouched even when named', () => {
   const { home, project } = sandbox(divergedProviders());
-  ak(['x', 'host', 'refresh', '--activity', 'debugging'], { cwd: project, home });
+  ak(['x', 'host', 'reset-routes', '--activity', 'debugging'], { cwd: project, home });
   const routing = readKit(home).routing.routes;
   assert.equal(routing.debugging.model, 'claude-opus-4-8');
   assert.equal(routing.debugging.provenance, 'user');
   rm(home, project);
 });
 
-test('x host refresh --yes re-seeds every diverged route and converges', () => {
+test('x host reset-routes --yes re-seeds every diverged route and converges', () => {
   const { home, project } = sandbox(divergedProviders());
-  const r = ak(['x', 'host', 'refresh', '--yes'], { cwd: project, home });
+  const r = ak(['x', 'host', 'reset-routes', '--yes'], { cwd: project, home });
   assert.equal(r.status, 0, r.all);
   const routing = readKit(home).routing.routes;
   assert.equal(routing.architecture.model, DEFAULT_ROUTES.architecture.model);
   assert.equal(routing.design.model, DEFAULT_ROUTES.design.model);
-  assert.equal(routing.debugging.model, 'claude-opus-4-8', 'user pins survive an all-refresh');
+  assert.equal(routing.debugging.model, 'claude-opus-4-8', 'user pins survive an all-reset');
 
-  const second = ak(['x', 'host', 'refresh'], { cwd: project, home });
-  assert.match(second.all, /no seeded routes diverge/i, 'refreshing converges — the second run is a no-op');
+  const second = ak(['x', 'host', 'reset-routes'], { cwd: project, home });
+  assert.match(second.all, /no seeded routes diverge/i, 'resetting converges — the second run is a no-op');
   rm(home, project);
 });
 
-test('x host refresh propagates an AQE router failure to automation', () => {
+test('x host reset-routes propagates an AQE router failure to automation', () => {
   const { home, project } = sandbox({
     ...divergedProviders(),
     aqeFallback: [{ provider: 'not-a-provider', models: ['model'] }],
   });
-  const r = ak(['x', 'host', 'refresh', '--activity', 'architecture'], { cwd: project, home });
+  const r = ak(['x', 'host', 'reset-routes', '--activity', 'architecture'], { cwd: project, home });
   assert.equal(r.status, 1, `router failure must survive the command boundary\n${r.all}`);
   assert.match(r.all, /aqe router:.*no valid providers in fallback chain/);
   assert.equal(readKit(home).routing.routes.architecture.model, DEFAULT_ROUTES.architecture.model,
@@ -202,44 +204,52 @@ test('x host refresh propagates an AQE router failure to automation', () => {
   rm(home, project);
 });
 
-test('x host refresh prints the cost-per-task trade for BOTH models, not just ids', () => {
+test('x host reset-routes prints the cost-per-task trade for BOTH models, not just ids', () => {
   // The whole point of the neutral framing: the user is being handed a decision
   // that genuinely goes both ways, so both sides need their characteristic.
   const { home, project } = sandbox(divergedProviders());
-  const r = ak(['x', 'host', 'refresh', '--activity', 'architecture'], { cwd: project, home });
+  const r = ak(['x', 'host', 'reset-routes', '--activity', 'architecture'], { cwd: project, home });
   assert.match(r.all, /turns/i, 'the work-per-task axis must appear, not only price');
   assert.match(r.all, /claude-opus-4-8/);
   assert.match(r.all, new RegExp(DEFAULT_ROUTES.architecture.model));
   rm(home, project);
 });
 
-test('x host refresh is a no-op on a policy seeded from current defaults', () => {
+test('x host reset-routes is a no-op on a policy seeded from current defaults', () => {
   const { home, project } = sandbox({
     hosts: { ...DUAL },
     routes: {
       architecture: { host: 'claude', model: DEFAULT_ROUTES.architecture.model, provenance: 'seeded' },
     },
   });
-  const r = ak(['x', 'host', 'refresh', '--yes'], { cwd: project, home });
+  const r = ak(['x', 'host', 'reset-routes', '--yes'], { cwd: project, home });
   assert.equal(r.status, 0);
   assert.match(r.all, /no seeded routes diverge/i);
   rm(home, project);
 });
 
-test('x host refresh ignores an unknown activity instead of failing', () => {
+test('x host reset-routes ignores an unknown activity instead of failing', () => {
   const { home, project } = sandbox(divergedProviders());
-  const r = ak(['x', 'host', 'refresh', '--activity', 'not-an-activity'], { cwd: project, home });
+  const r = ak(['x', 'host', 'reset-routes', '--activity', 'not-an-activity'], { cwd: project, home });
   assert.equal(r.status, 0, r.all);
   assert.match(r.all, /unknown activity/i);
-  assert.equal(readKit(home).routing.routes.architecture.model, 'claude-opus-4-8', 'nothing refreshed');
+  assert.equal(readKit(home).routing.routes.architecture.model, 'claude-opus-4-8', 'nothing reset');
   rm(home, project);
 });
 
-test('refresh is advertised as a subcommand and rejects an unknown one', () => {
+test('reset-routes is advertised as a subcommand, and the retired `refresh` spelling is unknown', () => {
   const { home, project } = sandbox({ hosts: { claude: true } });
   const help = ak(['x', 'host', '--help'], { cwd: project, home });
-  assert.match(help.all, /refresh/, 'the opt-in path must be discoverable');
+  assert.match(help.all, /reset-routes/, 'the opt-in path must be discoverable');
+  assert.doesNotMatch(help.all, /\brefresh\b/, 'no legacy spelling in help');
   const bad = ak(['x', 'host', 'bogus'], { cwd: project, home });
-  assert.match(bad.all, /status\|pick\|refresh\|off/);
+  assert.match(bad.all, /status\|pick\|reset-routes\|off/);
+
+  // No legacy: the retired `refresh` spelling hits the parser's GENERIC
+  // unknown-subcommand error — no alias, no "is now"/"did you mean" hint.
+  const retired = ak(['x', 'host', 'refresh'], { cwd: project, home });
+  assert.equal(retired.status, 2, retired.all);
+  assert.match(retired.all, /unknown host subcommand: refresh \(status\|pick\|reset-routes\|off/);
+  assert.doesNotMatch(retired.all, /is now|did you mean|instead|renamed/i, 'no hint for a retired spelling');
   rm(home, project);
 });

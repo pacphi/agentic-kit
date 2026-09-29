@@ -32,7 +32,7 @@ import {
   hostManagement, hostEnableCommand, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
 } from '../../lib/host-management.mjs';
 import {
-  ok, warn, fail, info, dim, bold, yellow,
+  ok, warn, fail, info, dim, bold, yellow, humanOutputToStderr,
 } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
@@ -55,7 +55,7 @@ export const options = {
   'aqe-fallback': { type: 'string' }, // 'claude-code:model1,model2;openai:gpt-5.6'  ('none' clears)
   provider: { type: 'string' },      // csv of ruflo API providers, optional id:model (openai:gpt-5.6)
   route: { type: 'string', multiple: true }, // repeatable: 'activity:host[:model]' per-activity routing override
-  activity: { type: 'string' },      // refresh: csv of activities to re-seed (default = prompt)
+  activity: { type: 'string' },      // reset-routes: csv of activities to re-seed (default = prompt)
   'expect-hash': { type: 'string' }, // adapters trust: required sha256 pin when --yes resolves a non-file source
   timeout: { type: 'string' },       // adapters conformance: outer ms budget override (default: manifest's own execution.run.hook.timeoutMs, else 120000)
   dev: { type: 'boolean', default: false }, // adapters conformance: run without persisting evidence/grants
@@ -95,14 +95,22 @@ Subcommands:
              bounded census, --project PATH adds a location. Preview by default;
              --apply offers backed-up correction; --yes approves noninteractively.
              Preserves Ruflo dual-mode workers and AQE native provider routing.
-  pick     choose hosts / aqe provider / ruflo providers → persist → apply
-  refresh  re-seed routes whose seeded pin diverges from the current defaults
-             (per-activity, opt-in; user pins are never touched, and \`ak sync\`
-             never does this for you)
-  off      reversible teardown (reset to claude-only; strip managed env keys)
+  pick     choose hosts / aqe provider / ruflo providers → persist → apply;
+             --dry-run previews the resolved hosts, primary host, aqe
+             provider/fallback and route changes, no prompt
+  reset-routes
+             re-seed routes whose seeded pin diverges from current defaults
+             (per-activity, opt-in; user pins untouched; \`ak sync\` never
+             does this); --dry-run previews the activities it would reset
+  off      reversible teardown (reset to claude-only; strip managed env
+             keys); --dry-run previews what would be reset
+  check-connection <claude|codex|opencode>
+             consent-gated paid connection check, the dashboard dialog's CLI
+             twin; needs --yes or a y/N prompt; --dry-run previews it
   adapters record hash-pinned consent for external host-adapter manifests
              (experimental — set AK_EXPERIMENTAL_HOST_ADAPTERS=1; revoke
-             always works, list/trust need the flag)
+             always works, list/trust need the flag; --dry-run refused, exit
+             2 — its verbs have no preview)
              list        show each configured adapter's trust state (default)
              trust <name> [--expect-hash <sha256>]   grant consent (required
                           with --yes against a non-file source); revoke <name>
@@ -137,7 +145,7 @@ Options (pick, all optional — omit for interactive):
                                  implementation, testing, review, security-scan,
                                  security-analysis, documentation, debugging,
                                  packaging, release
-  --activity <csv>             refresh: which activities to re-seed (default: prompt)
+  --activity <csv>             reset-routes: which activities to re-seed (default: prompt)
   --yes                        accept defaults without prompting
 
 Enabling a host prints its host trust manifest before kit.json or host config
@@ -156,8 +164,9 @@ Examples:
   ak host pick --host claude,codex,opencode
   ak host pick --host claude       disable codex + opencode; preserve user config
   ak host pick --route 'testing:claude:claude-sonnet-5'
-  ak host refresh --activity architecture,design
-  ak host off`;
+  ak host reset-routes --activity architecture,design
+  ak host off
+  ak host check-connection codex --dry-run`;
 
 /** Stamp provenance onto chain entries. 'suggested' = ak proposed it and the
  *  user pressed enter; 'user' = they typed it. Only 'suggested' entries are
@@ -177,19 +186,22 @@ export async function run({ flags, positionals, pkgRoot }) {
   const cwd = process.cwd();
 
   if (sub === 'status') return status({ flags, cwd });
-  if (sub === 'off') return off({ cwd, pkgRoot });
+  if (sub === 'off') return off({ cwd, pkgRoot, flags });
   if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
-  if (sub === 'refresh') return refresh({ flags, cwd });
-  if (sub === 'align') {
-    const { run: align } = await import('./host-align.mjs');
-    return align({ flags });
-  }
+  if (sub === 'reset-routes') return resetRoutes({ flags, cwd });
+  if (sub === 'align') return (await import('./host-align.mjs')).run({ flags });
   if (sub === 'adapters') {
-    const { run: runHostAdapters } = await import('./host-adapters.mjs');
-    return runHostAdapters({ flags, positionals: positionals.slice(1) });
+    // Every adapters verb (list/trust/revoke/conformance/grant/gate/status)
+    // mutates or executes something the moment it runs — there is no
+    // read-only preview to give --dry-run, so it is refused outright
+    // instead of silently behaving like a real run: a flag we declare is a
+    // flag we honor, or refuse.
+    if (flags['dry-run']) { fail('ak host adapters has no preview; run it without --dry-run'); return 2; }
+    return (await import('./host-adapters.mjs')).run({ flags, positionals: positionals.slice(1) });
   }
+  if (sub === 'check-connection') return (await import('./host-connection.mjs')).run({ flags, positionals: positionals.slice(1) });
 
-  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off|adapters|align)`);
+  fail(`unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|adapters|align)`);
   return 2;
 }
 
@@ -362,7 +374,7 @@ function printQeCourtStatus(cwd) {
  *  newer default is not uniformly better — on routine work it can cost 2-3× the
  *  agentic turns for the same result (#55). Only `provenance: 'seeded'` entries are
  *  eligible; a user pin survives even when named. */
-async function refresh({ flags, cwd }) {
+async function resetRoutes({ flags, cwd }) {
   const cfg = loadKitConfig();
   const policy = cfg.routing?.routes ?? {};
   const diverged = divergedRoutes(policy);
@@ -388,30 +400,70 @@ async function refresh({ flags, cwd }) {
     const want = flags.activity.split(',').map((s) => s.trim()).filter(Boolean);
     for (const a of want.filter((a) => !ACTIVITIES.includes(a))) warn(`unknown activity '${a}' — ignored`);
     picked = want.filter((a) => diverged.some((d) => d.activity === a));
-  } else if (flags.yes) {
+  } else if (flags.yes || flags['dry-run']) {
+    // --dry-run never prompts: with nothing else naming a subset, preview the
+    // full diverged set the way --yes would apply it for real.
     picked = diverged.map((d) => d.activity);
   } else {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const ans = (await rl.question(`refresh which activities? (comma-separated, "all", blank = none) [${diverged.map((d) => d.activity).join(',')}]: `)).trim();
+    const ans = (await rl.question(`reset which activities? (comma-separated, "all", blank = none) [${diverged.map((d) => d.activity).join(',')}]: `)).trim();
     rl.close();
-    if (!ans) { info('nothing refreshed — routes left as they are'); return 0; }
+    if (!ans) { info('no routes reset — routes left as they are'); return 0; }
     picked = ans.toLowerCase() === 'all'
       ? diverged.map((d) => d.activity)
       : ans.split(',').map((s) => s.trim()).filter((a) => diverged.some((d) => d.activity === a));
   }
-  if (!picked.length) { info('nothing refreshed — routes left as they are'); return 0; }
+  if (!picked.length) { info('no routes reset — routes left as they are'); return 0; }
+
+  if (flags['dry-run']) {
+    info(`would reset ${picked.length} route(s) to the current defaults: ${picked.join(', ')}`);
+    info('dry run — nothing changed');
+    return 0;
+  }
 
   cfg.routing.routes = refreshSeededRoutes(policy, { activities: picked });
   saveKitConfig(cfg);
-  ok(`refreshed ${picked.length} route(s): ${picked.join(', ')}`);
+  ok(`reset ${picked.length} route(s) to the current defaults: ${picked.join(', ')}`);
   const router = applyAqeRouter(cfg, cwd);
   (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
   printActivityRoutingTable(cfg);
   return router.ok ? 0 : 1;
 }
 
-async function off({ cwd, pkgRoot }) {
+/** --dry-run preview for off(): what teardown would reset, read straight off
+ *  the current config so it never has to duplicate off()'s own write logic.
+ *  Nothing below this is invoked — not even a lifecycle adapter's read-only
+ *  `undo` preview — so a dry run can never race a concurrent real change.
+ *  @param {{ pkgRoot?: string }} opts */
+function printOffDryRunSummary(cfg, opts) {
+  const { pkgRoot } = opts;
+  const enabled = HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id);
+  console.log(bold('\nhost off — dry run (preview only, nothing written)'));
+  console.log(`  would disable: ${enabled.join(', ') || 'none enabled'}`);
+  console.log(`  would reset primary host to: ${DEFAULT_PRIMARY_HOST}`);
+  console.log('  would clear: aqe provider/fallback, ruflo providers, activity routing');
+  console.log("  would strip ak-managed provider env keys from the host's settings file");
+  console.log('  would restore/remove the project\'s .agentic-qe/llm-config.json, if ak-managed');
+  // off() always attempts the opencode teardown, not only when opencode is
+  // currently enabled — a receipt left behind by an earlier incomplete
+  // teardown still gets a retry.
+  const opencodeOwned = cfg.integrations.hosts.opencode || !!cfg.integrations?.ownership?.opencode;
+  if (opencodeOwned) console.log('  would tear down opencode wiring (config, plugin, gateway, agents, skill)');
+  // Same gate the real path uses (reconcileOpencodeGuidance is only skipped
+  // when there is no pkgRoot to read guidance templates from) — off() always
+  // attempts this strip, not only when opencode wiring is torn down too.
+  if (pkgRoot) console.log('  would reconcile the opencode AGENTS.md guidance blocks (strip if enablement-gated; user content preserved)');
+  const codexOwned = cfg.integrations?.ownership?.codex?.mcp === 'ak' || cfg.integrations?.ownership?.codex?.reverseMcp === 'ak';
+  if (codexOwned) console.log('  would remove ak-managed Codex MCP wiring');
+}
+
+async function off({ cwd, pkgRoot, flags = {} }) {
   const cfg = loadKitConfig();
+  if (flags['dry-run']) {
+    printOffDryRunSummary(cfg, { pkgRoot });
+    info('dry run — nothing changed');
+    return 0;
+  }
   const codexMcpManaged = cfg.integrations?.ownership?.codex?.mcp === 'ak';
   const rufloCodexManaged = cfg.integrations?.ownership?.codex?.reverseMcp === 'ak';
   // OpenCode teardown reads its ownership receipt before the host/routing reset.
@@ -578,6 +630,15 @@ async function promptPickInputInteractively(cfg, hosts, registries, aqeProviderT
   };
 }
 
+/** Whether the caller named an explicit choice on the command line — the
+ *  set of flags that make pick() read intent from flags instead of prompting,
+ *  independent of --dry-run. Shared so parsePickInput's non-interactive gate
+ *  and the dry-run preview's disclosure (pick() below) can never disagree
+ *  about which case they are in. */
+const explicitPickChoiceGiven = (flags) => flags.host !== undefined || flags['aqe-provider'] !== undefined
+  || flags['aqe-fallback'] !== undefined || flags.provider !== undefined
+  || flags['primary-host'] !== undefined;
+
 /** Stage 1/3: resolve the raw enable/provider intent — from flags
  *  (non-interactive) or a readline prompt sequence. Returns `{code}` when
  *  pick() must return immediately (no frontier CLI detected on an
@@ -586,9 +647,7 @@ async function promptPickInputInteractively(cfg, hosts, registries, aqeProviderT
 async function parsePickInput({
   flags, cfg, hosts, registries, aqeProviderTypes,
 }) {
-  const nonInteractive = flags.host !== undefined || flags['aqe-provider'] !== undefined
-    || flags['aqe-fallback'] !== undefined || flags.provider !== undefined
-    || flags['primary-host'] !== undefined;
+  const nonInteractive = explicitPickChoiceGiven(flags) || flags['dry-run'] === true;
   const parsed = nonInteractive
     ? parsePickInputFromFlags(flags, cfg)
     : await promptPickInputInteractively(cfg, hosts, registries, aqeProviderTypes);
@@ -748,6 +807,9 @@ async function confirmPickTrustManifest(trustManifest, flags) {
   if (!trustManifest.length) return undefined;
   info('host trust manifest (evaluated before user or project changes):');
   for (const line of trustManifestLines(trustManifest)) console.log(`  ${line}`);
+  // A dry run previews the manifest and stops there — it never asks, on a
+  // TTY or off one, because nothing it could confirm is about to happen.
+  if (flags['dry-run']) return undefined;
   if (flags.yes) return undefined;
   if (!process.stdin.isTTY) {
     fail('host enablement needs trust confirmation; re-run with --yes after reviewing the manifest');
@@ -762,6 +824,30 @@ async function confirmPickTrustManifest(trustManifest, flags) {
     return 0;
   }
   return undefined;
+}
+
+/** --dry-run preview for pick(): the resolved hosts, primary host, aqe
+ *  provider/fallback chain and the route table the decision computed — all
+ *  already resolved in-memory on `cfg` by resolvePickDecision, so the
+ *  preview reuses status()'s own section printers rather than re-deriving
+ *  any of it, and can never drift from what a real run would report.
+ *  `previewOfCurrent` fires when --dry-run was the only reason this pick
+ *  ran non-interactively (see explicitPickChoiceGiven): with no explicit
+ *  choice on the command line, resolvePickDecision read back what is
+ *  already enabled/configured, not what an interactive `ak host pick`
+ *  would suggest (newly detected hosts, a suggested fallback chain) — the
+ *  preview says which one it is showing. */
+function printPickDryRunSummary({
+  cfg, enabled, primaryHost, previewOfCurrent,
+}) {
+  console.log(bold('\nhost pick — dry run (preview only, nothing written)'));
+  if (previewOfCurrent) {
+    info('previewing the current configuration, not what an interactive `ak host pick` would suggest (newly detected hosts, a suggested fallback chain)');
+  }
+  console.log(`  hosts:   ${enabled.join(', ') || 'none'}`);
+  console.log(`  primary: ${primaryHost}`);
+  printAqeProviderSection({ cfg });
+  printActivityRoutingTable(cfg);
 }
 
 /** Disable only marker-owned codex integrations, matching OpenCode's
@@ -944,12 +1030,80 @@ function readPickPriorState(cfg) {
   };
 }
 
+/** Resolve pick's intent through the trust-manifest gate and, under
+ *  --dry-run, print (or, under --json, build) the preview. Returns
+ *  `{ code, json? }` when pick() must return immediately (every early
+ *  refusal, and always for --dry-run), else the resolved decision plus
+ *  `nonInteractive` for pick()'s own qe-court prompt gate. Factored out so
+ *  it can run inside humanOutputToStderr for --dry-run --json without
+ *  duplicating any of this resolution logic. */
+async function resolvePickIntentAndPreview({
+  flags, cfg, trustBaseline, hosts, registries, aqeProviderTypes, aqeChainProviderTypes,
+  prevPrimary, oldPolicy,
+}) {
+  const input = await parsePickInput({
+    flags, cfg, hosts, registries, aqeProviderTypes,
+  });
+  if (input.code !== undefined) return { code: input.code };
+
+  const decision = await resolvePickDecision(cfg, {
+    enabled: input.enabled,
+    aqeProvider: input.aqeProvider,
+    aqeFallback: input.aqeFallback,
+    models: input.models,
+    flags,
+    registries,
+    prevPrimary,
+    oldPolicy,
+    aqeProviderTypes,
+    aqeChainProviderTypes,
+  });
+  if (decision.code !== undefined) return { code: decision.code };
+  const {
+    enabled, routing, primaryHost, aqeProvider, seed,
+  } = decision;
+
+  const trustManifest = newlyEnabledHostTrustManifest(trustBaseline, enabled);
+  const trustCode = await confirmPickTrustManifest(trustManifest, flags);
+  if (trustCode !== undefined) return { code: trustCode };
+
+  if (flags['dry-run']) {
+    const previewOfCurrent = !explicitPickChoiceGiven(flags);
+    if (flags.json) {
+      return {
+        code: 0,
+        json: {
+          dryRun: true,
+          previewOfCurrent,
+          hosts: enabled,
+          primaryHost,
+          aqeProvider: cfg.providers.aqeProvider,
+          aqeFallback: cfg.providers.aqeFallback,
+          routes: cfg.routing.routes,
+        },
+      };
+    }
+    printPickDryRunSummary({
+      cfg, enabled, primaryHost, previewOfCurrent,
+    });
+    info('dry run — nothing changed');
+    return { code: 0 };
+  }
+
+  return {
+    enabled, routing, primaryHost, aqeProvider, seed, nonInteractive: input.nonInteractive,
+  };
+}
+
 export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetiredRoutesInConfig }) {
   const aqeProviderTypes = aqeSelectableProviderTypes();
   const aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   const cfg = loadKitConfig();
   const trustBaseline = structuredClone(cfg);
-  const hosts = await detectHosts(cwd);
+  // A dry run never records host-setup evidence either — it is a read
+  // performed only to inform this preview, not a probe result future runs
+  // should reuse (ADR-0063's `record: false` convention for previews).
+  const hosts = await detectHosts(cwd, { record: !flags['dry-run'] });
   // Routing eligibility is capability-derived. OpenCode retains its independent
   // lifecycle wiring even though it is now an execution host; it is never a
   // primary/AQE host because those are separate registry capabilities.
@@ -968,31 +1122,22 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
     prevOpencode, prevPrimary, oldPolicy, prevCodex, codexMcpManaged, rufloCodexManaged,
   } = readPickPriorState(cfg);
 
-  const input = await parsePickInput({
-    flags, cfg, hosts, registries, aqeProviderTypes,
+  // Under --dry-run --json, every human line resolution would otherwise
+  // print (trust manifest, validation warnings) goes to stderr instead, the
+  // same contract status.mjs's --json uses, so stdout carries exactly the
+  // one JSON object built below.
+  const jsonDryRun = flags.json === true && flags['dry-run'] === true;
+  const resolve = () => resolvePickIntentAndPreview({
+    flags, cfg, trustBaseline, hosts, registries, aqeProviderTypes, aqeChainProviderTypes, prevPrimary, oldPolicy,
   });
-  if (input.code !== undefined) return input.code;
-
-  const decision = await resolvePickDecision(cfg, {
-    enabled: input.enabled,
-    aqeProvider: input.aqeProvider,
-    aqeFallback: input.aqeFallback,
-    models: input.models,
-    flags,
-    registries,
-    prevPrimary,
-    oldPolicy,
-    aqeProviderTypes,
-    aqeChainProviderTypes,
-  });
-  if (decision.code !== undefined) return decision.code;
+  const outcome = jsonDryRun ? await humanOutputToStderr(resolve) : await resolve();
+  if (outcome.code !== undefined) {
+    if (outcome.json) console.log(JSON.stringify(outcome.json, null, 2));
+    return outcome.code;
+  }
   const {
-    enabled, routing, primaryHost, aqeProvider, seed,
-  } = decision;
-
-  const trustManifest = newlyEnabledHostTrustManifest(trustBaseline, enabled);
-  const trustCode = await confirmPickTrustManifest(trustManifest, flags);
-  if (trustCode !== undefined) return trustCode;
+    enabled, routing, primaryHost, aqeProvider, seed, nonInteractive,
+  } = outcome;
 
   let codexRetired = null;
   if (prevCodex && !cfg.integrations.hosts.codex) {
@@ -1010,7 +1155,7 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   else warn('saved intent to kit.json, but AQE routing is incomplete — fix the warning above and re-run `ak sync`');
   if (seed.seeded) ok(`per-activity routing seeded — ${seed.count} activities (dual-host defaults; tune with --route or edit kit.json)`);
   printActivityRoutingTable(cfg);
-  await maybeWriteQeCourtDefaults({ nonInteractive: input.nonInteractive, cwd, enabled, aqeProvider });
+  await maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProvider });
   printDualHostTips(cfg);
   return incompleteTeardown || !router.ok ? 1 : 0;
 }

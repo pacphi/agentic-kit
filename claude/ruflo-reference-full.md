@@ -60,7 +60,7 @@ tools read and write when Ruflo's native bridge is active). A read through one d
 not cover the other, and a bare count from `memory list` describes one file. If a CLI
 search or retrieve finds nothing, or names an unread sibling store, repeat it with
 `--path <project>/.swarm/agentdb-memory.db` or use MCP `memory_search`. Never delete
-or merge either file. `ak x verify memory` shows the routing on this machine.
+or merge either file. `ak status --refresh=live --only memory-routes` shows the routing on this machine.
 
 **Use `--smart`** for query expansion + RRF + MMR + recency boosting.
 **Use `--build-hnsw`** the first time you search a populated namespace (one-time
@@ -75,7 +75,7 @@ Node 22"). Don't store anything derivable from `git log` or current code.
 The configured `.swarm/memory.db` pin and Ruflo's native
 `.swarm/agentdb-memory.db` sibling have different roles. Do not infer lost writes
 from an empty table in only one file. First run `ak status` and
-`ak x verify memory`; the latter runs a disposable store/retrieve/purge proof in a
+`ak status --refresh=live --only memory-routes`; the latter runs a disposable store/retrieve/purge proof in a
 throwaway project and reports whether CLI and MCP see each other's writes there. It
 says nothing about an existing corpus. Preserve existing databases.
 
@@ -250,7 +250,7 @@ a training cycle completed.
 
 **Verify learning separately from module presence.** `ruflo neural status` can
 show lazy per-process state. `ak status` inspects installed capabilities, while
-`ak x verify learning` trains a temporary fixture and checks retained patterns.
+`ak status --refresh=live --only learning` trains a temporary fixture and checks retained patterns.
 Neither establishes model-quality improvement on a real project. Inspect the
 sync plan after an upgrade; a repair is required only when the relevant evidence
 shows drift or missing native support.
@@ -267,7 +267,7 @@ initializer run. Read the managed AQE reference for tool discovery and authority
 
 ### Security verification
 
-`ak x verify security` probes the installed security modules and their behavior.
+`ak status --refresh=live --only security` probes the installed security modules and their behavior.
 A loaded module or zero exit code alone is not a security verdict. Historical
 Ruflo 3.28.0 packaging gaps required kit repair; that incident does not establish
 that every later version has the same defect. Use `ak status`, the current sync
@@ -431,9 +431,9 @@ Need to ... ?
 ├─ Find natural refactor boundaries  → ruflo analyze boundaries src/
 ├─ Coordinate 3+ agents              → native Agent tool first; ruflo swarm only if topology/consensus needed
 ├─ Scan untrusted text               → ruflo security defend -i "..."
-├─ Activate + verify self-learning   → ak sync && ak x verify learning
+├─ Activate + verify self-learning   → ak sync && ak status --refresh=live --only learning
 ├─ Re-apply after a ruflo/aqe upgrade → ak sync   (inspect the plan and resulting evidence)
-├─ Verify the security surface       → ak x verify security
+├─ Verify the security surface       → ak status --refresh=live --only security
 ├─ Set up agentic-qe in a repo       → ak setup   (opt-in)
 └─ Background analysis (long task)   → ruflo hooks worker dispatch -t <type>
 ```

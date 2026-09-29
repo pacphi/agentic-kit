@@ -20,7 +20,7 @@
 //     silently rewriting an operator-visible name is its own dishonesty.
 //   - AT RENDER output.mjs and the dashboard's `esc` STRIP. A renderer has no
 //     entry to drop; it has one string and must print something safe. This is
-//     defense in depth, and it is not redundant: `--deep` prints raw
+//     defense in depth, and it is not redundant: `--show-text` prints raw
 //     transcript text that no store gate ever sees.
 //
 // Bidi is included because U+202E reverses the rest of a line, so a row can be

@@ -59,7 +59,7 @@ test('on an observed release and platform the two-store row states which interfa
     assert.match(message, /native bridge/, 'the claim is conditional on the native bridge');
     assert.match(message, /preserve both/);
     assert.match(message, /--path/);
-    assert.match(message, /ak x verify memory/, 'points at the live check instead of asserting it');
+    assert.match(message, /ak status --refresh=live --only memory-routes/, 'points at the live check instead of asserting it');
     assert.doesNotMatch(message, UNVERIFIED, rufloVersion);
   }
 });

@@ -1,7 +1,12 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
 - **Status:** Implemented
-- **Updated:** 2026-09-28 — `GET /api/system/summary`'s allow-list projection now also covers
+- **Updated:** 2026-09-28 — CLI parity (§5) is now `ak system [--refresh[=live|machine]]
+  [--project-trees] [--json]` (`src/lib/refresh.mjs`'s shared strengths, replacing the retired
+  `--deep`); §5's `GET /api/system?refresh=deep` rationale is untouched by this branch and belongs
+  to a later remediation program's dashboard work (remediation program, branch 6b; see
+  [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
+- **Earlier update:** 2026-09-28 — `GET /api/system/summary`'s allow-list projection now also covers
   `storage`, `install`, `projects` and `consumers` (previously only `catalog` was projected; the
   other four passed through unfiltered and were ~76% of the endpoint's real-machine bytes).
   `GET /api/system` and `ak system --json` are unchanged (remediation program, branch 6a task 11);
@@ -322,8 +327,9 @@ silent "Other" slice into a to-do list a release can close.
   a mutation of user data, so it stays within that contract. `&trees=1|0` sets whether that scan
   walks project working trees; it is a **measurement** parameter, not a view filter, because
   trees that were never walked cannot be un-hidden client-side.
-- `ak system [--deep] [--json]` — CLI parity sharing the same collector, following the
-  usage-scorecard precedent of one collector behind both surfaces.
+- `ak system [--refresh[=live|machine]] [--project-trees] [--json]` — CLI parity sharing the same
+  collector, following the usage-scorecard precedent of one collector behind both surfaces
+  (`--refresh=machine` is the CLI equivalent of the `?refresh=deep` route below).
 - `GET /api/system/summary` (amendment, 2026-09-26; extended 2026-09-28) — the page's read: the
   same payload and parameters with `catalog`, `storage`, `install`, `projects` and `consumers` each
   projected to an allow-list of keys and items cut to what the page draws (including

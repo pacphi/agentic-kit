@@ -1,5 +1,5 @@
-// live-checks — what the last live checks found (decision 9b). `ak sync`,
-// `ak x verify` and `ak status --live` record results; this section only
+// live-checks — what the last live checks found (decision 9b). `ak sync` and
+// `ak status --refresh=live` record results; this section only
 // reads them and shows each with its age, so plain status and the dashboard
 // stay free of probes. The AQE embedding request is shown on its own
 // aqe-embedding row. No evidence yet means no row.
@@ -16,7 +16,7 @@ export default {
       const evidence = readLiveCheck(id, { inputsKey: liveCheckInputsKey(id, { cfg, cwd }) });
       if (evidence) {
         rows.push(row('live-checks', liveCheckLevel(evidence),
-          `${id}: ${describeLiveCheck(evidence, { recheck: 'ak status --live' })}`));
+          `${id}: ${describeLiveCheck(evidence, { recheck: 'ak status --refresh=live' })}`));
       }
     }
     return rows;

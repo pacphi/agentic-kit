@@ -28,7 +28,7 @@ export const options = {
   // days vs all history — patterns are lifetime phenomena), and a default here
   // would make "the user asked for 14" indistinguishable from "nobody asked".
   window: { type: 'string' },
-  deep: { type: 'boolean', default: false },
+  'show-text': { type: 'boolean', default: false },
 };
 
 export const help = `ak usage — provider account analytics cache + offline scorecard summary
@@ -43,11 +43,11 @@ Usage:
   ak usage status
   ak usage refresh openrouter
   ak usage score [--window 7|14|30] [--json]
-  ak usage prompts [--window 7|14|30|all] [--deep] [--json]
+  ak usage prompts [--window 7|14|30|all] [--show-text] [--json]
 
 \`ak usage prompts\` reads the prompt FINGERPRINTS the transcript scan already
 stores — a hash, a token count, a bounded token-hash sketch, and who wrote the
-turn. No prompt text is stored by it and none is printed. \`--deep\` is the
+turn. No prompt text is stored by it and none is printed. \`--show-text\` is the
 exception, and is opt-in for exactly that reason: it re-reads the transcripts
 to print the text behind each finding. That text goes to your terminal and is
 written nowhere — but with --json it is in the payload, so redirect that to a
@@ -65,7 +65,7 @@ Options:
   --window N  score: 7, 14, or 30 days (default 14)
               prompts: 7, 14, 30, or all (default all — patterns are lifetime
               phenomena, so the whole retained corpus is the honest default)
-  --deep      prompts only: re-read transcripts to print the verbatim prompts
+  --show-text prompts only: re-read transcripts to print the verbatim prompts
               behind each finding. Costs a few seconds; the report states how
               many it opened and how long it took. With --json the exemplars
               (which CONTAIN PROMPT TEXT) ride under an \`exemplars\` key.
@@ -78,7 +78,7 @@ Examples:
   ak usage score --window 30 --json  machine-readable scorecard projection
   ak usage prompts                   what you type, over all retained history
   ak usage prompts --window 30       the same report, last 30 days only
-  ak usage prompts --deep            the same report plus the verbatim exemplars`;
+  ak usage prompts --show-text       the same report plus the verbatim exemplars`;
 
 function summary(value) {
   if (!value) return null;
@@ -875,7 +875,7 @@ function printPromptReport(agg, r) {
  *  could not be re-read.
  *
  *  Security review SEC-2: the strip happens HERE, at the one funnel raw
- *  transcript text passes through on its way to the `--deep` printers, rather
+ *  transcript text passes through on its way to the `--show-text` printers, rather
  *  than only in output.mjs. Two reasons. This text never touches a store, so
  *  the store gates that stop every other route do not see it. And the column
  *  padding in `tableRow` counts raw `.length`, so stripping after the row is
@@ -936,7 +936,7 @@ function printPersonas(rows, total) {
 
 function printDeepPass(deep) {
   const c = deep.cost;
-  heading(`Deep pass — verbatim exemplars (deep pass: ${fmtNum(c.transcripts)} `
+  heading(`Prompt text — verbatim exemplars (deep pass: ${fmtNum(c.transcripts)} `
     + `transcript${c.transcripts === 1 ? '' : 's'}, ${c.seconds.toFixed(1)}s)`);
   info(dim('re-read from the transcripts on demand. This text is printed here and written nowhere.'));
   if (c.unreadable > 0 || c.resolved < c.wanted) {
@@ -978,7 +978,7 @@ async function runPrompts({ flags, deps }) {
   }
 
   const report = promptReport(agg, win);
-  const deep = flags.deep ? runDeepPass(agg, report, win, deps) : null;
+  const deep = flags['show-text'] ? runDeepPass(agg, report, win, deps) : null;
 
   if (flags.json) {
     const projection = promptProjection(agg, report);

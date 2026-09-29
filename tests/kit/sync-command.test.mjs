@@ -39,12 +39,17 @@ function seedHome(cfg = offlineKitConfig(), pkgs = {}) {
   paths._setGlobalRootForTest(fakeGlobalRoot(HOME, pkgs));
 }
 
-/** Run `ak sync --dry-run …` from the sandbox project and return its output. */
+/** Run `ak sync --dry-run …` from the sandbox project and return its output.
+ *  The dry run's version lookups answer nothing: some tests put /usr/bin on
+ *  PATH, where a real npm would otherwise query the registry. */
 async function dryRun(over = {}) {
   const cwd = process.cwd();
   process.chdir(PROJECT);
   try {
-    return await captureLog(() => sync.run({ flags: FLAGS({ 'dry-run': true, ...over }), pkgRoot: PKG_ROOT }));
+    return await captureLog(() => sync.run({
+      flags: FLAGS({ 'dry-run': true, ...over }), pkgRoot: PKG_ROOT,
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+    }));
   } finally { process.chdir(cwd); }
 }
 
@@ -567,6 +572,43 @@ test('manual fixes and preserved advisories never enter the plan and never fail 
   assert.match(out, /converged — no failing subsystems/);
 });
 
+// ADR-0063: the plan read never records (record: false), the converge proof
+// does (record: true), and neither forces a refresh. versionEvidence carries
+// cache-only version results for the parts --skip names; a sync that skips
+// none of them hands both reads an empty one.
+const MARKER = { subsystem: 'sync-test-only-marker', level: 'warn', message: 'marker row', fix: 'no sync step performs this' };
+
+test('the plan read and the converge proof get exactly these collect() arguments', async () => {
+  seedHome();
+  const calls = [];
+  await syncWith(async (args) => { calls.push(args); return args.record ? [] : [MARKER]; });
+  assert.equal(calls.length, 2);
+  const expected = (record) => ({
+    pkgRoot: PKG_ROOT, cwd: PROJECT, dejaVuAdapter: calls[0].dejaVuAdapter,
+    dejaVuPlanOptions: { allowUpgrade: false }, record, versionEvidence: {},
+  });
+  assert.deepEqual(calls[0], expected(false));
+  assert.deepEqual(calls[1], expected(true));
+  assert.equal(calls[1].dejaVuAdapter, calls[0].dejaVuAdapter);
+});
+
+test('with --skip versions both reads get cache-only drift, re-read after the apply phase', async () => {
+  seedHome(offlineKitConfig(), { ruflo: '9.9.8', 'agentic-qe': '9.9.9' });
+  const calls = [];
+  await syncWith(async (args) => {
+    calls.push(args);
+    // Stand-in for an apply phase that changed what is installed.
+    if (!args.record) paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
+    return args.record ? [] : [MARKER];
+  }, { skip: ['versions'] });
+  assert.equal(calls.length, 2);
+  const ruflo = (call) => call.versionEvidence.drift.find((r) => r.pkg === 'ruflo');
+  assert.deepEqual(Object.keys(calls[0].versionEvidence), ['drift']);
+  assert.deepEqual(Object.keys(calls[1].versionEvidence), ['drift']);
+  assert.equal(ruflo(calls[0]).installed, '9.9.8');
+  assert.equal(ruflo(calls[1]).installed, '9.9.9', 'the proof re-reads installed versions after the apply phase');
+});
+
 test('which steps perform a subsystem: none for an unknown one, the tail for host alignment', () => {
   const cfg = loadKitConfig();
   const flags = FLAGS();
@@ -677,6 +719,60 @@ test('a skipped subsystem runs no step and is never counted as a failure', async
   assert.doesNotMatch(out, /rvf:/, 'the aqe step never ran');
   assert.doesNotMatch(out, /unresolved:|still failing:/);
   assert.match(out, /skipped by request: \[aqe\]/);
+});
+
+// A skipped item is announced once, with the plan; the verdict does not repeat
+// it. Without --no-upgrade, so the ruvnet-brain row reaches the plan at all.
+const BRAIN_ROW = { subsystem: 'ruvnet-brain', level: 'warn', message: 'ruvnet-brain release v4.3.29 available', fix: 'sync refreshes the KB', repair: 'sync' };
+const NPX_ROW = { subsystem: 'npx', level: 'warn', message: 'stale npx env', fix: 'sync prunes stale npx envs', repair: 'sync' };
+const brainSkippedLines = (out) => out.match(/skipped by request: \[ruvnet-brain\]/g) ?? [];
+
+test('--skip ruvnet-brain prints its skipped line once', async () => {
+  seedHome();
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    const { result, out } = await captureLog(() => sync.run({
+      flags: FLAGS({ skip: ['ruvnet-brain'], yes: true }), pkgRoot: PKG_ROOT, collectFn: twoPhase([BRAIN_ROW, NPX_ROW], []),
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+    }));
+    assert.equal(result, 0, out);
+    assert.match(out, /converged — no failing subsystems \(1 skipped by request\)/);
+    assert.equal(brainSkippedLines(out).length, 1, out);
+  } finally { process.chdir(prior); }
+});
+
+// A host probe that throws while sync refreshes host evidence before planning
+// is reported, naming the host, and the sync goes on with the next host and
+// with the plan (which then reads that host as ak last recorded it).
+test('a host probe that fails before planning is reported by name and the sync continues', async () => {
+  seedHome(offlineKitConfig({
+    integrations: { version: 2, hosts: { claude: true, codex: true, opencode: false }, bindings: [] },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+  }));
+  const probed = [];
+  const probes = {
+    installState: async (h) => {
+      probed.push(h.id);
+      if (h.id === 'claude') throw new Error('claude probe exploded');
+      return { method: 'external' };
+    },
+    executable: async () => ({ ok: true }),
+    collectFacts: async () => { throw new Error('host setup probe exploded'); },
+  };
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    const { result, out } = await captureLog(() => sync.run({
+      flags: FLAGS({ 'no-upgrade': true }), pkgRoot: PKG_ROOT, collectFn: async () => [],
+      refreshHosts: (flags, cwd) => sync.refreshPlanHosts(flags, cwd, probes),
+    }));
+    assert.equal(result, 0, out);
+    assert.deepEqual(probed, ['claude', 'codex'], 'the next host is still probed');
+    assert.match(out, /⚠.*claude.*claude probe exploded/);
+    assert.match(out, /⚠.*host setup.*host setup probe exploded/);
+    assert.match(out, /nothing to do — all subsystems healthy/, 'the sync went on to plan');
+  } finally { process.chdir(prior); }
 });
 
 test('--skip stops a step on its derived triggers too', () => {
@@ -849,7 +945,8 @@ function syncChild({ first = [], after = [], flags = {}, throws = false }) {
       return calls++ === 0 ? first : after;
     };
     exitWhenFlushed(await sync.run({ flags: ${JSON.stringify(FLAGS({ 'no-upgrade': true, json: true, ...flags }))},
-      pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn }));
+      pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn,
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }) }));
   `;
   return spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     cwd: PROJECT, env: spawnEnv(HOME), encoding: 'utf8', timeout: 120_000,
@@ -907,6 +1004,16 @@ test('--json: a converged run with a skip reports the skipped item and exit 0', 
   assert.ok(out.steps.some((s) => s.id === 'npx' && s.ok), JSON.stringify(out.steps));
   assert.ok(!out.steps.some((s) => s.id === 'aqe-rvf'), 'a skipped step is not listed as run');
   assert.match(child.stderr, /converged — no failing subsystems/);
+});
+
+test('--json --skip ruvnet-brain keeps the skipped item in the JSON and prints its line once', () => {
+  seedHome();
+  const child = syncChild({ first: [BRAIN_ROW, NPX_ROW], after: [], flags: { 'no-upgrade': false, yes: true, skip: ['ruvnet-brain'] } });
+  const out = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(out.skipped, [BRAIN_ROW]);
+  assert.deepEqual(out.plan.map((p) => p.subsystem), ['npx']);
+  assert.equal(brainSkippedLines(child.stderr).length, 1, child.stderr);
 });
 
 test('--json: an error still yields exactly one JSON result, with the error and exit 1', () => {
@@ -1049,11 +1156,17 @@ function syncCfg(catalog) {
   });
 }
 
+/** A real sync from the sandbox project. Its version lookups answer nothing:
+ *  withOpencodeCli puts /usr/bin on PATH, where a real npm would otherwise
+ *  query the registry. */
 async function realSync() {
   const cwd = process.cwd();
   process.chdir(PROJECT);
   try {
-    return await captureLog(() => sync.run({ flags: FLAGS(), pkgRoot: PKG_ROOT }));
+    return await captureLog(() => sync.run({
+      flags: FLAGS(), pkgRoot: PKG_ROOT,
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+    }));
   } finally { process.chdir(cwd); }
 }
 

@@ -196,7 +196,7 @@ Delivery
   GET /api/system?refresh=deep → start-or-attach the single-flight deep scan
   GET /api/system/summary    → the same read, catalog/storage/install/projects/consumers each
                                 projected to what the System page draws
-  ak system [--deep] [--json]  → the same collector, CLI-rendered
+  ak system [--refresh[=live|machine]] [--project-trees] [--json]  → the same collector, CLI-rendered
         |
         v
   Machine Footprint destinations under System:
@@ -746,7 +746,7 @@ nothing to leak.
 
 The CLI twin (`ak system`) renders the same collector output, `--json` emitting the collector's
 payload verbatim, following the one-collector-two-surfaces precedent of the usage scorecard.
-`ak system --deep` is the terminal spelling of **Full scan** and writes the same snapshot.
+`ak system --refresh=machine` is the terminal spelling of **Full scan** and writes the same snapshot.
 
 ## Invariants
 

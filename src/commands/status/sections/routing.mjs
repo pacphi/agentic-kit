@@ -27,7 +27,7 @@ function divergedRow(policy) {
   // "diverges from": which side wins is activity-dependent (a newer default
   // can cost 2-3× the agentic turns on routine work), so a `warn` would push
   // users to spend turns clearing a lint. No `fix` — sync must never
-  // auto-refresh a pin; `ak host refresh` is the opt-in path (#55).
+  // auto-reset a pin; `ak host reset-routes` is the opt-in path (#55).
   const diverged = divergedRoutes(policy);
   if (!diverged.length) return null;
   const pairs = [...new Set(diverged.flatMap((d) => [
@@ -35,7 +35,7 @@ function divergedRow(policy) {
     ...d.escalation.map((e) => `${e.model} vs ${e.defaultModel} (escalation)`),
   ]))].join(', ');
   return row('routing', 'info',
-    `${diverged.length} seeded route(s) diverge from current defaults (${pairs}) — ak host refresh`);
+    `${diverged.length} seeded route(s) diverge from current defaults (${pairs}) — ak host reset-routes`);
 }
 
 export default {

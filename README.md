@@ -41,9 +41,10 @@ container for you. See [docs/DEVCONTAINERS.md](https://github.com/pacphi/agentic
 - **Multi-host execution (optional):** Claude, Codex, and opt-in OpenCode can share one activity policy; `ak run` is the canonical executor, while `ak setup --codex` enables the subscription-backed Claude/Codex defaults.
 - **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard report observed state and explicit evidence gaps.
 - **Managed ruflo components:** ak applies and reports ruflo's opt-in agent pickers, MCP tool governance, learning profile, and promotional funnel — see [Managed ruflo components](docs/MANAGED-TOOLS.md#managed-ruflo-components).
-- **Scoped verification:** `ak x verify` exercises named paths against real CLIs and reports
-  their results; `ak status` shows each remembered result with its age, and `ak status --live`
-  runs the quick, free subset first. Registration,
+- **Scoped verification:** `ak status --refresh=live` exercises named paths against real CLIs and
+  reports their results; `ak status` shows each remembered result with its age, and a plain
+  `--refresh=live` runs the quick, free subset first, while `--only CHECK` names one check
+  (including a slow proof) directly. Registration,
   configuration, and one passing probe do not establish every capability or every running session.
 - Cross-platform, **zero runtime dependencies** (SQLite embedded).
 
@@ -89,7 +90,7 @@ ak setup        first-time setup — machine and/or the project you're standing 
                 [--codex] [--opencode] [--primary-host claude|codex] [--with-deja-vu]
                 [--deja-vu-mode mcp|auto] [--no-deja-vu] [--project] [--minimal]
                 [--yes] [--no-aqe] [--no-security] [--reconfigure]
-ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep] [--live]
+ak status       read-only dashboard: what's true, what's drifted   [--json] [--refresh[=live|machine]]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
                 [--skip SUBSYSTEM] [--json]
 ak dashboard    open the local web dashboard (auto-opens your browser)
@@ -98,15 +99,16 @@ ak admin        maintainer-only telemetry admin (localhost; GitHub/npm egress)
                 [--port N] [--no-open]
 ak about        what each installed component is and why it's there
 ak system       machine footprint: install size, runtime, storage, catalog, projects
-                [--deep] [--json]
-ak maintain     inventory, guidance, discovery, guarded one-action plans
-                inventory | show | guidance | discovery | sources | scans | activity | audit | reconcile | plan | apply | undo
+                [--refresh[=live|machine]] [--json]
+ak maintain     findings, guidance, discovery, guarded one-action plans
+                [report] [--refresh[=live|machine]] | inventory | show | guidance | discovery |
+                sources | scans | activity | audit | reconcile | plan | apply | undo
 ak usage        offline scorecard, prompt patterns, and provider account cache
                 status | score | prompts | refresh openrouter
 ak models       inspect model lifecycle evidence and swap impact
                 status | refresh | diff | explain | plan
 ak host         manage execution hosts, routing, and provider bindings
-                status | pick | refresh | off
+                status | pick | reset-routes | off | check-connection
 ak audit hooks  read-only hook inventory across Codex, Claude, OpenCode, and adapters
 ak audit context read-only managed-guidance, skill-metadata, MCP-registration, and window evidence
 ak heal hooks   deterministic dry-run repair plan; explicit apply, verify, undo, recover
@@ -150,18 +152,20 @@ and current platform limits.
 | **models** | Builds a private, host-scoped model inventory from Claude, Codex, OpenCode, Ollama, bounded local usage evidence, and a dated bundled record of Anthropic's public model/lifecycle facts. `status`, `diff`, `explain`, and `plan` are cache-only and read-only; `refresh --online` is the sole online-catalogue boundary. Public facts never imply account or OpenRouter routability. Swap plans enumerate routes plus Agentic QE/Ruflo consumers and print a copyable canonical action without executing it. The CLI exposes exact local evidence deliberately; the Dashboard exposes source-proven public catalogue identity and uses the owner-visible model read contract; secret-shaped values remain masked. See [Model lifecycle intelligence](docs/MODELS.md). |
 | **admin** | Opens the **maintainer admin** (`127.0.0.1:7432`, localhost-only, foreground) — the project-telemetry sibling of `dashboard`, with the same dark/light visual theme and persisted theme preference: unique repo visitors and cloners (GitHub traffic API, needs a push-access token via `GITHUB_TOKEN`/`GH_TOKEN`/`gh auth token` — panels degrade honestly without one), contributors and watchers, npm download momentum (last 7d vs prior 7d, sparklines — shown as trend only, never an absolute reach number, since mirrors/CI inflate the raw count), latest CI run status and open Dependabot alerts, a **"since you last looked"** delta strip over a local baseline, open issues/PRs from others (oldest first), and external humans ranked by recency (bots excluded). Access is gated by a **per-session token** carried in the URL fragment and sent header-only; the page makes **zero external fetches** (the server proxies GitHub/npm; your credential never reaches the page or the payload). Where `dashboard` is offline-first, `admin` does deliberate GitHub/npm egress — that contract split is why they're siblings, not tabs. `--port N`, `--no-open`; Ctrl-C stops. (Also available as `ak x admin`.) |
 | **about** | A plain-words directory of every component the kit installs and configures — one entry per component: what it is, what it does for you, where to read more, and an honest state chip read from the same detection `ak status` uses (the prose is authored with the release; the chip is the only runtime fact). `ak about [entry-id]` opens one entry; `--category` narrows to `hosts`, `engine-memory`, `quality`, `safety`, `knowledge`, `kit`, or `configured`; `--no-detect` skips state resolution for an instant editorial read; `--json` emits the directory with resolved chips. The dashboard's About area renders this identical directory. |
-| **system** | What the stack occupies on your machine. The default read is the cheap tier: the live agent-process census, the files growing fastest between scans, and the last full scan's figures carried forward with their date. `--deep` re-walks install trees, storage, the cross-host catalog, and the hosted repositories with recorded sessions, then persists the result; excluded local-only, unsupported-remote, and sessionless project candidates remain counted with reasons. Production runs this synchronous measurement in one worker so the dashboard can continue reporting activity; this is responsiveness containment, not a claim that the scan finishes sooner. `--json` emits the same snapshot payload `/api/system` serves. |
-| **maintain** | Inventory-led maintenance. `inventory`, `show`, `guidance`, and `procedure` read the verified placement inventory and the outcomes the kit can ground; `discovery`, `sources`, and `scans` manage where it looks and resumable scan coverage; `activity`, `receipt`, and `audit` read receipts and run the read-only interruption audit. `ak maintain scan` runs the provider check; add `--deep` to remeasure System first and `--refresh-inventory` to rebuild the inventory. Every write is one action: `plan --executable` derives one action, `apply` needs the plan ID, digest, one action ID, and `--yes`, `undo` needs a committed reversible receipt, and `reconcile` records one audited outcome for one receipt. `recover` is a read-only alias for `audit`. Placements without a registered provider stay report-only. See [Maintenance](docs/MAINTENANCE.md). |
+| **system** | What the stack occupies on your machine. The default read is the cheap tier: the live agent-process census, the files growing fastest between scans, and the last full scan's figures carried forward with their date. `--refresh=machine` re-walks install trees, storage, the cross-host catalog, and the hosted repositories with recorded sessions, then persists the result; `--project-trees` also measures the working trees of your own projects; excluded local-only, unsupported-remote, and sessionless project candidates remain counted with reasons. Production runs this synchronous measurement in one worker so the dashboard can continue reporting activity; this is responsiveness containment, not a claim that the scan finishes sooner. `--json` emits the same snapshot payload `/api/system` serves. |
+| **maintain** | Inventory-led maintenance. `inventory`, `show`, `guidance`, and `procedure` read the verified placement inventory and the outcomes the kit can ground; `discovery`, `sources`, and `scans` manage where it looks and resumable scan coverage; `activity`, `receipt`, and `audit` read receipts and run the read-only interruption audit. `ak maintain` (or `ak maintain report`) reads the last measurement; `--refresh[=live\|machine]` refreshes Maintenance evidence and the inventory first, adding live checks or a full machine re-measure as named. Every write is one action: `plan --executable` derives one action, `apply` needs the plan ID, digest, one action ID, and `--yes`, `undo` needs a committed reversible receipt, and `reconcile` records one audited outcome for one receipt. `recover` is a read-only alias for `audit`. Placements without a registered provider stay report-only. See [Maintenance](docs/MAINTENANCE.md). |
 | **run** | **Canonical execution surface.** Executes the template vocabulary through host-neutral supervised adapters. It accepts an explicit OpenCode route (persisted or `--route`) alongside Claude/Codex; `--dry-run` prints the exact static plan (with each worker's escalation ladder); at runtime, successful dependencies pass runtime-only, sanitized handoffs capped at 2 KiB each/8 KiB fan-in, never exposed in public JSON. A handoff may cross hosts/vendors and must exclude secrets, credentials, raw logs, and transcript excerpts. `--escalate` advances a failed worker one rung of its route's ladder per attempt (bounded by the ladder; permission/consent and uncertain results are never escalated). `--timeout` is one absolute readiness→prepare→launch→observe budget per attempt, while separately bounded teardown proves whether resources terminated. An OpenCode worker runs an isolated loopback server with ephemeral basic authentication, returns only normalized observed facts, and aborts instead of approving a permission request. `ak run` does not turn OpenCode into an AQE provider or primary host. |
-| **host** | Execution-host status, selection, primary-host choice, activity routing, and reversible teardown: `ak host status\|pick\|refresh\|off`. The plumbing spelling is `ak x host`. Inference providers and bindings remain separate concepts even though their controls share this workflow. |
+| **host** | Execution-host status, selection, primary-host choice, activity routing, reversible teardown, and the consent-gated connection check: `ak host status\|pick\|reset-routes\|off\|check-connection`. The plumbing spelling is `ak x host`. Inference providers and bindings remain separate concepts even though their controls share this workflow. |
 | **uninstall** | Removes the kit's footprint (and any legacy shell-kit install); owned configuration is removed and ak's receipted edits inside Ruflo's install are put back, while project memory/transcripts are retained by default; `--purge` widens the documented package/config scope. |
 
 </details>
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
-`mcp pick|off`, `host status|pick|refresh|off`, `reference diff|sync`,
-`statusline status|codex native|extended|off`,
-`verify learning|security|aqe|providers|harvest`, `improvement-eval`) — see `ak --help --all`.
+`mcp status|pick|off`, `host status|pick|reset-routes|off|check-connection`, `reference diff|sync`,
+`statusline status|codex native|codex extended|codex off`,
+`improvement-eval`) — see `ak --help --all`. Named checks and slow proofs (`learning`, `security`,
+`aqe`, `providers`, `harvest`, `deja-vu`, `memory`, `memory-routes`, `mcp`, `aqe-embedding`) run
+through `ak status --refresh=live --only CHECK`.
 
 One of those is worth calling out:
 
@@ -169,7 +173,8 @@ One of those is worth calling out:
   it records the session outcome through Ruflo's own `ruflo hooks post-task`, run from the
   project root with the project memory pin; `--distill` also runs Ruflo's memory distillation
   (`ruflo memory distill run`) on the project store. Off and `--dry-run`-safe by default; no
-  daemon, ever. `ak x verify harvest` proves the path against an isolated temporary store.
+  daemon, ever. `ak status --refresh=live --only harvest` proves the path against an isolated
+  temporary store.
 
 ## The status line
 

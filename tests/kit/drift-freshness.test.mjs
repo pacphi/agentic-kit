@@ -53,13 +53,14 @@ test('a failed forced fetch falls back to the cached seen values instead of null
   assert.equal(ruflo.outdated, true, '9.9.10 > installed 9.9.9 still detected');
 });
 
-test('a fully-failed forced fetch neither clobbers seen nor stamps last (TTL retries promptly)', async () => {
+test('a fully-failed forced fetch keeps seen and restamps last, keeping when the versions were seen', async () => {
   seedHome({ last: 1, seen: { ruflo: '9.9.10', 'agentic-qe': '9.9.9' } });
   await driftReport({ force: true, fetchLatest: async () => null });
 
   const after = loadKitConfig().versionCheck;
   assert.equal(after.seen.ruflo, '9.9.10', 'seen preserved on total failure');
-  assert.equal(after.last, 1, 'last not stamped — the next call must retry, not trust a failed probe');
+  assert.ok(after.last > 1, 'last restamped — an offline status or dashboard poll retries once per TTL window');
+  assert.deepEqual(after.observedAt, { ruflo: 1, 'agentic-qe': 1 }, 'the observation time is not the failed attempt');
 });
 
 test('a successful forced fetch updates seen, stamps last, and reports drift', async () => {
@@ -111,7 +112,8 @@ test('sync (non-dry) force-refreshes drift BEFORE building the plan, so a fresh-
 });
 
 // ADR-0041 §7: the forced lookup is where Ruflo's release dates are
-// remembered; a dry run touches nothing, and `ak status` never looks them up.
+// remembered; a dry run looks them up for its preview but records nothing,
+// and `ak status` never looks them up.
 test('a non-dry sync remembers Ruflo release dates for the support window; a dry run does not', async () => {
   const time = { created: '2020-01-01T00:00:00Z', '3.45.0': '2026-09-24T22:54:53Z', '3.46.0': '2026-09-26T22:34:55Z' };
   const calls = [];
@@ -125,9 +127,10 @@ test('a non-dry sync remembers Ruflo release dates for the support window; a dry
 
   seedHome({ last: 1, seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' } });
   await syncWith(FLAGS({ 'dry-run': true }));
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls, ['npm view ruflo time --json'], 'the dry run previews the lookup');
   assert.equal(loadKitConfig().versionCheck.rufloMinors, undefined);
 
+  calls.length = 0;
   await syncWith(FLAGS());
   assert.deepEqual(calls, ['npm view ruflo time --json']);
   const remembered = loadKitConfig().versionCheck.rufloMinors;

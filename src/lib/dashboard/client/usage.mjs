@@ -1169,10 +1169,14 @@ import { renderUsage } from './usage-orchestrators.mjs';
     "rpc-error":function(u){var c=codexCode(u.rpcCode);return "codex app-server refused the rate-limit request"+(c?" (RPC error "+c+")":"")
       +", for example when codex is not signed in. Run <code>codex login status</code>.";},
     "no-limit-windows":function(){return "codex answered but reported no plan limit window. Plan windows apply to a ChatGPT-plan "
-      +"sign-in; API-key use is billed at API rates. <code>codex login status</code> shows which one codex uses.";}
+      +"sign-in; API-key use is billed at API rates. <code>codex login status</code> shows which one codex uses.";},
+    "host-not-found":function(){return "Codex is not installed on this machine (ak&rsquo;s last host check did not find the codex CLI), "
+      +"so its quota is not requested.";},
+    "host-unconfirmed":function(){return "ak has not checked for Codex on this machine recently; the quota is requested once the "
+      +"dashboard&rsquo;s status check finds it.";}
   };
   var CODEX_FAILED_SHORT={"not-installed":"codex not found","spawn-failed":"could not start","timeout":"timed out",
-    "no-limit-windows":"no plan windows"};
+    "no-limit-windows":"no plan windows","host-not-found":"codex not found","host-unconfirmed":"not checked yet"};
   function codexWhy(u){
     return u&&Object.prototype.hasOwnProperty.call(CODEX_WHY,u.reason)?CODEX_WHY[u.reason](u):null;
   }
@@ -1180,7 +1184,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(!u||!Object.prototype.hasOwnProperty.call(CODEX_WHY,u.reason))return "";
     var c=u.reason==="exited"?codexCode(u.exitCode):u.reason==="rpc-error"?codexCode(u.rpcCode):"";
     var label=u.reason==="exited"?"exited":u.reason==="rpc-error"?"refused (RPC)":CODEX_FAILED_SHORT[u.reason];
-    return " · last refresh failed: "+label+(c?" (code "+c+")":"");
+    // host-not-found/host-unconfirmed never attempted a refresh (ADR-0010's
+    // presence gate skipped the spawn entirely) — "last refresh failed" would
+    // be false; every other reason DID attempt one.
+    var prefix=(u.reason==="host-not-found"||u.reason==="host-unconfirmed")?" · not refreshed: ":" · last refresh failed: ";
+    return prefix+label+(c?" (code "+c+")":"");
   }
 
   function renderLimitsCodex(){

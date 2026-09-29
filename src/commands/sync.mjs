@@ -26,13 +26,12 @@ import { applyRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
 import { cleanupProbeRows } from '../lib/memory-probe-cleanup.mjs';
 import { rufloMemoryLocation } from '../lib/ruflo-memory.mjs';
 import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
-import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
+import { loadKitConfig, saveKitConfig, configErrorRecovery, configRecoveryLines } from '../lib/config.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, collectIntegrationFacts, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
-import { recordRufloReleaseDates } from '../lib/ruflo-support-window.mjs';
-import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
+import { lookUpPlanVersions, skippedVersionEvidence } from './sync/plan-versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { runScaffoldAgentsFix } from '../lib/scaffold.mjs';
@@ -40,7 +39,7 @@ import { nativesStatus, securityPresent } from '../lib/natives.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome } from '../lib/output.mjs';
+import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome, humanOutputToStderr } from '../lib/output.mjs';
 import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { confirmCodexMcpRepairs, reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
@@ -106,47 +105,33 @@ export function recordApplyFailure(state, name, result) {
   if (result?.ok === false) state.applyFailures.push({ name, detail: result.detail || `exit ${result.status || 'failed'}` });
 }
 
-/** Refresh every network-backed fact that can open an upgrade gate. Kept out
- *  of run() so adding one release boundary does not grow the command's already
- *  broad orchestration complexity. Sequential: these probes persist kit.json. */
-async function refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner) {
-  if (flags['dry-run'] || flags['no-upgrade']) return;
-  await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
-  // ADR-0041 §7: remember each Ruflo minor's first publish so `ak status` can
-  // compute the support window without a network call. A failed lookup keeps
-  // the old dates.
-  const cfg = loadKitConfig();
-  if (await recordRufloReleaseDates({ cfg, ...(releaseDatesRunner ? { runner: releaseDatesRunner } : {}) })) {
-    try { saveKitConfig(cfg); } catch { /* read-only envs: the next sync records them */ }
-  }
-  // Self-update has its own TTL cache; refresh it before the collector decides
-  // whether a self action exists. An apply-time refresh cannot open that gate.
-  await selfDrift({ pkgRoot, force: true, ...(fetchLatest ? { fetchLatest } : {}) });
-  // Brain releases have a second executability fact beyond the tag: the
-  // required ruvnet-brain.zip asset. A tag-only release is not actionable.
-  if (loadKitConfig().ruvnetBrain) await ruvnetBrainDrift({ force: true });
-}
-
 /** Force host install/launch/setup evidence fresh before the plan is built,
  *  so a row that has not yet gone STALE (host-setup's 6h TTL) but is simply
  *  WRONG — a host repaired or broken since it was last recorded — can never
  *  hide a needed fix from the plan, or hide that a fix already landed. Kept
- *  narrow and separate from `refreshPlanDrift`: forcing every evidence-gated
+ *  narrow and separate from `lookUpPlanVersions`: forcing every evidence-gated
  *  kind fresh here (by passing `refresh: true` to the plan's own `collect()`
  *  call) was tried and reverted — it broke `--dry-run`'s "touches nothing"
  *  contract for `ruflo-component` evidence and defeated this branch's own
  *  warm-cache design for kinds that don't need it. Dry-runs skip this: it
- *  persists evidence, and --dry-run is pinned to touch nothing — same
- *  cache-staleness trade `refreshPlanDrift` already makes for version drift. */
-async function refreshPlanHosts(flags, cwd) {
+ *  persists evidence, and --dry-run is pinned to touch nothing, so a dry run
+ *  reads host evidence as last recorded (it expires after 6 h). A probe that
+ *  throws is reported by host and the sync goes on; the plan then reads that
+ *  host as ak last recorded it. `probes` replaces the probes (tests). */
+export async function refreshPlanHosts(flags, cwd, probes = {}) {
   if (flags['dry-run']) return;
+  const { installState, executable, collectFacts } = { ...HOST_LIFECYCLE, collectFacts: collectIntegrationFacts, ...probes };
+  const fresh = { refresh: true, record: true, source: 'sync' };
+  const guarded = (what, probe) => Promise.resolve().then(probe).catch((e) => warn(
+    `${what}: could not re-check before planning (${e?.message ?? e}); the plan uses what ak last recorded`));
   const cfg = loadKitConfig();
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
-    const st = await hostInstallState(h, { refresh: true, record: true, source: 'sync' });
-    if (st.method === 'npm') await hostExecutable(h, { refresh: true, record: true, source: 'sync' });
+    await guarded(`host ${h.id}`, async () => {
+      if ((await installState(h, fresh)).method === 'npm') await executable(h, fresh);
+    });
   }
-  await collectIntegrationFacts({ cwd, cfg, refresh: true, record: true, source: 'sync' });
+  await guarded('host setup', () => collectFacts({ cwd, cfg, ...fresh }));
 }
 
 export const options = {
@@ -162,9 +147,12 @@ export const help = `ak sync — converge to good: upgrade + heal + verify
 Builds a plan from the same collector \`ak status\` uses, then applies it in
 order: upgrades first (they wipe native modules), then heals, then re-collects
 to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
-Before planning, a sync that may upgrade (not --dry-run or --no-upgrade) reads
-the latest versions and Ruflo's release dates from npm; \`ak status\` uses the
-remembered dates for the Ruflo support window.
+Before planning, a sync that may upgrade (not --no-upgrade) looks up the latest
+versions and Ruflo's release dates online; \`ak status\` uses the remembered
+dates for the Ruflo support window. --dry-run makes the same lookups and
+records nothing: its npm lookups use a temporary npm cache it removes
+afterwards. A dry run reads host evidence as ak last recorded it (it expires
+after 6 h).
 In a Ruflo project, sync applies ak's daemon settings (flat keys in
 .claude-flow/config.json, start-on-use on unless kit.json rufloDaemon.autoStart
 is false) and restarts the project's daemon only if it was running.
@@ -191,6 +179,8 @@ refresh after an upgrade (that refresh can replace the statusline helper). A
 skipped subsystem's manual-fix row is the exception: sync never performed
 that fix anyway, so it is still listed under "needs your action" instead of
 "skipped by request".
+--skip versions, self, ruvnet-brain or ruvector also leaves that part's online
+version lookup out: the plan reads the latest versions ak last recorded for it.
 An unknown name is rejected with the list of names sync accepts.
 
 --json writes every human line (the plan, step results, prompts) to stderr
@@ -201,13 +191,16 @@ plan and skipped items carry status's row fields (subsystem, level, message,
 fix, repair); needsYourAction items carry subsystem, level, message and fix;
 each unresolved item has a reason: not-converged, no-step, failing,
 apply-failed, or declined. converged is null when the run stopped
-before a verdict (a dry run with a plan, a rejected flag, an error); an error
-also sets "error". The exit code equals exitCode.
+before a verdict (a dry run with a plan, a rejected flag, an error); a
+rejected flag or an error also sets "error", and an unreadable kit.json also
+sets "recovery": { backup, commands[], note }, the commands that move it
+aside. The exit code equals exitCode.
 
 Usage: ak sync [options]
 
 Options:
-  --dry-run            print the plan and stop; change nothing
+  --dry-run            print the plan and stop; like a real sync it checks
+                       the latest versions online first, and records nothing
   --no-upgrade         heal only; don't upgrade ruflo/aqe/kit versions
   --skip SUBSYSTEM     leave SUBSYSTEM out of this run (repeatable, or
                        comma-separated: --skip natives,ruvnet-brain)
@@ -620,7 +613,7 @@ export const SYNC_STEPS = [
           return;
         }
         // Retire withdrawn models from the persisted policy. Distinct from
-        // divergence (which stays an explicit `ak x host refresh` decision): a
+        // divergence (which stays an explicit `ak host reset-routes` decision): a
         // retired model stops answering, so leaving it named on disk is a
         // scheduled failure. Only seeded entries are rewritten; a user pin is
         // reported and left alone.
@@ -984,30 +977,12 @@ function stepTracer(state, result, capture) {
   return { traced, report, markFailed };
 }
 
-/** Under --json, send everything written to stdout during `fn` (ok/warn/fail/
- *  info lines, the plan listing, prompts, progress) to stderr instead, and
- *  let the step tracer collect it while `capture.chunks` is set. stdout is
- *  restored even when `fn` throws, so the one JSON result lands on it alone. */
-async function humanOutputToStderr(fn) {
-  const stdoutWrite = process.stdout.write;
-  const capture = { chunks: null };
-  // stderr.write is looked up on every call, so a caller's own wrapper still sees it.
-  const toStderr = (...args) => {
-    capture.chunks?.push(String(args[0]));
-    return Reflect.apply(process.stderr.write, process.stderr, args);
-  };
-  process.stdout.write = /** @type {typeof process.stdout.write} */ (/** @type {unknown} */ (toStderr));
-  try {
-    return await fn(capture);
-  } finally {
-    process.stdout.write = stdoutWrite;
-  }
-}
-
 /** Print the verdict; returns the exit code. `manualFailing`: a fail-level
- *  manual row remains, so "no failing subsystems" would be untrue. */
-function reportVerdict({ unresolved, remaining, skipped }, manualFailing = false) {
-  for (const s of skipped) info(`skipped by request: [${s.subsystem}] ${s.fix ?? s.message}`);
+ *  manual row remains, so "no failing subsystems" would be untrue. A skipped
+ *  item announcePlan already printed (`announced`) is not printed again. */
+function reportVerdict({ unresolved, remaining, skipped }, manualFailing, announced) {
+  const said = new Set(announced.map(repairKey));
+  for (const s of skipped.filter((r) => !said.has(repairKey(r)))) info(`skipped by request: [${s.subsystem}] ${s.fix ?? s.message}`);
   if (unresolved.length === 0 && remaining.length === 0) {
     const what = manualFailing ? 'nothing left that sync can repair' : 'no failing subsystems';
     ok(bold(`converged — ${what}${skipped.length ? ` (${skipped.length} skipped by request)` : ''}`));
@@ -1040,6 +1015,12 @@ async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm,
   }
 }
 
+const emptyResult = () => ({ plan: [], steps: [], unresolved: [], skipped: [], needsYourAction: [], converged: null, exitCode: 0 });
+
+/** The --json answer to an invocation the CLI parser rejected: the result
+ *  shape with nothing run, exit 2 (the audit record's Decision 6). */
+export const jsonUsageError = (message) => ({ ...emptyResult(), exitCode: 2, error: message });
+
 /** `ak sync`. Without --json it prints as it goes and returns the exit code.
  *  With --json every human line goes to stderr and stdout carries exactly one
  *  JSON object: { plan, steps, unresolved, skipped, needsYourAction, converged,
@@ -1047,9 +1028,10 @@ async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm,
  *  true when nothing is left for sync to do, false when it ended with
  *  unresolved or failing items, and null when it stopped before a verdict (a
  *  dry run with a plan, a rejected flag, an error). Manual rows never decide
- *  it; every run ends by listing them (needsYourAction). */
+ *  it; every run ends by listing them (needsYourAction). An unreadable kit.json
+ *  also adds `recovery`, the commands that set it aside (config.mjs). */
 export async function run(opts) {
-  const result = { plan: [], steps: [], unresolved: [], skipped: [], needsYourAction: [], converged: null, exitCode: 0 };
+  const result = emptyResult();
   if (!opts.flags.json) {
     result.exitCode = await converge(opts, result);
     reportNeedsYourAction(result.needsYourAction);
@@ -1059,8 +1041,10 @@ export async function run(opts) {
     try {
       result.exitCode = await converge(opts, result, capture);
     } catch (e) {
-      fail(`ak sync: ${e?.stack ?? e}`);
-      Object.assign(result, { converged: null, exitCode: 1, error: e?.message ?? String(e) });
+      const recovery = configErrorRecovery(e);
+      fail(`ak sync: ${recovery ? e.message : e?.stack ?? e}`);
+      for (const line of recovery ? configRecoveryLines(recovery) : []) console.log(line);
+      Object.assign(result, { converged: null, exitCode: 1, error: e?.message ?? String(e) }, recovery ? { recovery } : {});
     }
     reportNeedsYourAction(result.needsYourAction);
   });
@@ -1073,6 +1057,8 @@ async function converge({
   pkgRoot,
   fetchLatest,
   releaseDatesRunner,
+  brainDrift,
+  tmpRoot,
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
   refreshHosts = refreshPlanHosts,
@@ -1091,10 +1077,12 @@ async function converge({
   // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
   // stamped before an upstream release claims "all current" and the upgrade
   // never reaches the plan (the old force at apply time sat behind the very
-  // versions gate it needed to open). Dry-runs skip the refresh: it writes
-  // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
-  // preview may be cache-stale by up to one TTL window.
-  await refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner);
+  // versions gate it needed to open). A dry run makes the same lookups and
+  // records nothing; the plan read below gets their results. A part --skip
+  // names is never looked up; both reads below get its recorded versions.
+  const { versionEvidence } = await lookUpPlanVersions({
+    flags, skip, pkgRoot, fetchLatest, releaseDatesRunner, brainDrift, tmpRoot,
+  });
   // Same reasoning, narrower scope: a NOT-YET-STALE host-install-method/
   // host-launch/host-setup row can still be wrong (a host repaired or broken
   // since it was last recorded), and unlike version drift this cannot be
@@ -1116,7 +1104,7 @@ async function converge({
   // converge proof below — and a plain `ak status` right after — see the
   // post-repair state, not what was cached before it.
   const rows = await collectFn({
-    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false,
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false, versionEvidence,
   });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair
@@ -1204,10 +1192,13 @@ async function converge({
   // they changed anything). Unlike the plan read, this one DOES persist
   // (record: true): it is the last thing this run computes, so a cache-miss
   // probe it triggers is worth keeping — a plain `ak status` immediately
-  // afterward then reuses it instead of re-probing on its own.
+  // afterward then reuses it instead of re-probing on its own. Skipped
+  // version parts are re-read from the cache here, never taken from the plan
+  // read: the apply phase may have changed what is installed.
   console.log('');
+  const afterEvidence = await skippedVersionEvidence({ skip, pkgRoot });
   const after = await collectFn({
-    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: true,
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: true, versionEvidence: afterEvidence,
   });
   result.needsYourAction = needsYourAction(after);
 
@@ -1232,7 +1223,7 @@ async function converge({
         const n = nativesStatus();
         return (n?.locations?.filter((l) => l.native).length ?? 0) + (n?.aqe?.native ? 1 : 0);
       })(),
-      driftOutdated: (await driftReport()).some((r) => !r.installed || r.outdated),
+      driftOutdated: (afterEvidence.drift ?? await driftReport()).some((r) => !r.installed || r.outdated),
       securityPresent: securityPresent(),
     });
     saveKitConfig(cfg);
@@ -1241,7 +1232,7 @@ async function converge({
   const verdict = convergenceVerdict({ plan, after, state, flags, cfg, skip, skipped });
   result.unresolved = [...verdict.unresolved, ...verdict.remaining].map(publicIssue);
   result.skipped = verdict.skipped.map(publicRow);
-  const code = reportVerdict(verdict, result.needsYourAction.some((r) => r.level === 'fail'));
+  const code = reportVerdict(verdict, result.needsYourAction.some((r) => r.level === 'fail'), skipped);
   result.converged = code === 0;
   return code;
 }

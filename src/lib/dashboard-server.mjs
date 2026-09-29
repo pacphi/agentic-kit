@@ -418,7 +418,7 @@ export function routingPayload(cfg = loadKitConfig()) {
     //                 the row shows what will actually run. Actionable but not a
     //                 choice.
     //   diverged    — a seeded route the defaults moved past. A trade to weigh,
-    //                 cleared only by an explicit `ak x host refresh`.
+    //                 cleared only by an explicit `ak host reset-routes`.
     const diverged = new Map(divergedRoutes(policy).map((d) => [d.activity, d]));
     return {
       primaryHost: cfg.routing?.primaryHost ?? 'claude',
@@ -1134,6 +1134,10 @@ export function startDashboard({
   // enabledHosts drives quota.mjs's F-10 labeling (any OTHER enabled host with
   // no sanctioned quota channel) from the same kit.json read used elsewhere in
   // this file (see loadKitConfig() below) — never a second, ad hoc source.
+  // Whether Codex itself is even asked is NOT decided here: readLimits's own
+  // default (providers.mjs recordedHostPresence, reading the host-setup
+  // evidence detectHosts already records for every host on each /api/status
+  // poll) decides, and this route never overrides it with a probe (ADR-0010).
   const provideLimits = limits || (async () => {
     const { readLimits } = await import('./quota.mjs');
     return readLimits({ enabledHosts: loadKitConfig().integrations.hosts });

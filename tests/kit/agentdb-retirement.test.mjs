@@ -10,7 +10,7 @@
 //   · a legacy `agentdb` key in kit.json is tolerated silently (preserved, ignored);
 //   · harvest runs only Ruflo's own verbs, from the project memory root, with the
 //     project memory pin — and distillation is an explicit opt-in;
-//   · `ak x verify harvest` never seeds an AgentDB store and keeps every memory
+//   · the harvest proof never seeds an AgentDB store and keeps every memory
 //     path inside its temporary directory;
 //   · About reports the agentdb copy Ruflo bundles, never the standalone global.
 import { test, after } from 'node:test';
@@ -31,7 +31,7 @@ const heal = await import('../../src/lib/heal.mjs');
 const { SYNC_STEPS } = await import('../../src/commands/sync.mjs');
 const { loadKitConfig, saveKitConfig } = await import('../../src/lib/config.mjs');
 const harvest = await import('../../src/lib/harvest.mjs');
-const verify = await import('../../src/commands/x/verify.mjs');
+const verify = await import('../../src/lib/live-checks.mjs');
 const about = await import('../../src/commands/about.mjs');
 const { foldKnownVersions } = await import('../../src/lib/dashboard-server.mjs');
 assertSandboxed(paths, HOME);

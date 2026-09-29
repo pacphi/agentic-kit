@@ -13,7 +13,9 @@ import { row } from '../row.mjs';
 
 export default {
   id: 'ruvector',
-  async collect({ cfg, refresh = false }) {
+  // A ruvector drift the caller already holds (versionEvidence: what ak sync
+  // looked up or read from the cache, ADR-0063) is used as given.
+  async collect({ cfg, refresh = false, versionEvidence }) {
     const rows = [];
     if (!ruvectorRegistered()) return rows;
     if (cfg.ruvector === false) {
@@ -21,7 +23,7 @@ export default {
       return rows;
     }
     try {
-      const rv = await ruvectorDrift({ force: refresh });
+      const rv = versionEvidence?.ruvector ?? await ruvectorDrift({ force: refresh });
       if (rv.present && rv.outdated) {
         rows.push(row('ruvector', 'warn',
           `ruvector CLI ${rv.installed} installed, ${rv.latest} available`, 'sync upgrades the ruvector CLI'));

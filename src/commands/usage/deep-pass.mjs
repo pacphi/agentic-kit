@@ -1,4 +1,4 @@
-// Exemplar-gathering machinery for `ak usage prompts --deep`.
+// Exemplar-gathering machinery for `ak usage prompts --show-text`.
 //
 // The CLI half of the privacy split (ADR-0039 "The privacy split"). The
 // aggregate tier knows THAT a request was retyped in 22 sessions; it cannot say what
@@ -7,7 +7,7 @@
 // parsers the scan path uses, so a turn re-fingerprints to the identical `h`
 // and joins back to the findings exactly.
 //
-// THE BOUNDARY: the text goes to stdout for the explicit `--deep` request and
+// THE BOUNDARY: the text goes to stdout for the explicit `--show-text` request and
 // nowhere else. Nothing here writes a file.
 //
 // WHY THIS READS THE INDEX CACHE AND `agg.promptPatterns` DOES NOT. The

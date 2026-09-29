@@ -39,16 +39,15 @@ function detectCurrentEnvironments({
  *   loadConfig: () => any, saveConfig: (cfg: any) => void, controlRoot: string,
  *   fsImpl?: typeof fs, now?: () => number, installationKey: string,
  *   platform?: string, env?: NodeJS.ProcessEnv, walk?: Function,
- *   fetchImpl?: typeof fetch, paths?: object, wslDistributions?: any[],
+ *   paths?: object, wslDistributions?: any[],
  *   osImpl?: typeof os, collectIntegrationFacts: Function,
- *   recipeRegistry?: { url: string, allowlist: string[], publisherId: string },
  *   providerOptions?: object }} options
  */
 export function buildManagementContext({
   maintenance, collector, modelStore = null, hookReadModel = null, loadConfig, saveConfig, controlRoot,
   fsImpl = fs, now = Date.now, installationKey, platform = process.platform, env = process.env,
-  walk = undefined, fetchImpl = undefined, paths = {}, wslDistributions = [], osImpl = os,
-  collectIntegrationFacts, recipeRegistry = null, providerOptions = {},
+  walk = undefined, paths = {}, wslDistributions = [], osImpl = os,
+  collectIntegrationFacts, providerOptions = {},
 }) {
   const managementRoot = path.join(controlRoot, 'management');
   const checkpointRoot = path.join(managementRoot, 'checkpoints');
@@ -59,11 +58,10 @@ export function buildManagementContext({
   const environmentId = currentEnvironmentId(environments);
 
   const nowDate = () => new Date(now());
-  const resolvedFetch = fetchImpl ?? globalThis.fetch;
   const ctx = {
     maintenance, collector, modelStore, hookReadModel, loadConfig, saveConfig, controlRoot, managementRoot,
-    transactionsRoot, fsImpl, now, installationKey, platform, env, walk, fetchImpl: resolvedFetch, paths,
-    environments, environmentId, collectIntegrationFacts, recipeRegistry, providerOptions,
+    transactionsRoot, fsImpl, now, installationKey, platform, env, walk, paths,
+    environments, environmentId, collectIntegrationFacts, providerOptions,
     dispositionStore: createDispositionStore({ root: managementRoot, fsImpl, now: nowDate }),
     recipeStore: createRecipeStore({ root: managementRoot, fsImpl, now: nowDate }),
     preferencesStore: createPreferencesStore({ root: managementRoot, fsImpl }),

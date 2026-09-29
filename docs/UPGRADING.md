@@ -51,8 +51,7 @@ row, possibly a moment slower on that one check, never a placeholder state. This
 needs no action. Two rows read differently until their own next refresh, unchanged by this
 release: ruflo-component rows read `unknown` until `ak sync` or `ak status --refresh` (see
 [MANAGED-TOOLS.md](MANAGED-TOOLS.md#managed-ruflo-components)); the remembered live-check rows
-(`ak x verify`'s suites) simply don't appear until `ak sync`, `ak x verify`, or `ak status --live`
-records one.
+simply don't appear until `ak sync` or `ak status --refresh=live` records one.
 
 The old, now-orphaned storage locations — `<stateBase>/agentic-kit/live-checks/` (pre-dating this
 release) and `<stateBase>/agentic-kit/ruflo-components-evidence.json` (also pre-dating this
@@ -151,8 +150,8 @@ When the ChatGPT desktop app imports a Claude Code transcript, it saves a copy a
 Project discovery no longer counts these copies: they give a folder no Codex host and no Desktop
 origin, and System says how many it set aside. A snapshot taken before this change still holds the
 old hosts and origins, so the Footprint snapshot schema advances to v8. This build reports a v7
-snapshot as unreadable until you run **Full scan** in System or `ak system --deep`. It is never
-shown under the new rule. See [ADR-0060](adr/0060-session-surface-initiator-and-product-names.md) §3.
+snapshot as unreadable until you run **Full scan** in System or `ak system --refresh=machine`. It
+is never shown under the new rule. See [ADR-0060](adr/0060-session-surface-initiator-and-product-names.md) §3.
 
 ## 2026-09-27: Ruflo support window
 
@@ -167,7 +166,8 @@ shows a `versions` row for it:
 - **not yet known**: ak has not read Ruflo's release dates yet. Run `ak sync`.
 
 `ak status` never looks the dates up itself. A plain `ak sync` reads them from npm and remembers them
-in `kit.json` (`versionCheck.rufloMinors`); `ak sync --dry-run` and `ak sync --no-upgrade` do not.
+in `kit.json` (`versionCheck.rufloMinors`). `ak sync --dry-run` reads them for its preview and
+remembers nothing; `ak sync --no-upgrade` does not read them.
 
 ## 2026-09-27: ak keeps its MCP policy file out of git
 
@@ -259,8 +259,8 @@ bundled copy instead. Nothing is uninstalled for you. A leftover global is harml
 `ak x harvest` now runs only Ruflo commands from the project root: `ruflo hooks post-task`, plus
 `ruflo memory distill run` when you pass `--distill`. Its `--json` result no longer carries the
 `agentdb` or `harvested` fields; each step reports `ok`, `skipped` and `detail`, and the result
-names the project `root`. `ak x verify harvest` now fails when Ruflo is missing instead of
-skipping.
+names the project `root`. `ak status --refresh=live --only harvest` now fails when Ruflo is
+missing instead of skipping.
 
 ## 2026-09-26: Status rows say who performs each fix
 
@@ -298,7 +298,9 @@ stdout, pretty-printed like `ak status --json`:
   warning row whose fix you must do yourself. These never change `converged` or `exitCode`.
 - `converged` is `true` when nothing is left for sync to do, `false` when it ended with unresolved
   items, and `null` when it stopped before a verdict: a dry run with a plan, a rejected flag, or an
-  error. A rejected flag or an error also adds `error`. The process exit code equals `exitCode`.
+  error. A rejected flag or an error also adds `error`, and an unreadable kit.json also adds
+  `recovery` (`backup`, `commands`, `note`): the commands that move it aside. The process exit
+  code equals `exitCode`.
 
 A script that scraped stdout of `ak sync --json` for human lines should read stderr instead.
 
@@ -388,8 +390,8 @@ System > Sessions renders the identity as one two-line transcript link: localize
 then a shortened opaque native ID. Focus or hover discloses the original filename, full native ID,
 and detailed localized time with timezone. If an older snapshot or host has no declared opening
 instant, the measured mtime is explicitly labeled **Last active**. Run **Full scan** or
-`ak system --deep` to populate native identity for an existing snapshot; no configuration or
-payload migration is required.
+`ak system --refresh=machine` to populate native identity for an existing snapshot; no
+configuration or payload migration is required.
 
 ## 2026-09-03: System Projects snapshot v7
 
@@ -401,7 +403,7 @@ such as the user home from triggering several hundred thousand unrelated filesys
 
 Because that population is narrower than the v6 measurement contract, the Footprint snapshot
 schema advances to v7. A v6 snapshot is reported as unreadable by this build until the next explicit
-**Full scan** or `ak system --deep`; it is never silently reinterpreted.
+**Full scan** or `ak system --refresh=machine`; it is never silently reinterpreted.
 
 ## 2026-09-03: System Catalog snapshot v6
 
@@ -409,7 +411,7 @@ Catalog identity now preserves full plugin marketplace/version provenance and se
 standalone capability identities from plugin-contributed identities. Catalog v4 now also separates
 one physical artifact from each host ConsumerBinding, and the Footprint snapshot schema advances to
 v6. An older snapshot is reported as unreadable-by-this-build until
-you run `ak system --deep`. It is not migrated or silently shown under the new semantics.
+you run `ak system --refresh=machine`. It is not migrated or silently shown under the new semantics.
 
 This issue #198 prerequisite closed through
 [PR #201](https://github.com/pacphi/agentic-kit/pull/201), merge `1bf0a5b`. Its identity,
@@ -426,7 +428,7 @@ evidence is emitted.
 For a read-only project review, run:
 
 ```bash
-ak system --deep
+ak system --refresh=machine
 ak x skills plan --project /absolute/path/to/project
 ```
 
@@ -440,19 +442,19 @@ but no operation runs automatically: ordinary scan/plan are read-only, executabl
 after five minutes, and apply requires the exact plan ID, digest, selected action IDs, and `--yes`.
 
 ```bash
-ak maintain scan --deep
+ak maintain --refresh=machine
 ak maintain plan --findings FINDING_ID --executable
 ak maintain apply --plan PLAN_ID --digest SHA256 --actions ACTION_ID --yes
 ```
 
 Maintenance stores private, integrity-sealed scan reports, plans, and receipts under the current
 user's agentic-kit state directory. Existing System snapshot files remain read-only evidence inputs;
-Catalog schema v4 is still refreshed with `ak system --deep`. `ak sync` neither selects nor
-executes Maintenance findings.
+Catalog schema v4 is still refreshed with `ak system --refresh=machine`. `ak sync` neither selects
+nor executes Maintenance findings.
 
-Browser refresh now reads the saved Maintenance report without polling providers. Use **Scan now**
-or `ak maintain scan` for current provider/version evidence. A successful System deep rescan also
-chains one Maintenance scan after the snapshot is persisted.
+Browser refresh now reads the saved Maintenance report without polling providers. Use **Refresh
+evidence** or `ak maintain --refresh` for current provider/version evidence. A successful System
+deep rescan also chains one Maintenance scan after the snapshot is persisted.
 
 The first provider set is intentionally narrower than the inventory. Claude plugin disable,
 update, and remove; exact Codex plugin/MCP removal; exact receipt-owned skill archive; one bounded
@@ -660,7 +662,7 @@ An upgrade never opts a machine into transcript indexing. Adopt it in two motion
 ```bash
 ak sync                                  # install the newer Agentic Kit
 ak setup --minimal --with-deja-vu       # record MCP mode without rerunning project setup
-ak x verify deja-vu                     # prove package, doctor, wiring, and index state
+ak status --refresh=live --only deja-vu  # prove package, doctor, wiring, and index state
 ```
 
 Use `--deja-vu-mode auto` on the setup command only after reviewing the per-host

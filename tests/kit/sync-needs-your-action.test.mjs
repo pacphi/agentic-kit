@@ -43,7 +43,7 @@ const MANUAL_FAIL = row('memory-pin', 'fail', 'CLAUDE_FLOW_DB_PATH pins a missin
   'repoint it in .claude/settings.local.json env, or remove the pin', { repair: 'manual' });
 const MANUAL_WARN = row('codex-context', 'warn', 'Codex context file is not ak-owned',
   'review ~/.codex/AGENTS.md yourself', { repair: 'manual' });
-const MANUAL_INFO = row('aqe', 'info', 'readiness unverified', 'run: ak x verify aqe', { repair: 'manual' });
+const MANUAL_INFO = row('aqe', 'info', 'readiness unverified', 'run: ak status --refresh=live --only aqe', { repair: 'manual' });
 // A sync repair: the aqe-rvf step performs it.
 const RVF_WARN = row('aqe', 'warn', 'store oversized', RVF_FIX);
 const RVF_FAIL = row('aqe', 'fail', 'store still oversized', RVF_FIX);

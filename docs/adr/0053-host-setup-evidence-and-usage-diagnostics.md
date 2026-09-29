@@ -12,6 +12,14 @@
   15-minute-capped, consent-gated, untouched by this branch (its `host-health-evidence.mjs`
   input-fingerprint helper, used only to invalidate that in-memory cache, is also untouched). See
   [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) (remediation program, branch 6a tasks 5 and 7)
+- **Updated:** 2026-09-28 — `ak host check-connection <claude|codex|opencode>` is the CLI twin of
+  this connection check: it reuses `createHostReadinessReader`, so it refuses for exactly the same
+  hosts and reasons the dashboard dialog would (managed-only, `canCheckConnection`), and applies
+  the same consent rule (`--yes` or an interactive y/N; a non-TTY without `--yes` is refused;
+  `--dry-run` always stops before any request). The "Check again" local re-check button and
+  `/api/host-health/local` are unchanged by this branch — that half belongs to a later remediation
+  program's dashboard work (remediation program, branch 6b; see
+  [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
 - **Amends:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md)
 - **Related:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md), [ADR-0051](0051-supported-peer-delegation-and-host-realignment.md)
 

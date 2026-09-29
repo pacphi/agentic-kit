@@ -2,7 +2,16 @@
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
-- **Updated:** 2026-09-28 — closes this ADR's §8 gap: a curated or added source's real failure now
+- **Updated:** 2026-09-28 — Branch 6b gives this ADR's two scan controls CLI equivalents:
+  `ak maintain --refresh` and `ak maintain --refresh=machine` (`src/lib/refresh.mjs`'s
+  `--refresh[=live|machine]`, `ak status --help` for the shared stages). The `scan` verb, the
+  `scans start`/`plan --deep`/`--refresh-inventory` re-measure flags, and `ak maintain recipes
+  refresh` are gone from the CLI and the v2 dashboard route allowlist alike — the recipe store's
+  own verified-staging function stays as a library for a future registry to call (R14). The two
+  dashboard controls named below — **Refresh evidence** and **Re-measure machine** — are unchanged
+  by this branch; their supersession comes with the dashboard half of a later remediation program.
+  See [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md)'s own "Delivered in 6b" section.
+- **Earlier update:** 2026-09-28 — closes this ADR's §8 gap: a curated or added source's real failure now
   survives a process restart too. `coverage()` restores `failed` (or a non-user `stopped` limit)
   from the newest scan-history summary when there is no live record and no later complete
   snapshot, so Discovery and the Inventory banner no longer fall back to reporting a restarted

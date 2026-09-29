@@ -169,6 +169,41 @@ export class KitConfigError extends Error {
   }
 }
 
+/** Quote one path for `platform`'s shell: PowerShell on win32, else POSIX sh. */
+const shellQuote = (value, platform) => (platform === 'win32'
+  ? `'${String(value).replaceAll("'", "''")}'`
+  : `'${String(value).replaceAll("'", "'\"'\"'")}'`);
+
+/**
+ * How to recover from an unreadable kit.json: move the file aside (the
+ * original is preserved), let `ak status` regenerate the defaults, then
+ * restore the intended values by hand. `commands` are the exact commands to
+ * run in `platform`'s shell. Null for any error that is not a KitConfigError.
+ * @param {unknown} err
+ * @param {string} [platform]
+ * @returns {{ backup: string, commands: string[], note: string } | null}
+ */
+export function configErrorRecovery(err, platform = process.platform) {
+  const configPath = /** @type {any} */ (err)?.configPath;
+  if (/** @type {any} */ (err)?.name !== 'KitConfigError' || typeof configPath !== 'string') return null;
+  const backup = `${configPath}.invalid`;
+  const move = platform === 'win32'
+    ? `Move-Item -LiteralPath ${shellQuote(configPath, platform)} -Destination ${shellQuote(backup, platform)}`
+    : `mv -- ${shellQuote(configPath, platform)} ${shellQuote(backup, platform)}`;
+  return {
+    backup,
+    commands: [move, 'ak status'],
+    note: `Then compare ${backup} with the regenerated defaults and restore only the intended values.`,
+  };
+}
+
+/** The recovery as the lines a person reads: a heading, each command
+ *  indented, then the note.
+ *  @param {{ commands: string[], note: string }} recovery */
+export function configRecoveryLines({ commands, note }) {
+  return ['Recovery (the original is preserved):', ...commands.map((command) => `  ${command}`), note];
+}
+
 export function migrateKitConfig(config = {}) {
   // Integration migration must consume legacy hosts and ownership first; routing
   // then consumes primaryHost/dualRouting from the same still-raw providers map.

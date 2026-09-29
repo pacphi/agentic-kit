@@ -34,6 +34,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { configDir, claudeSettingsPath } from './paths.mjs';
 import { managedHostIds } from './adapters/registries.mjs';
+import { recordedHostPresence } from './providers.mjs';
 
 export const claudeLimitsFile = () => path.join(configDir(), 'claude-rate-limits.json');
 export const codexLimitsFile = () => path.join(configDir(), 'codex-rate-limits.json');
@@ -298,6 +299,7 @@ export function codexAppServerRateLimits(opts = {}) {
 /** Every failure class codexAppServerExchange can report (#238 P4). */
 export const CODEX_UNAVAILABLE_REASONS = Object.freeze([
   'not-installed', 'spawn-failed', 'exited', 'timeout', 'rpc-error', 'no-limit-windows',
+  'host-not-found', 'host-unconfirmed',
 ]);
 
 const spawnFailure = (error) => ({ reason: error?.code === 'ENOENT' ? 'not-installed' : 'spawn-failed' });
@@ -360,6 +362,18 @@ export function codexAppServerExchange({ timeoutMs = 15_000, spawnImpl = spawn, 
 }
 
 /**
+ * The last cached Codex answer, raw (not re-normalized), or null when there is
+ * none yet / it is unreadable. Pure file read, no freshness judgment — callers
+ * decide TTL/staleness themselves (collectCodexLimitsDetailed) or serve it
+ * verbatim while skipping the spawn (readLimits, when Codex presence is not
+ * confirmed).
+ * @param {{ cacheFile?: string }} [o]
+ */
+export function readCodexLimitsCache({ cacheFile = codexLimitsFile() } = {}) {
+  try { return JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { return null; }
+}
+
+/**
  * Cached Codex quota. Fresh cache → served as-is; stale → one app-server call,
  * cache rewritten on success; failure → the stale cache (age visible via
  * `fetchedAt`) rather than nothing, or null when there has never been an
@@ -386,8 +400,7 @@ export async function collectCodexLimitsDetailed({
   ttlMs = CODEX_TTL_MS, cacheFile = codexLimitsFile(), now = Date.now(),
   timeoutMs, spawnImpl, bin,
 } = {}) {
-  let cached = null;
-  try { cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { /* first run */ }
+  const cached = readCodexLimitsCache({ cacheFile });
   if (cached && Number.isFinite(cached.fetchedAt) && now - cached.fetchedAt < ttlMs) {
     return { limits: cached, unavailable: null };
   }
@@ -430,11 +443,17 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
 /**
  * Both providers, plus the freshness contract the UI renders: `fetchedAt` on
  * each side and `generatedAt` overall. Claude is a pure file read (push
- * model); Codex may spawn one vendor subprocess, TTL-bounded. `others` lists
- * any additional enabled host with no sanctioned quota channel (F-10);
- * omitting `enabledHosts` (the default) leaves it empty, so claude/codex
- * output is unchanged unless a caller opts in. `claudeChannel` is the
- * user-level statusLine's class (classifyClaudeTeeChannel), and
+ * model); Codex may spawn one vendor subprocess, TTL-bounded, and ONLY when
+ * the last recorded `host-setup` evidence (providers.mjs `recordedHostPresence`,
+ * written by `detectHosts` on every `/api/status` poll for every host —
+ * managed or not, ADR-0010) says the codex CLI was found — recent evidence, not
+ * a fresh probe: this function never spawns `which`/`codex --version` itself.
+ * Presence `'not-found'`/`'unconfirmed'` serves the last cached answer (if
+ * any) with `codexUnavailable` naming which, and skips the spawn entirely.
+ * `others` lists any additional enabled host with no sanctioned quota channel
+ * (F-10); omitting `enabledHosts` (the default) leaves it empty, so
+ * claude/codex output is unchanged unless a caller opts in. `claudeChannel` is
+ * the user-level statusLine's class (classifyClaudeTeeChannel), and
  * `codexUnavailable` the failure class of the latest Codex refresh (null when
  * the answer is fresh); both are siblings so `claude` and `codex` keep their
  * null-or-data contracts.
@@ -442,17 +461,24 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
  * @param {{ now?: number, claudeFile?: string, codexCacheFile?: string, ttlMs?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string,
  *           enabledHosts?: Record<string, boolean>,
- *           claudeSettingsFile?: string, home?: string }} [o]
+ *           claudeSettingsFile?: string, home?: string,
+ *           codexPresence?: () => 'found'|'not-found'|'unconfirmed' }} [o]
  */
 export async function readLimits({
   now = Date.now(), claudeFile, codexCacheFile, ttlMs, timeoutMs, spawnImpl, bin, enabledHosts,
-  claudeSettingsFile, home,
+  claudeSettingsFile, home, codexPresence,
 } = {}) {
   const claude = readClaudeLimits({ file: claudeFile ?? claudeLimitsFile() });
   const claudeChannel = classifyClaudeTeeChannel({ settingsFile: claudeSettingsFile ?? claudeSettingsPath(), home });
-  const { limits: codex, unavailable: codexUnavailable } = await collectCodexLimitsDetailed({
-    ttlMs, cacheFile: codexCacheFile ?? codexLimitsFile(), now, timeoutMs, spawnImpl, bin,
-  });
+  const presence = (codexPresence ?? (() => recordedHostPresence('codex', { now })))();
+  const { limits: codex, unavailable: codexUnavailable } = presence === 'found'
+    ? await collectCodexLimitsDetailed({
+      ttlMs, cacheFile: codexCacheFile ?? codexLimitsFile(), now, timeoutMs, spawnImpl, bin,
+    })
+    : {
+      limits: readCodexLimitsCache({ cacheFile: codexCacheFile ?? codexLimitsFile() }),
+      unavailable: { reason: presence === 'not-found' ? 'host-not-found' : 'host-unconfirmed' },
+    };
   const others = unsupportedQuotaHosts({ enabledHosts });
   return { generatedAt: new Date(now).toISOString(), claude, claudeChannel, codex, codexUnavailable, others };
 }

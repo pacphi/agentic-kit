@@ -60,7 +60,7 @@ jobs:
           USERPROFILE: ${{ runner.temp }}/kit-home
           XDG_CONFIG_HOME: ${{ runner.temp }}/kit-home/.config
           APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
-        run: node bin/agentic-kit.mjs x verify security
+        run: node bin/agentic-kit.mjs status --refresh=live --only security
 
       - name: Host-neutral hook contract fixtures
         run: node --test tests/kit/hook-audit.test.mjs tests/kit/hook-audit-hosts.test.mjs
@@ -86,7 +86,7 @@ jobs:
       # that mitigation does not help (issuecomment-5857781254).
       # Scope is NOT neural-train-specific: upstream evidence (2026-08-12) shows the
       # same teardown abort on store-touching commands (`memory search` → correct
-      # output, rc 134), so an `x verify memory` step added here would need the same
+      # output, rc 134), so an `--only memory-routes` step added here would need the same
       # guard. Remove continue-on-error once that issue closes.
       - name: Deep proof against the live packages (learning)
         continue-on-error: true
@@ -95,7 +95,7 @@ jobs:
           USERPROFILE: ${{ runner.temp }}/kit-home
           XDG_CONFIG_HOME: ${{ runner.temp }}/kit-home/.config
           APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
-        run: node bin/agentic-kit.mjs x verify learning
+        run: node bin/agentic-kit.mjs status --refresh=live --only learning
 
   clean-mac-setup:
     name: clean macOS setup (packed artifact)

@@ -54,17 +54,30 @@ test('normal sync discovers and schedules a self-update hidden by a fresh stale-
   assert.equal(loadKitConfig().versionCheck.self.best.version, '4.0.0-alpha.50');
 });
 
-for (const mode of ['dry-run', 'no-upgrade']) {
-  test(`${mode} does not force registry refresh or change the fresh self cache`, async () => {
-    seed();
-    const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
-    let lookups = 0;
-    const { result } = await run({ flags: flags({ [mode]: true }), fetchLatest: async () => { lookups++; return '4.0.0-alpha.50'; } });
-    assert.equal(result, 0);
-    assert.equal(lookups, 0);
-    assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+test('no-upgrade does not force registry refresh or change the fresh self cache', async () => {
+  seed();
+  const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+  let lookups = 0;
+  const { result } = await run({ flags: flags({ 'no-upgrade': true }), fetchLatest: async () => { lookups++; return '4.0.0-alpha.50'; } });
+  assert.equal(result, 0);
+  assert.equal(lookups, 0);
+  assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+});
+
+test('dry-run looks the kit up online and plans the self-update, but leaves the fresh self cache unchanged', async () => {
+  seed();
+  const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+  const tags = [];
+  const { result, out } = await run({
+    flags: flags({ 'dry-run': true }),
+    fetchLatest: async (pkg, tag) => { if (pkg === KIT_PKG) tags.push(tag); return pkg === KIT_PKG ? '4.0.0-alpha.50' : null; },
+    releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: '' }),
   });
-}
+  assert.equal(result, 0);
+  assert.deepEqual(tags, ['latest', 'next']);
+  assert.match(out, /\[self\].*kit 4\.0\.0-alpha\.49 installed, 4\.0\.0-alpha\.50 available/);
+  assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+});
 
 test('stable installations refresh only latest and do not enter the prerelease channel', async () => {
   seed('4.0.0');
@@ -76,16 +89,18 @@ test('stable installations refresh only latest and do not enter the prerelease c
   assert.deepEqual(tags, ['latest']);
 });
 
-test('failed forced self lookups preserve known updates and do not renew the cache TTL', async () => {
+test('failed forced self lookups preserve known updates and restamp last, keeping when the update was seen', async () => {
   seed();
   const cfg = loadKitConfig();
   cfg.versionCheck.self = { last: 1, best: { version: '4.0.0-alpha.50', tag: 'next' } };
   writeKitConfig(home, cfg);
-  const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
   const result = await selfDrift({ pkgRoot, force: true, fetchLatest: async () => null });
   assert.equal(result.latest, '4.0.0-alpha.50');
   assert.equal(result.outdated, true);
-  assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+  const saved = loadKitConfig().versionCheck.self;
+  assert.deepEqual(saved.best, { version: '4.0.0-alpha.50', tag: 'next' });
+  assert.ok(saved.last > 1, 'the next lookup waits one TTL window');
+  assert.equal(saved.observedAt, 1);
 });
 
 test('a failed next lookup retains its cached candidate without claiming a fresh observation', async () => {
@@ -108,6 +123,26 @@ test('stable installs reject cached next-channel candidates when latest is unava
   assert.deepEqual(tags, ['latest']);
   assert.equal(result.latest, null);
   assert.equal(result.outdated, false);
+});
+
+test('a stable install whose record holds only a next-channel candidate is not rewritten on every offline lookup', async (t) => {
+  seed('4.0.0');
+  const cfg = loadKitConfig();
+  cfg.versionCheck.self = { last: 1, best: { version: '5.0.0-alpha.1', tag: 'next' } };
+  writeKitConfig(home, cfg);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => (now += 1000)); // each call would restamp a different time
+  let text = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+  let writes = 0;
+  for (let i = 0; i < 3; i += 1) {
+    const result = await selfDrift({ pkgRoot, fetchLatest: async () => null });
+    assert.equal(result.latest, null, 'a next-channel candidate never reaches a stable install');
+    const after = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+    if (after !== text) writes += 1;
+    text = after;
+  }
+  assert.ok(writes <= 1, `${writes} kit.json writes for 3 offline lookups`);
+  assert.deepEqual(loadKitConfig().versionCheck.self.best, { version: '5.0.0-alpha.1', tag: 'next' });
 });
 
 test('successful registry observations supersede cached versions even after a channel rollback', async () => {
