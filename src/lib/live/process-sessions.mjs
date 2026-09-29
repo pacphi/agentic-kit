@@ -52,8 +52,35 @@ const HOST_NAMES = new Map([
   ['opencode', 'opencode'],
 ]);
 
-const tokens = (command) => String(command ?? '').trim().split(/\s+/)
-  .map((token) => token.replace(/^['"]|['"]$/g, ''));
+function tokens(command) {
+  const args = [];
+  let word = '';
+  let quote = null;
+  const input = String(command ?? '').trim();
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index];
+    if (quote && char === '\\' && input[index + 1] === quote) {
+      word += char + input[++index];
+    } else if (char === quote) {
+      quote = null;
+      word += char;
+    } else if (!quote && (char === '"' || char === "'")) {
+      quote = char;
+      word += char;
+    } else if (!quote && /\s/.test(char)) {
+      if (word) args.push(word);
+      word = '';
+    } else {
+      word += char;
+    }
+  }
+  // An unmatched quote in flattened `ps args=` cannot establish argument
+  // boundaries, so no token can prove a service or MCP subcommand.
+  if (quote) return [];
+  if (word) args.push(word);
+  return args.map((arg) => ((arg.startsWith('"') && arg.endsWith('"'))
+    || (arg.startsWith("'") && arg.endsWith("'"))) ? arg.slice(1, -1) : arg);
+}
 // win32.basename deliberately, on every platform: it splits on BOTH separators,
 // so `C:\opt\bin\codex` and `/usr/local/bin/codex` both reduce to `codex`. The
 // POSIX result is unchanged (a POSIX path has no backslash to split on), and
@@ -67,8 +94,9 @@ const executableName = (value) => path.win32.basename(String(value ?? '')).toLow
  * full executable path (macOS `comm=`) and argv as one space-joined string, so
  * `/Users/me/Library/Application Support/x/codex mcp-server` would otherwise
  * split inside the path and shift every argument by one. The prefix must end
- * at whitespace or the end of the string. Spaces inside later arguments stay
- * ambiguous, which is inherent to the args= format.
+ * at whitespace or the end of the string. Later balanced quotes preserve a
+ * value boundary where `ps args=` includes them; flattened unquoted values
+ * remain ambiguous.
  */
 function argvOf(command, executable) {
   const text = String(command ?? '').trim();
@@ -96,7 +124,17 @@ const CODEX_SWITCH_OPTIONS = new Set([
   '--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust',
   '--worktree', '--search', '--no-alt-screen', '--no-daemon',
 ]);
-const validConfigOverride = (value) => /^[^\s=]+=.*/.test(value);
+function validConfigOverride(value) {
+  const match = /^([a-zA-Z0-9_.-]+)=(.+)$/.exec(value);
+  if (!match) return false;
+  const literal = match[2];
+  // Codex accepts raw-string fallback values. Once `ps` flattens an unquoted
+  // raw string, the following word could be part of that value. Only a
+  // self-delimiting TOML scalar can establish where a subcommand begins.
+  return /^"(?:\\.|[^"\\])*"$/.test(literal)
+    || /^'[^']*'$/.test(literal)
+    || /^(?:true|false|-?\d+(?:\.\d+)?)$/.test(literal);
+}
 function codexSubcommand(argv, offset) {
   for (let index = offset; index < argv.length && index < offset + 32; index++) {
     const token = argv[index];

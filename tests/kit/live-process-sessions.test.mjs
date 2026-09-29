@@ -15,6 +15,10 @@ test('host process detection recognizes controllers and rejects helpers', () => 
   assert.equal(hostFromCommand('codex mcp-server'), null);
   assert.equal(hostFromCommand('codex -s read-only mcp-server'), null);
   assert.equal(hostFromCommand('node /opt/bin/codex -c model="test" mcp-server'), null);
+  assert.equal(hostFromCommand('codex -c developer_instructions="say mcp-server hello"'), 'codex');
+  assert.equal(hostFromCommand('codex --config=developer_instructions="say mcp-server hello"'), 'codex');
+  assert.equal(hostFromCommand('codex --config developer_instructions=say mcp-server hello'), 'codex',
+    'a flattened unquoted config value cannot prove an MCP subcommand');
   assert.equal(hostFromCommand('/opt/bin/codex-code-mode-host'), null);
   assert.equal(hostFromCommand('node app.mjs codex'), null);
   assert.equal(hostFromCommand('python worker.py claude'), null);
@@ -105,6 +109,14 @@ test('Codex global options before app-server identify a service, never a session
       command: 'codex --model app-server' },
     { pid: 80, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
       command: 'codex --config malformed app-server' },
+    { pid: 90, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex -c developer_instructions="say app-server hello"' },
+    { pid: 91, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --config=developer_instructions="say app-server hello"' },
+    { pid: 92, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --config developer_instructions=say app-server hello' },
+    { pid: 93, ppid: 1, startedAt, executable: '/usr/local/bin/codex',
+      command: 'codex --config developer_instructions="say app-server hello" app-server' },
   ];
   const cwdByPid = new Map(processRows.map((row) => [row.pid, `/repos/${row.pid}`]));
   const survey = await surveyHostProcesses({ platform: 'darwin', processRows, cwdByPid,
@@ -118,9 +130,13 @@ test('Codex global options before app-server identify a service, never a session
     { pid: 60, controllerKind: 'project-session' },
     { pid: 70, controllerKind: 'project-session' },
     { pid: 80, controllerKind: 'project-session' },
+    { pid: 90, controllerKind: 'project-session' },
+    { pid: 91, controllerKind: 'project-session' },
+    { pid: 92, controllerKind: 'project-session' },
+    { pid: 93, controllerKind: 'host-service' },
   ]);
   assert.deepEqual((await listActiveHostSessions({ platform: 'darwin', processRows, cwdByPid,
-    inspectWorkspace: async () => null })).map(({ pid }) => pid), [40, 50, 60, 70, 80]);
+    inspectWorkspace: async () => null })).map(({ pid }) => pid), [40, 50, 60, 70, 80, 90, 91, 92]);
 });
 
 // macOS `ps -o comm=` prints the executable's full path, and many real paths
