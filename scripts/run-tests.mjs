@@ -31,6 +31,18 @@ export const SUITES = {
 };
 
 /**
+ * Keep local coverage on by default. Only an explicit CI opt-out changes the
+ * unit suite's instrumentation; all test commands still run.
+ * @param {'unit'|'ui'} mode
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function commandsFor(mode, env = process.env) {
+  const commands = SUITES[mode];
+  if (mode !== 'unit' || env.AK_TEST_COVERAGE !== '0') return commands;
+  return [commands[0].filter((arg) => !COVERAGE.includes(arg)), ...commands.slice(1)];
+}
+
+/**
  * @param {string[][]} commands argument vectors for process.execPath
  * @param {{ env?: NodeJS.ProcessEnv, repoRoot?: string, platform?: string, homedir?: string, log?: (s: string) => void }} [o]
  * @returns {number} exit code: 2 when the suite temp root sits inside a git repository,
@@ -87,7 +99,7 @@ function enclosingRepository(dir) {
 
 function main(argv) {
   const [mode] = argv;
-  if (mode === 'unit' || mode === 'ui') return runGuarded(SUITES[mode]);
+  if (mode === 'unit' || mode === 'ui') return runGuarded(commandsFor(mode));
   if (mode === 'exec') {
     const sep = argv.indexOf('--');
     const repoAt = argv.indexOf('--repo');
