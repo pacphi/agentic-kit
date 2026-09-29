@@ -82,6 +82,10 @@ test('all hosts have qualified OK, accessible details and explicitly confirmed c
   await page.locator('.usage-source-details summary').click();
   assert.match(await page.locator('.source-diagnostics').innerText(),/parse-yield-partial/);
   assert.equal(await page.locator('[data-health-host="codex"] .sp-status').innerText(),'OK');
+  const unassessed=report();
+  unassessed.hosts.claude={...unassessed.hosts.claude,checks:{...checks,configuration:{state:'unknown',reason:'Configuration was not assessed.'}}};
+  await page.evaluate(data=>globalThis.renderHostReadiness(data),unassessed);
+  assert.equal(await page.locator('[data-health-host="claude"] .sp-status').innerText(),'Unknown');
   await page.evaluate(()=>globalThis.renderHostReadiness(null));
   assert.equal(await page.locator('[data-health-host="codex"] .sp-status').innerText(),'Unknown');
   assert.equal(errors.length,0,errors.join('\n'));

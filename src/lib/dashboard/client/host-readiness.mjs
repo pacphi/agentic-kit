@@ -31,7 +31,9 @@ export function renderHostReadiness(report,checking){
   el.hidden=false;
   el.innerHTML=['claude','codex','opencode'].map(function(host){
     var row=report&&report.hosts&&report.hosts[host];
-    var state=checking||(HEALTH_BUSY&&HEALTH_BUSY_HOST===host)?'checking':row&&HEALTH_LABELS[row.status]?row.status:'unknown';
+    var configuration=row&&row.checks&&row.checks.configuration;
+    var unassessed=host==='claude'&&configuration&&['unknown','not-run','not-checked'].includes(configuration.state);
+    var state=checking||(HEALTH_BUSY&&HEALTH_BUSY_HOST===host)?'checking':unassessed?'unknown':row&&HEALTH_LABELS[row.status]?row.status:'unknown';
     var managed=!row||hostIsManaged(row);
     // A managed host's badge is its health; any other host's badge is its
     // management word, in a neutral colour: its problems are information.
