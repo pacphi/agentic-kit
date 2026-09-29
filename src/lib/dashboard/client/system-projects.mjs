@@ -256,7 +256,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       if(!pm||pm.status==="unknown"||!Array.isArray(pm.value)){
         procs.innerHTML=sysEmpty((pm&&pm.reason)||"the process census is unavailable.");
       }else if(!pm.value.length){
-        procs.innerHTML=sysEmpty("no host process is running right now \u2014 a measured zero.");
+        procs.innerHTML=sysEmpty("no coding-agent or desktop-application process is running right now \u2014 a measured zero.");
       }else{
         var rows=pm.value,maxRss=0,body="";
         for(i=0;i<rows.length;i++){var rv=mval(rows[i].rssBytes);if(rv!=null&&rv>maxRss)maxRss=rv;}
@@ -271,7 +271,8 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
               +esc(source.value.label||source.value.path)+"</span>"
             : '<span class="sy-unk" title="'+esc((source&&source.reason)||"not attributable")+'">'
               +esc(String((source&&source.reason)||"not attributable").split("\u2014")[0].trim())+"</span>";
-          body+='<tr><td><span class="sy-dot" style="background:'+hostColor(p.host)+'"></span>'+esc(p.host)+"</td>"
+          body+='<tr><td><span class="sy-dot" style="background:'+hostColor(p.host)+'"></span>'
+            +esc(p.application||p.host||"Unknown process")+"</td>"
             +'<td class="num">'+esc(String(p.pid))+"</td>"
             +"<td>"+proj+"</td>"
             +'<td class="num">'+mhtml(p.uptimeMs,fmtDur)+"</td>"
@@ -282,7 +283,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         }
         // pid is right-aligned in the body, so its header is too — a numeric
         // column whose header hangs off the far side reads as a different column.
-        procs.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Host</th>'
+        procs.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Coding-agent host / desktop application</th>'
           +'<th style="text-align:right">pid</th>'
           +'<th>Working context</th><th style="text-align:right">Uptime</th><th style="text-align:right">CPU</th>'
           +"<th>RSS</th></tr></thead><tbody>"+body+"</tbody></table></div>";
