@@ -1,5 +1,11 @@
 # V6 session presentation execution
 
+## Status
+
+Units 22/23 and their consumer/default-suite handoff are implemented and independently accepted; final legacy Unknown filter compatibility is included.
+Full V6 verification passed at `1c02db91`; feature PR CI and develop integration
+remain separate gates at this archival capture. No live store mutation is claimed.
+
 Approved Units 22/23, based on `4a414024`; sole writer in `task/v6-surfaces-ui`.
 
 1. Add a shared presentation vocabulary and additive project session surface evidence.

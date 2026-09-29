@@ -1,15 +1,21 @@
 # Usage accuracy execution plan
 
 - **Branch:** `fix/usage-accuracy`, based on `develop@e2f9dcae0554ff63921df618a819fd5e6afe80d2`
-- **Scope sources:** [v2 V6](2026-09-28-remediation-program-v2.md),
-  [v1 Wave 4](2026-09-26-remediation-program.md),
+- **Scope sources:** [v2 V6](../plans/2026-09-28-remediation-program-v2.md),
+  [v1 Wave 4](../plans/2026-09-26-remediation-program.md),
   [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md).
 
 ## Status
 
-Active. All 23 source units are independently accepted. Unit 24 documentation is a
-candidate awaiting independent review. Final integration gates, whole-branch review and
-archival remain controller-owned. Unit 11 captures Claude Code's
+Implemented on `fix/usage-accuracy`; all 24 units are independently accepted.
+The whole-branch review and its scoped correction review passed through `6d5979cc`.
+A one-line legacy test correction at `1c02db91` passed controller review, followed
+by all eight local gates on that exact clean commit: 6,405 unit tests passed,
+seven skipped, legacy suites passed, and browser checks passed (514 legacy
+assertions plus 16 native tests). Coverage was 94.19% lines, 83.82% branches and
+93.50% functions. Feature PR CI, develop integration and final human main review
+remain separate gates at this archival capture. No release, installation or real
+store operation is claimed. Unit 11 captures Claude Code's
 latest valid cumulative `cost-state` checkpoint as a separate reconciliation
 signal. It reports provable time or token scope differences while preserving
 message-derived cost totals. The observed checkpoint has no end time or serving

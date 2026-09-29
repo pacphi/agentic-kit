@@ -1,5 +1,11 @@
 # V6 Unit 15: OpenCode reported-zero cost trust
 
+## Status
+
+The scoped parser/cost work and core cache invalidation handoff are implemented and independently accepted. The final OpenCode marker also includes observation semantics.
+Full V6 verification passed at `1c02db91`; feature PR CI and develop integration
+remain separate gates at this archival capture. No live store mutation is claimed.
+
 ## Decision and scope
 
 OpenCode may record zero when a model has no configured rate. A positive-token
