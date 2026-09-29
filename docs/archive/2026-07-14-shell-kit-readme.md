@@ -46,11 +46,11 @@ What this kit still adds, because the override doesn't cover everything:
 1. 💾 **Verifies memory actually persists** — a real store→disk check, instead of trusting `doctor`'s "healthy". (The data-loss bug itself is now fixed upstream on ruflo ≥3.10.6.)
 2. 🧠 **Activates & proves self-learning** — puts the native binary in place where needed and *asserts* the ruvector engine (SONA, HNSW, ReasoningBank) is genuinely on, not just reported on.
 3. 🎓 **Agentic-QE won't initialize** — it's a *separate* package ([`agentic-qe`](https://github.com/proffesor-for-testing/agentic-qe)) **not** covered by ruflo's override, so it still hits the same Node-ABI wall; `ruflo-setup-aqe` fixes it.
-4. 🧹 **MCP and daemon governance** — registers the ruflo MCP once at user scope with a tool-family picker (so `ruflo init` stops committing per-project `.mcp.json`), and runs the background daemon **default-on with local-only workers**: token-spending AI workers stay opt-in behind ruflo 3.28's machine-wide launch budget ([#2661](https://github.com/ruvnet/ruflo/issues/2661)), with the kit's TTL reaper and ⚙ statusline count as an independent check. (The [June 2026 token-burn incident](docs/archive/2026-06-token-consumption-incident.md) that forced daemons to be opt-in was root-fixed upstream in 3.27/3.28.)
+4. 🧹 **MCP and daemon governance** — registers the ruflo MCP once at user scope with a tool-family picker (so `ruflo init` stops committing per-project `.mcp.json`), and runs the background daemon **default-on with local-only workers**: token-spending AI workers stay opt-in behind ruflo 3.28's machine-wide launch budget ([#2661](https://github.com/ruvnet/ruflo/issues/2661)), with the kit's TTL reaper and ⚙ statusline count as an independent check. (The [June 2026 token-burn incident](2026-06-token-consumption-incident.md) that forced daemons to be opt-in was root-fixed upstream in 3.27/3.28.)
 
-> 📎 **A note on prior art.** A colleague, **Ciprian Melian**, wrote an excellent project-scoped repair kit as a gist ([link](https://gist.github.com/ciprianmelian/eb7e8ff7d24018141ca34bb8a7e216a6)) that pairs ruflo with agentic-qe. This kit builds on those ideas but takes a **machine-wide, upgrade-safe** approach — and our investigation found that several of the gist's source patches are now **already upstream in ruflo 3.10.5** (the real remaining lever is the missing native binary, not the source patches). The full story is in [docs/BACKGROUND.md](docs/BACKGROUND.md).
+> 📎 **A note on prior art.** A colleague, **Ciprian Melian**, wrote an excellent project-scoped repair kit as a [gist](https://gist.github.com/ciprianmelian/eb7e8ff7d24018141ca34bb8a7e216a6) that pairs ruflo with agentic-qe. This kit builds on those ideas but takes a **machine-wide, upgrade-safe** approach — and our investigation found that several of the gist's source patches are now **already upstream in ruflo 3.10.5** (the real remaining lever is the missing native binary, not the source patches). The full story is in [2026-07-14-shell-kit-background.md](2026-07-14-shell-kit-background.md).
 
-The deep dive — ABI tables, the exact files, why "HNSW: Not loaded" is a cosmetic lie — lives in **[docs/BACKGROUND.md](docs/BACKGROUND.md)**.
+The deep dive — ABI tables, the exact files, why "HNSW: Not loaded" is a cosmetic lie — lives in **[2026-07-14-shell-kit-background.md](2026-07-14-shell-kit-background.md)**.
 
 ---
 
@@ -157,7 +157,7 @@ Try `./install.sh --dry-run` first to preview exactly what it will do.
 > `ruflo-token-audit`, available in every project. Just ask Claude in plain language —
 > e.g. *"Audit my Claude Code token usage for the last 7 days — what's burning my
 > tokens?"* — and it runs the audit, checks for runaway daemons, and recommends fixes.
-> Background: [docs/archive/2026-06-token-consumption-incident.md](docs/archive/2026-06-token-consumption-incident.md).
+> Background: [2026-06-token-consumption-incident.md](2026-06-token-consumption-incident.md).
 
 ---
 
@@ -186,6 +186,7 @@ for healing again.
 | 🔍 Routine checks | **functions** (`ruflo-parity-test`, `ruflo-learning-verify`) | no reason to re-bootstrap |
 
 **Rule of thumb:**
+
 - *"I'm setting up"* → `install.sh` (once).
 - *"I upgraded ruflo/aqe"* → `ruflo-resync`.
 - *"I'm starting work in a repo"* → `ruflo-onboard`.
@@ -196,7 +197,7 @@ for healing again.
 
 When set up with this kit, a footer is appended **below** ruflo's own status line. It's append-only — it never rewrites ruflo's lines, so a ruflo update can't break it. Each ruflo feature renders on **its own line** (so the live metrics are individually scannable), and each piece appears **only when that feature is genuinely active**:
 
-```
+```text
 ▊ RuFlo V3.28.0 ● you  │  ⏇ main  │  Fable 5         ┐
 🏗️  DDD Domains … 🤖 Swarm … 🔧 Architecture …       │ ruflo's own lines + the kit's
 📊 AgentDB …                                          │ per-feature lines (all ruflo)
@@ -209,6 +210,7 @@ When set up with this kit, a footer is appended **below** ruflo's own status lin
 ```
 
 Every field renders only when its data is actually present (numbers above are illustrative):
+
 - 🧠 **SONA** — `[bar]` is a volume gauge (~10 patterns/dot); `patterns`/`traj` from `.claude-flow/neural/stats.json` (these now persist across restarts, ruflo #2245); `⚡ HNSW` only when a vector index exists.
 - 📈 **RL** — **live** route Q-learner metrics, shown only once the learner has actually run (`updateCount > 0`): `ε`↓ (exploration), `δ̄`↓ (mean TD error), `|Q|` (distinct task-states — a real count since the encoder fix F3, ruflo #2239, **fixed in 3.10.11**: 6 tasks → 6 distinct Q-states), `upd` (updates). Read fs-only from `.swarm/q-learning-model.json` — which persists across `ruflo route feedback` calls (saveModel, ruflo 3.10.6+); never the broken `route stats` CLI.
 - ◷ **proof** (alarm-only) — the most recent `ruflo-improvement-eval` verdict (`.claude-flow/improvement.json`), a *synthetic* proof-of-mechanism (its own reward env: permutation `p` + Cohen's `d` + above-chance vs a no-learning ablation), **not** a live measure of real routing. A `PASS` (expected) renders **nothing**; only a regression surfaces as `◷ proof FAIL  Δpp · CI · p · d · <age>` (the age keeps a stale FAIL honest). Never fabricated.
@@ -288,7 +290,7 @@ It's not a replacement for ruflo — just a thin, reversible layer that picks sa
 
 ## 📦 What's in the box
 
-```
+```text
 ruflo-machine-ref/
 ├── install.sh                 # machine bootstrap: prereqs + kit + heal (profiles, interactive)
 ├── uninstall.sh               # clean reversal (opt-in --purge for global npm packages)
@@ -346,10 +348,10 @@ use `ruflo cleanup --force` for per-project data.
 
 ## 📚 Further reading
 
-- 📖 [docs/BACKGROUND.md](docs/BACKGROUND.md) — the full root-cause investigation (Node/ABI/WASM, why self-learning looked dormant, the agentic-qe variant, the security surface)
-- 🔧 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — symptom → diagnosis → fix runbook
-- 🧩 [docs/CONDITIONAL-BLOCKS.md](docs/CONDITIONAL-BLOCKS.md) — how the per-tool CLAUDE.md blocks work (agentic-qe, superpowers), why superpowers needs "house rules," and how to add support for a new tool
-- 🧱 [docs/archive/](docs/archive/) (superpowers plans/specs, dated 2026-05) — the design spec and implementation plan behind the self-learning work
+- 📖 [2026-07-14-shell-kit-background.md](2026-07-14-shell-kit-background.md) — the full root-cause investigation (Node/ABI/WASM, why self-learning looked dormant, the agentic-qe variant, the security surface)
+- 🔧 [2026-07-14-shell-kit-troubleshooting.md](2026-07-14-shell-kit-troubleshooting.md) — symptom → diagnosis → fix runbook
+- 🧩 [2026-07-14-shell-kit-conditional-blocks.md](2026-07-14-shell-kit-conditional-blocks.md) — how the per-tool CLAUDE.md blocks work (agentic-qe, superpowers), why superpowers needs "house rules," and how to add support for a new tool
+- 🧱 [archive index](README.md) (superpowers plans/specs, dated 2026-05) — the design spec and implementation plan behind the self-learning work
 
 ---
 

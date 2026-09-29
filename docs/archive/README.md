@@ -4,7 +4,8 @@ Documents in this directory are **frozen**: they describe investigations, incide
 design work that shaped this kit. Some subjects have been resolved —
 mostly by upstream ruflo/agentic-qe releases (baseline: ruflo 3.28.0 / agentic-qe 3.12.2,
 2026-07-14). They are kept verbatim as provenance for *why* the kit's surviving pieces
-exist. Do not update them; the living docs are [../TROUBLESHOOTING.md](../troubleshooting.md),
+exist. Bodies are not edited, except to repair links and apply lint-only formatting; each repair is
+recorded below. The living docs are [../TROUBLESHOOTING.md](../troubleshooting.md),
 [../PROVIDERS.md](../providers.md), and [../MANAGED-TOOLS.md](../managed-tools.md)
 (the former `BACKGROUND.md` and `CONDITIONAL-BLOCKS.md` are themselves archived below).
 
@@ -39,20 +40,25 @@ new authorization. The July 2026 dependency baseline above describes that archiv
 it is not the current installation requirement. Follow the linked living guide and current ADR
 for operative behavior, then verify the exact source and artifact before applying a procedure.
 
-### Original-location links retained in frozen files
+### Link repair (2026-09-28)
 
-The metadata audit for issue 211 found twelve unresolved link occurrences in three archived files.
-They are relocation artifacts, not missing current documentation. Frozen bodies remain unchanged;
-use these destinations when following their historical references:
+The twelve relocation artifacts found by the metadata audit for issue 211 were repaired as follows.
 
-| Original reference in archived material | Preserved or current destination |
-| --- | --- |
-| shell-kit README `docs/BACKGROUND.md` | [Archived background](2026-07-14-shell-kit-background.md) |
-| shell-kit README `docs/CONDITIONAL-BLOCKS.md` | [Archived conditional blocks](2026-07-14-shell-kit-conditional-blocks.md) |
-| shell-kit README `docs/TROUBLESHOOTING.md` | [Archived troubleshooting](2026-07-14-shell-kit-troubleshooting.md); [current guide](../troubleshooting.md) |
-| shell-kit README `docs/archive` | [This archive index](README.md) |
-| shell-kit README/troubleshooting `docs/archive/…` or `archive/…` incident paths | [June incident](2026-06-token-consumption-incident.md), [June recurrence](2026-06-11-token-consumption-recurrence.md) |
-| host-extensibility HTML `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) |
+| File | Old target | New target | Evidence |
+| --- | --- | --- | --- |
+| shell-kit README:49 | `docs/archive/2026-06-token-consumption-incident.md` | [June incident](2026-06-token-consumption-incident.md) | Same file, flattened into this folder on 2026-07-14 |
+| shell-kit README:51 | `docs/BACKGROUND.md` | [Archived background](2026-07-14-shell-kit-background.md) | Archive index records the original location |
+| shell-kit README:53 | `docs/BACKGROUND.md` | [Archived background](2026-07-14-shell-kit-background.md) | Archive index records the original location |
+| shell-kit README:160 | `docs/archive/2026-06-token-consumption-incident.md` | [June incident](2026-06-token-consumption-incident.md) | Same file, flattened into this folder on 2026-07-14 |
+| shell-kit README:349 | `docs/BACKGROUND.md` | [Archived background](2026-07-14-shell-kit-background.md) | Archive index records the original location |
+| shell-kit README:350 | `docs/TROUBLESHOOTING.md` | [Archived troubleshooting](2026-07-14-shell-kit-troubleshooting.md) | Archive index records the original location |
+| shell-kit README:351 | `docs/CONDITIONAL-BLOCKS.md` | [Archived conditional blocks](2026-07-14-shell-kit-conditional-blocks.md) | Archive index records the original location |
+| shell-kit README:352 | `docs/archive` | [Archive index](README.md) | The archive index is this file |
+| shell-kit troubleshooting:320 | `archive/2026-06-token-consumption-incident.md` | [June incident](2026-06-token-consumption-incident.md) | Same file, same folder |
+| shell-kit troubleshooting:321 | `archive/2026-06-11-token-consumption-recurrence.md` | [June recurrence](2026-06-11-token-consumption-recurrence.md) | Same file, same folder |
+| host-extensibility explainer:227 | `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
+| host-extensibility explainer:679 | `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
+| daemon-statusline spec:6 | `https://github.com/pacphi/ruflo-machine-ref/issues/3` | unlinked | Online check returned 404; no successor found |
 
 External links and upstream resolution claims are retained as historical evidence and were not
 reconfirmed by this metadata audit. The per-file inventory and limitations are recorded in the

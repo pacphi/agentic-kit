@@ -13,13 +13,12 @@ retry_wait_time = 2
 timeout = 20
 max_concurrency = 8
 
-# Don't descend into vendored or archived trees.
+# Don't descend into vendored trees.
 exclude_path = [
   "node_modules",
   ".claude",
   ".agentic-qe",
   ".agents",
-  "docs/archive",
 ]
 
 # Hosts that reliably 403/rate-limit automated requests — noise, not broken links.

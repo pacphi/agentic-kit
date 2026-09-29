@@ -41,10 +41,12 @@ required digging.
 ## Findings (verified against ruflo 3.10.5 source + experiment)
 
 ### F1 — The route Q-learner *does* learn (in-process)
+
 ruflo's `createQLearningRouter` genuinely learns: 200 in-process updates → Q-table grows,
 ε decays (1.0→0.91), TD error nonzero. The algorithm works. **[Still true on 3.10.46.]**
 
 ### F2 — CLI `route feedback` could not persist (BUG) → **FIXED UPSTREAM (3.10.6 #2222)**
+
 `route.js` `feedbackCommand` called `update()` but **never `saveModel()`**, and
 `q-learning-router.js` defaulted `autoSaveInterval: 100`. Each CLI call is a fresh process
 that loads the model, applies **one** update, and exits before the %100 auto-save triggers —
@@ -55,6 +57,7 @@ after feedback** (verified in installed source: `commands/route.js`). The kit's 
 the script is now a version-gated no-op that only applies the legacy patch on installs <3.10.6.
 
 ### F2b — Negative-reward inversion → **FIXED UPSTREAM (3.10.7)**, we did *not* catch this
+
 A deeper bug in the same area: `route feedback -r -1.0` was parsed as **+1.0** — the shared
 flag parser dropped any `-`-prefixed value, so giving **negative** feedback actively
 *reinforced* the bad agent. Fixed in `parser.ts` (3.10.7). We missed it because our
@@ -62,6 +65,7 @@ flag parser dropped any `-`-prefixed value, so giving **negative** feedback acti
 Worth recording: any workflow doing `route feedback -r -<n>` before 3.10.7 trained backwards.
 
 ### F3 — The state encoder collapses semantically-distinct tasks → ✅ **FIXED in ruflo 3.10.11**
+
 `featureVectorToKey`/`extractFeatures` key features 1–32 on keyword *presence* and 33–48 on
 length/word-count buckets; tasks with different routing keywords but similar shape hash to the
 **same** Q-state (verified: six keyword-distinct tasks → 1 state). Was confirmed still open in
@@ -70,6 +74,7 @@ longer discarded by the 31-bit truncating hash. Confirmed in the [ruflo#2360](ht
 reconciliation table. The `ruflo-improvement-eval --probe-states` check should now show N tasks → N distinct Q-states.
 
 ### F4 — SONA learn→inference loop is unwired at the JS/WASM boundary → ✅ **FIXED in `@ruvector/ruvllm@2.5.6`**
+
 The ruflo-bundled view was: every `SonaCoordinator` call is training/recording, the coordinator
 exposes no `predict`/`forward`, and the trained `Δ LoRA` changes no decision (written, never
 read); 3.10.9 documented the WASM MicroLoRA `apply()` as *"empirically inert (Δ=0 after 200
@@ -77,6 +82,7 @@ adapts)"* and refused to fake a gradient.
 
 **Corrected against actual `ruvnet/ruvector` source (`c2089c4`), before filing** — the bundled
 wording was imprecise and was *not* carried over verbatim:
+
 - Inference seams **do exist and work**: `applyLora`, `MicroLoRA::forward`, `LoraAdapter.forward`.
 - The real gap was the **learn→adapt loop unwired through the bindings consumers actually call**:
   - `WasmSonaEngine::learn_from_feedback` was a **no-op**.
@@ -84,6 +90,7 @@ wording was imprecise and was *not* carried over verbatim:
   - Reproduced with a `cargo test` (`crates/sona/tests/repro_delta_zero.rs`, included verbatim in #519).
 
 **`@ruvector/ruvllm@2.5.6` ships a real implementation** (comment: "fixes #553 — this was a no-op stub"):
+
 - `processInstantLearning` computes `reward = quality - 0.5`, creates a correction embedding,
   derives `gradOutput = input.map(x => -reward * x)`, and calls `this.microLora.backward(input, gradOutput, lr)`.
 - `LoraAdapter.backward()` applies gradient descent updates to both `loraA` and `loraB` weight matrices.
@@ -93,6 +100,7 @@ wording was imprecise and was *not* carried over verbatim:
 - Both ruflo 3.10.46 and agentic-qe 3.10.7 ship the **identical** `sona.js` (MD5: `0b1d3b2bd4292acc312bb51423561149`).
 
 ### F5 — With F2 fixed, the route learner self-improves — significantly but modestly
+
 Our held-out, ablated, multi-seed experiment (`ruflo-improvement-eval`) over a synthetic
 environment engineered to occupy distinct Q-states (per F3) shows the learner beats a
 no-learning ablation with a **statistically significant, monotone** gain — but a **modest**
@@ -101,7 +109,7 @@ counts, plateauing well below 100%). Honest verdict: **self-improving = yes (pro
 consumed loop), but weak.** This result is independent of the F2 fix mechanism and remains the
 kit's reusable proof harness.
 
-```
+```text
 route Q-learner · 5 seeds · learning vs no-learning ablation
   cold 17% → warm 33%   Δ+16pp   permutation p=0.004   Cohen's d=∞   above-chance: yes
   (modest ceiling — partial learning; see F3 encoder collapse + slow ε decay)
@@ -125,6 +133,7 @@ route Q-learner · 5 seeds · learning vs no-learning ablation
 3. **Integration shortcoming.** ruflo has two disjoint training paths — the CLI's WASM trainer (`services/ruvector-training.js`, used by `neural train`) and the native `@ruvector/ruvllm` `TrainingPipeline`/`ContrastiveTrainer` (`ruvector/lora-adapter.js`). `neural train` never routes through the native pipeline, and the status surface bridges neither. Separately, native `TrainingPipeline.saveCheckpoint(path)` returns `undefined` and writes **0 bytes** — so the "no checkpoints" substance is real for that call, on top of the reporting bug.
 
 **Reproduction (tool-agnostic, no kit required):**
+
 ```bash
 npm i -g ruflo@3.17.0            # Node >= 24; bundles @ruvector/ruvllm@2.5.6
 ruflo neural status              # → Contrastive Trainer: Unavailable — Install @ruvector/ruvllm
@@ -196,4 +205,4 @@ The downstream kit carry-forward — a **live RL statusline panel** — is track
 line and the live `Δ‖W‖` micro-LoRA adaptation field.
 
 Environment: ruflo 3.10.10, Node 26, `ruvnet/ruvector@c2089c4`. Repro tool:
-`ruflo-improvement-eval` (https://github.com/pacphi/ruflo-machine-ref).
+`ruflo-improvement-eval` (<https://github.com/pacphi/ruflo-machine-ref>).

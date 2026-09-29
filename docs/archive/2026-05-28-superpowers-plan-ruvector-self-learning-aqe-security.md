@@ -11,6 +11,7 @@
 **Reference spec:** `2026-05-28-superpowers-spec-ruvector-self-learning-aqe-security.md`
 
 > **Amendments (post-review, during execution):**
+>
 > - **Task 5 (status line)** evolved from a single-line minimal footer to a **two-line
 >   labeled append footer** (`🧠 SONA <patterns>·<traj>[·⚡HNSW]  🛡 aidefence on` /
 >   `🎓 Agentic QE <patterns>[·traj][·vec]·<size>`). Still append-only (chosen over a
@@ -23,6 +24,7 @@
 >   (`aqe init` fails at persistence-db init); `ruflo-setup-aqe` repairs it first.
 
 **Conventions inherited from the existing kit (match these exactly):**
+
 - Color helpers `ok()/warn()/fail()/dim()` with TTY guard, as in `bin/ruflo-patch-native`.
 - `set -u`. Flag parsing via `while`/`case`. `--help` via `sed -n '3,NNp' "$0" | sed 's|^# \{0,1\}||'`.
 - Exit codes: `0` ok/no-op, `1` verification failed, `2` environment error.
@@ -51,6 +53,7 @@
 ## Task 1: `bin/ruflo-enable-learning` (machine-layer activation)
 
 **Files:**
+
 - Create: `bin/ruflo-enable-learning`
 - Verify against: live global ruflo install
 
@@ -180,6 +183,7 @@ fi
 chmod +x bin/ruflo-enable-learning
 ./bin/ruflo-enable-learning --check
 ```
+
 Expected: prints the activation table; exits 1 while still dormant (pre-patch). This is the "red" assertion proving the tool detects the dormant state.
 
 - [ ] **Step 4: Run the full activation and observe the flip**
@@ -187,6 +191,7 @@ Expected: prints the activation table; exits 1 while still dormant (pre-patch). 
 ```bash
 ./bin/ruflo-enable-learning ; echo "exit=$?"
 ```
+
 Expected: patch-native installs native bsq3 in 6 dirs; the "native better-sqlite3" row goes green. Capture whether ruvector rows (HNSW/SONA/RuVector Training) also flip — **this result feeds Task 3.** Exit 0 if all green; exit 1 if ruvector still dormant (expected hand-off to Task 3).
 
 - [ ] **Step 5: Commit**
@@ -201,6 +206,7 @@ git commit -m "feat: ruflo-enable-learning — activate + assert ruvector self-l
 ## Task 2: `bin/ruflo-learning-verify` (end-to-end learning loop proof)
 
 **Files:**
+
 - Create: `bin/ruflo-learning-verify`
 - Verify against: isolated `/tmp` dir
 
@@ -218,6 +224,7 @@ echo "--- AFTER ---";  ruflo neural status 2>&1 | grep -iE "Patterns Learned|Tra
 sqlite3 "$CLAUDE_FLOW_DB_PATH" ".tables" 2>/dev/null
 cd - >/dev/null; rm -rf "$T"
 ```
+
 Record which counter (`Patterns Learned`, `Trajectories`, or a `reasoning_*`/`sona_*` table row count) transitions 0→>0. Use that as the assertion target in Step 2. If `ruflo neural train` is not the right entry point, also try `ruflo hooks post-task -i t1 --success true -q 0.95 -a coder` then re-check — record whichever moves the counter.
 
 - [ ] **Step 2: Write `bin/ruflo-learning-verify` using the counter found in Step 1**
@@ -290,6 +297,7 @@ fi
 chmod +x bin/ruflo-learning-verify
 ./bin/ruflo-learning-verify ; echo "exit=$?"
 ```
+
 Expected after Task 1 activation succeeds: `Patterns Learned: 0 → N` (N>0), exit 0. If exit 1, the loop isn't persisting → Task 3.
 
 - [ ] **Step 4: Commit**
@@ -306,6 +314,7 @@ git commit -m "feat: ruflo-learning-verify — assert train cycle persists patte
 **Run this task ONLY if Task 1 Step 4 left HNSW/SONA/RuVector rows non-green after native bsq3 went green.** If everything went green, mark this task complete with a note "not needed — ruvector activated by native bsq3 alone" and skip to Task 4.
 
 **Files:**
+
 - Possibly Create: a guarded patch step inside `bin/ruflo-enable-learning` (extend Step 2 region)
 - Modify: `docs/TROUBLESHOOTING.md` (record the root cause found)
 
@@ -333,6 +342,7 @@ grep -rnoE "not available|@ruvector/core|ruvllm|HNSW" "$RUFLO_ROOT/node_modules/
 - [ ] **Step 2: Classify the failure and record it**
 
 Determine which class it is and write the finding into `docs/TROUBLESHOOTING.md` under a new `### ruvector dormant after patch` heading:
+
 - **(a) dlopen/ABI**: `LOAD FAIL … invalid ELF / mach-o / NODE_MODULE_VERSION` → the native `.node` is for the wrong arch/ABI. Fix: reinstall the matching optional dep (`npm install @ruvector/<pkg> --no-save` in that module dir), mirroring `ruflo-patch-native`'s per-dir install loop.
 - **(b) resolution path**: `LOAD FAIL … Cannot find package` only from one submodule → an optional `@ruvector/*` dep is absent in that submodule's tree. Fix: install it into that submodule dir.
 - **(c) internal guard**: both load OK here but ruflo still reports "not available" → a guard keyed off the WASM/native flag that only re-checks after a clean re-init. Fix: document that `ruflo neural status` must be run with native bsq3 already in place (re-run after `ruflo-enable-learning`), and re-verify.
@@ -365,6 +375,7 @@ ruvector_repair() {
 ./bin/ruflo-enable-learning ; echo "exit=$?"   # expect all rows green now
 ./bin/ruflo-learning-verify ; echo "exit=$?"   # expect patterns 0 -> N
 ```
+
 Expected: exit 0 from both.
 
 - [ ] **Step 5: Commit**
@@ -379,6 +390,7 @@ git commit -m "fix: targeted ruvector native repair + dormant-after-patch runboo
 ## Task 4: `bin/ruflo-security-verify` (verify + activate + document security)
 
 **Files:**
+
 - Create: `bin/ruflo-security-verify`
 
 - [ ] **Step 1: Confirm the surface exists (test-first baseline)**
@@ -465,6 +477,7 @@ echo ""
 chmod +x bin/ruflo-security-verify
 ./bin/ruflo-security-verify ; echo "exit=$?"
 ```
+
 Expected: security + aidefence load, defend flags the injection sample, secrets/scan run, CVE gap warned. Exit 0 (CVE gap is a warn, not a failure).
 
 - [ ] **Step 4: Commit**
@@ -479,6 +492,7 @@ git commit -m "feat: ruflo-security-verify — verify scan/defend/secrets + aide
 ## Task 5: Status-line activation segments (R16–R18)
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh` (the `ruflo-fix-statusline-version` function, ~line 90–124)
 
 - [ ] **Step 1: Baseline — confirm current statusline has no activation segments**
@@ -561,6 +575,7 @@ git commit -m "feat: status line shows self-learning/security/agentic-qe activat
 ## Task 6: `ruflo-setup-aqe` (opt-in agentic-qe with half-init repair)
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh` (add new function)
 
 - [ ] **Step 1: Baseline — confirm half-init detection target**
@@ -625,6 +640,7 @@ ls -d .agentic-qe/memory.db .claude/skills/agentic-quality-engineering
 node .claude/helpers/statusline.cjs <<<'{}' 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -o '🎓 qe'
 cd - >/dev/null
 ```
+
 Expected: both markers present; `🎓 qe` segment appears.
 
 - [ ] **Step 4: Commit**
@@ -639,6 +655,7 @@ git commit -m "feat: ruflo-setup-aqe — opt-in agentic-qe init with half-init r
 ## Task 7: Wire `--with-security` into `ruflo-setup-project` + register bins
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh` (`ruflo-setup-project`, ~line 126–222)
 - Modify: `install.sh:53`
 
@@ -688,6 +705,7 @@ cd /tmp && rm -rf sec-test && mkdir sec-test && cd sec-test && git init -q
 ruflo-setup-project --minimal --with-security 2>&1 | grep -E "Security pass|security"
 cd - >/dev/null
 ```
+
 Expected: three bins listed; `## Security pass` block runs during setup.
 
 - [ ] **Step 4: Commit**
@@ -702,6 +720,7 @@ git commit -m "feat: --with-security setup pass + register new bins in install.s
 ## Task 8: Documentation (reference block, background, troubleshooting, README)
 
 **Files:**
+
 - Modify: `claude/ruflo-reference.md`, `docs/BACKGROUND.md`, `docs/TROUBLESHOOTING.md`, `README.md`
 
 - [ ] **Step 1: Update `docs/BACKGROUND.md` with the corrected diagnosis**
@@ -715,11 +734,13 @@ Add `### Self-learning dormant (ruflo neural status shows "Using sql.js")` → r
 - [ ] **Step 3: Update `claude/ruflo-reference.md`** (the machine-wide CLAUDE.md block)
 
 In the self-learning / quick-decision sections, add the three new commands and the activation workflow:
-```
+
+```text
 Enable self-learning (after any ruflo upgrade) → ruflo-enable-learning && ruflo-learning-verify
 Verify security surface                        → ruflo-security-verify
 Set up agentic-qe in a repo (opt-in)           → ruflo-setup-aqe
 ```
+
 Add a one-line note that the status line shows 🧠/🛡/🎓 when each is active.
 
 - [ ] **Step 4: Update `README.md`** quick reference / commands table with the three bins, `ruflo-setup-aqe`, and `--with-security`.

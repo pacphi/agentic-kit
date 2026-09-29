@@ -65,11 +65,13 @@ then learning + security + statusline.
 ### Section 1 — Prerequisites model
 
 **Hard prerequisites** (install.sh checks):
+
 - Node.js 20–26, npm, git — abort with guidance only if **node or npm** is absent.
 - Soft-checked (warn, do not abort): `sqlite3`, `claude` (Claude Code).
 - Node version outside 20–26: warn (kit still proceeds; the patch keys off ABI).
 
 **Managed prerequisites** (install.sh can install):
+
 - `ruflo` → `npm i -g ruflo` — required.
 - `agentic-qe` → `npm i -g agentic-qe` — optional.
 
@@ -95,6 +97,7 @@ auto-enabled when stdout is not a TTY so CI never hangs). Existing flags kept:
 `--shell`, `--no-shell-rc`, `--dry-run`, `--help`.
 
 **Flag-resolution rules:**
+
 - A profile sets baseline intent; granular flags override individual decisions.
 - Conflicting granular flags (e.g. `--with-aqe --no-aqe`) → last one wins
   (consistent with the existing arg loop) and a warning is printed.
@@ -104,6 +107,7 @@ auto-enabled when stdout is not a TTY so CI never hangs). Existing flags kept:
   opt-in).
 
 **Order of operations:**
+
 1. **Preflight** — detect Node version (warn if outside 20–26), npm, git;
    soft-check sqlite3 / claude. Abort only if node/npm absent.
 2. **Resolve plan** — from profile/granular flags, or interactive prompts:
@@ -162,6 +166,7 @@ install.
 
 **(a) Breadcrumb pattern** — every helper ends by printing the *next* logical
 command:
+
 - `ruflo-resync` → "Next: `cd <your-repo> && ruflo-onboard`"
 - `ruflo-setup-project` → "Next: `ruflo-learning-verify` to prove learning persists"
 - `ruflo-learning-verify` → "Done. After any `npm i -g ruflo@latest`, run `ruflo-resync`."
@@ -170,6 +175,7 @@ command:
 **(b) New `ruflo-onboard` wrapper** (shell function in `ruflo-functions.sh`) —
 run from inside a repo; does the per-project sequence with a header/footer
 summary:
+
 - `ruflo-onboard` → `ruflo-setup-project` → `ruflo-learning-verify`
 - `ruflo-onboard --with-security` → adds the security pass to setup-project
 - `ruflo-onboard --aqe` → also runs `ruflo-setup-aqe`; if agentic-qe is not
@@ -212,6 +218,7 @@ truth; after the first run you never need install.sh for healing again.
 | Routine checks | functions (`ruflo-parity-test`, `ruflo-learning-verify`) | No need to re-bootstrap |
 
 **Rule of thumb (README verbatim):**
+
 - "I'm setting up" → `install.sh` (once).
 - "I upgraded ruflo/aqe" → `ruflo-resync`.
 - "I'm starting work in a repo" → `ruflo-onboard`.

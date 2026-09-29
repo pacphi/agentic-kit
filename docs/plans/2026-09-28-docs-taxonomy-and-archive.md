@@ -16,8 +16,8 @@
 
 **Spec:** the maintainer decisions of 2026-09-28, recorded in [§ Decisions](#decisions). There is no separate spec document.
 
-**Status:** In progress, 2026-09-28. Phase 1 and Phase 2 are implemented in PR #264 against
-`main@e957737b`; Phase 3 starts on `docs/archive-link-repair` only after that PR merges.
+**Status:** Implemented, 2026-09-28. Phase 1 and Phase 2 merged in PR #264 at
+`main@e7cfe9ca`; Phase 3 is ready for review in PR #266.
 
 ## Decisions
 
@@ -1596,7 +1596,8 @@ Task 3 refreshes the map. `move` rows are `git mv`ed; `redirect` rows only retar
 
 ## Appendix B — the 12 historical archive links
 
-Found by lychee on 2026-09-28. Each target below is the file the text originally meant, confirmed by the archive index's "Original location" column and its 2026-07-14 flattening note.
+Found by lychee on 2026-09-28 and repaired in Phase 3. Each target was confirmed by the archive
+index's "Original location" column and its 2026-07-14 flattening note.
 
 | File:line | Written target | Repair | Evidence |
 | --- | --- | --- | --- |

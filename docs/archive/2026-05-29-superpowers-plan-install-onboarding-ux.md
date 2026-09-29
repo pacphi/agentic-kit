@@ -11,6 +11,7 @@
 **Spec:** `2026-05-29-superpowers-spec-install-onboarding-ux.md`
 
 **Conventions:**
+
 - No `Co-Authored-By` trailer (project `.claude/settings.json` has no `attribution.commit`).
 - Commit after each task. Never use `--no-verify`.
 
@@ -31,6 +32,7 @@
 ## Task 1: Rewrite `install.sh`
 
 **Files:**
+
 - Modify: `install.sh` (full rewrite)
 
 - [ ] **Step 1: Write the new `install.sh`**
@@ -337,6 +339,7 @@ git commit -m "feat(install): profiles + interactive prereq onboarding (prefligh
 ## Task 2: Rewrite `uninstall.sh`
 
 **Files:**
+
 - Modify: `uninstall.sh` (full rewrite)
 
 - [ ] **Step 1: Write the new `uninstall.sh`**
@@ -553,6 +556,7 @@ git commit -m "feat(uninstall): opt-in --remove-ruflo/--remove-aqe/--purge with 
 ## Task 3: Add `ruflo-onboard` to `shell/ruflo-functions.sh`
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh`
 
 - [ ] **Step 1: Read the area around `ruflo-setup-aqe` to choose an insertion point**
@@ -638,6 +642,7 @@ git commit -m "feat(onboard): add ruflo-onboard one-command per-project setup wr
 ## Task 4: Add breadcrumbs to existing helpers
 
 **Files:**
+
 - Modify: `shell/ruflo-functions.sh` (end of `ruflo-resync`, end of `ruflo-setup-project`)
 - Modify: `bin/ruflo-learning-verify` (end of successful run)
 
@@ -690,6 +695,7 @@ git commit -m "feat(onboard): next-step breadcrumbs on resync, setup-project, le
 ## Task 5: README — Prerequisites + Quick start
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Insert a Prerequisites section before Quick start**
@@ -762,7 +768,8 @@ Try `./install.sh --dry-run` first to preview exactly what it will do.
 🪙 **Prefer CLI-only (no MCP, ~84k tokens saved per session)?** Skip
 `ruflo-setup-machine`; the installed `~/.claude/CLAUDE.md` reference teaches
 Claude Code to drive ruflo through plain Bash.
-```
+
+```text
 
 - [ ] **Step 3: Verify the markdown still renders coherently**
 
@@ -781,6 +788,7 @@ git commit -m "docs(readme): add Prerequisites section and one-command Quick sta
 ## Task 6: README — commands table, uninstall, decision guide
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Add `ruflo-onboard` to the commands table**
@@ -850,22 +858,27 @@ packages* — they affect every project on the machine, so each one prompts to
 confirm (pass `--yes` to skip in scripts). Add `--this-project` from a repo root
 to revert that repo's statusline patches too (it backs up first and leaves all
 ruflo/agentic-qe data alone — use `ruflo cleanup --force` for per-project data).
-```
+
+```text
 
 - [ ] **Step 4: Update the "What's in the box" tree**
 
 In the `## 📦 What's in the box` code block, update the `install.sh` / `uninstall.sh` comment lines and the `shell/` line to:
 
 ```
+
 ├── install.sh                 # machine bootstrap: prereqs + kit + heal (profiles, interactive)
 ├── uninstall.sh               # clean reversal (opt-in --purge for global npm packages)
-```
+
+```text
 
 and
 
 ```
+
 │   └── ruflo-functions.sh     # ruflo-resync, ruflo-onboard, ruflo-setup-project, ruflo-setup-aqe, …
-```
+
+```text
 
 - [ ] **Step 5: Verify references**
 
@@ -898,6 +911,7 @@ Expected: no errors.
 - [ ] **Step 3: Dry-run matrix**
 
 Run each and eyeball against the expectations in Tasks 1 & 2:
+
 ```bash
 ./install.sh --help
 ./install.sh --minimal --dry-run
@@ -907,6 +921,7 @@ Run each and eyeball against the expectations in Tasks 1 & 2:
 ./uninstall.sh --dry-run
 ./uninstall.sh --purge --dry-run
 ```
+
 Expected: `--ruflo-only` shows `npm install -g ruflo` but NOT `agentic-qe`; everything else as described in the per-task steps.
 
 - [ ] **Step 4: No-TTY safety check**
