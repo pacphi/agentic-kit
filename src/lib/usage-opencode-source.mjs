@@ -25,21 +25,30 @@ function selected(file, selection, fsImpl) {
 function discover(dataRoot, fsImpl) {
   let dir;
   const candidates = new Set();
+  try { dir = fsImpl.opendirSync(dataRoot); }
+  catch (error) {
+    return error.code === 'ENOENT'
+      ? selected(path.join(dataRoot, 'opencode.db'), 'discovered', fsImpl)
+      : unavailable('database-discovery-unreadable');
+  }
   try {
-    dir = fsImpl.opendirSync(dataRoot);
-    for (let count = 0; ; count++) {
-      const entry = dir.readSync();
-      if (!entry) break;
-      if (count >= 256) return unavailable('database-discovery-limit');
-      if (!/^opencode(?:-[A-Za-z0-9_-]+)?\.db$/.test(entry.name)) continue;
-      const candidate = selected(path.join(dataRoot, entry.name), 'discovered', fsImpl);
-      if (!candidate.dbFile) return candidate;
-      if (!fsImpl.statSync(candidate.dbFile).isFile()) return unavailable('database-path-invalid');
-      candidates.add(candidate.dbFile);
-    }
-  } catch (error) {
-    if (error.code !== 'ENOENT') return unavailable('database-discovery-unreadable');
-  } finally { if (dir) dir.closeSync(); }
+    try {
+      for (let count = 0; ; count++) {
+        const entry = dir.readSync();
+        if (!entry) break;
+        if (count >= 256) return unavailable('database-discovery-limit');
+        if (!/^opencode(?:-[A-Za-z0-9_-]+)?\.db$/.test(entry.name)) continue;
+        const candidate = selected(path.join(dataRoot, entry.name), 'discovered', fsImpl);
+        if (!candidate.dbFile) return candidate;
+        if (!fsImpl.statSync(candidate.dbFile).isFile()) return unavailable('database-path-invalid');
+        candidates.add(candidate.dbFile);
+      }
+    } finally { dir.closeSync(); }
+  } catch {
+    // Once the root opened, any read/stat/close failure leaves enumeration
+    // incomplete. A missing candidate cannot establish a unique source.
+    return unavailable('database-discovery-unreadable');
+  }
   if (candidates.size > 1) return unavailable('database-selection-ambiguous');
   return selected([...candidates][0] ?? path.join(dataRoot, 'opencode.db'), 'discovered', fsImpl);
 }

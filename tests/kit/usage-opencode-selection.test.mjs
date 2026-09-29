@@ -62,3 +62,55 @@ test('project source health reports unreadable database categories without priva
   assert.equal(result.status, 'degraded');
   assert.equal(result.reason, 'permission');
 });
+
+// The deterministic iterator orders an actual dangling link between two actual
+// stores. Production must not treat a candidate's ENOENT as a missing root.
+test('a dangling eligible candidate cannot hide a second real database', { skip: process.platform === 'win32' }, () => {
+  const dir = tempDir('ak-oc-dangling-');
+  try {
+    const root = path.join(dir, 'opencode'); fs.mkdirSync(root);
+    fs.writeFileSync(path.join(root, 'opencode-a.db'), '');
+    fs.symlinkSync(path.join(root, 'missing.db'), path.join(root, 'opencode-b.db'));
+    fs.writeFileSync(path.join(root, 'opencode-c.db'), '');
+    const entries = fs.readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    let closed = false;
+    const fsImpl = { ...fs, opendirSync: () => ({ readSync: () => entries.shift() ?? null, closeSync: () => { closed = true; } }) };
+    const selection = source.selectOpencodeSource({ env: { HOME: dir, XDG_DATA_HOME: dir }, fsImpl });
+    assert.equal(selection.dbFile, null);
+    assert.equal(selection.health.status, 'degraded');
+    assert.equal(closed, true);
+    const projects = scanOpencodeDirectories({ selection, withDb: () => { throw Error('uncertain source must not be opened'); } });
+    assert.equal(projects.complete, false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+for (const failure of ['stat-ENOENT', 'stat-EACCES', 'read-ENOENT', 'read-EIO', 'close-EIO', 'limit']) {
+  test(`partial discovery never establishes uniqueness after ${failure}`, () => {
+    const dir = tempDir('ak-oc-partial-');
+    try {
+      const root = path.join(dir, 'opencode'); fs.mkdirSync(root);
+      const first = path.join(root, 'opencode-a.db'); fs.writeFileSync(first, '');
+      const second = path.join(root, 'opencode-b.db'); fs.writeFileSync(second, '');
+      let count = 0;
+      const [operation, code] = failure.split('-');
+      const fail = () => { throw Object.assign(Error('private path'), { code }); };
+      const fsImpl = { ...fs,
+        opendirSync: () => ({
+          readSync: () => {
+            count++;
+            if (count === 1) return { name: 'opencode-a.db' };
+            if (operation === 'read') return fail();
+            if (operation === 'limit') return { name: `unrelated-${count}` };
+            return count === 2 ? { name: 'opencode-b.db' } : null;
+          },
+          closeSync: () => { if (operation === 'close') fail(); },
+        }),
+        statSync: (file) => file === second && operation === 'stat' ? fail() : fs.statSync(file),
+      };
+      const result = source.selectOpencodeSource({ env: { HOME: dir, XDG_DATA_HOME: dir }, fsImpl });
+      assert.equal(result.dbFile, null);
+      assert.equal(result.health.status, 'degraded');
+      assert.ok(!JSON.stringify(result.health).includes(dir));
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
