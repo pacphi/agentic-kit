@@ -592,13 +592,13 @@ test('the projects note says how many imported copies discovery set aside, and n
 
 // ── The page reads the slim endpoint ────────────────────────────────────────
 
-test('loadSystem fetches /api/system/summary, deep refresh parameters included', async () => {
+test('loadSystem only re-reads /api/system/summary', async () => {
   const urls = [];
   const fetchImpl = (url) => { urls.push(url); return Promise.resolve({ json: () => Promise.resolve(systemSummaryPayload(fullPayload(1))) }); };
   const { projects } = systemClient({ fetchImpl });
   await projects.loadSystem();
   await projects.loadSystem(true, false);
-  assert.deepEqual(urls, ['/api/system/summary', '/api/system/summary?refresh=deep&trees=0']);
+  assert.deepEqual(urls, ['/api/system/summary', '/api/system/summary']);
 });
 
 // ── The routes ──────────────────────────────────────────────────────────────

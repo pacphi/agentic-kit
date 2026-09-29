@@ -601,14 +601,10 @@ import { fmtNum, fmtTok } from './usage.mjs';
     if(trees){
       var on=!!(c&&c.includeProjectTrees);
       trees.classList.toggle("on",on);
-      trees.setAttribute("aria-pressed",on?"true":"false");
-      // Not a filter: whether trees were walked is decided at scan time, so the
-      // chip advertises the rescan it will start rather than pretending the
-      // answer is already on the client.
+      trees.textContent=on?'Project trees included':'Project trees excluded';
       trees.title=on
-        ?"project working trees are in this ranking \u2014 click to rescan without them"
-        :"project working trees are excluded \u2014 click to rescan with them (a deep scan takes a while)";
-      trees.disabled=!!(d.scan&&d.scan.running);
+        ?"The last machine measurement included project working trees."
+        :"The last machine measurement excluded project working trees.";
     }
     if(!el)return;
     if(!c&&!d.storage&&!d.install){

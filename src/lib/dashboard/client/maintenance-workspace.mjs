@@ -10,7 +10,7 @@
 // a node module — tests/kit/maintenance-dashboard-client-labels.test.mjs
 // asserts these literal maps stay byte-identical to that contract).
 import { authHeaders, esc } from './bootstrap.mjs';
-import { mntCheckProviders, mntRemeasureMachine, mntWireOperation } from './maintenance-operation.mjs';
+import { mntWireOperation } from './maintenance-operation.mjs';
 import { ago } from './intelligence.mjs';
 
   // ── Label vocabulary (copied from src/lib/maintenance/management/model.mjs) ─
@@ -186,7 +186,7 @@ import { ago } from './intelligence.mjs';
     if(lastRefresh&&lastRefresh.status==="running"){
       return '<div class="mnt-empty" aria-busy="true">Building the inventory…</div>';
     }
-    return '<div class="mnt-empty">No inventory has been built yet. Use Refresh evidence, above, to build it.</div>';
+    return '<div class="mnt-empty">No inventory has been built yet. Use Refresh, above, to build it.</div>';
   }
   export function mntScanRequiredAnnouncement(lastRefresh){
     if(lastRefresh&&lastRefresh.status==="failed"){
@@ -434,8 +434,4 @@ import { ago } from './intelligence.mjs';
     MNT.wired=true;
     mntWireTabs();mntWireOperation();
     document.addEventListener("keydown",mntHandleEscape);
-    var checkProviders=document.getElementById("mnt-check-providers");
-    if(checkProviders)checkProviders.addEventListener("click",mntCheckProviders);
-    var remeasure=document.getElementById("mnt-remeasure");
-    if(remeasure)remeasure.addEventListener("click",mntRemeasureMachine);
   }

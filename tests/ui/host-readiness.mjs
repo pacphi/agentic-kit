@@ -19,7 +19,6 @@ const report = () => ({ checkedAt: '2026-09-20T10:00:00Z', scope: 'Dashboard lau
     host, status: 'ok', level: 'local', checks, evidenceKey: 'a'.repeat(64), canCheckConnection: true,
     checkedAt: '2026-09-20T10:00:00Z', connection: { state: 'not-run' }, target: { nativeDefault: true },
   }])) });
-
 test('all hosts have qualified OK, accessible details and explicitly confirmed connection checks', async t => {
   const browser = await launchChrome();
   t.after(() => browser.close());
@@ -42,7 +41,7 @@ test('all hosts have qualified OK, accessible details and explicitly confirmed c
     return route.fulfill({contentType:'text/html',body:renderPage({name:'Health fixture',version:'test'}).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')});
   });
   await page.goto('http://health.test/');
-  await page.addScriptTag({content:`${esc.toString()}\nfunction authHeaders(){return {'x-dash-token':'fixture'};}\n${source('usage')}\n${source('host-readiness')}\nwireHostHealth();`});
+  await page.addScriptTag({content:`${esc.toString()}\nfunction authHeaders(){return {'x-dash-token':'fixture'};}\n${source('usage')}\nfunction refreshRunning(){return false;}\nfunction startRefresh(strength){(window.__refreshCalls ||= []).push(strength);return Promise.resolve(true); }\n${source('host-readiness')}\nwireHostHealth();`});
   assert.equal(await page.locator('[data-health-host="codex"] .sp-status').innerText(),'Checking');
   await page.evaluate(data=>globalThis.renderHostReadiness(data),report());
   for(const [host,name] of [['claude','Claude Code'],['codex','Codex'],['opencode','OpenCode']]){
@@ -121,7 +120,7 @@ test('unmanaged hosts read their management state everywhere, with information-o
     return route.fulfill({contentType:'text/html',body:renderPage({name:'Health fixture',version:'test'}).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')});
   });
   await page.goto('http://health.test/');
-  await page.addScriptTag({content:`${esc.toString()}\nfunction authHeaders(){return {'x-dash-token':'fixture'};}\n${source('usage')}\n${source('host-readiness')}\nwireHostHealth();`});
+  await page.addScriptTag({content:`${esc.toString()}\nfunction authHeaders(){return {'x-dash-token':'fixture'};}\n${source('usage')}\nfunction refreshRunning(){return false;}\nfunction startRefresh(strength){(window.__refreshCalls ||= []).push(strength);return Promise.resolve(true); }\n${source('host-readiness')}\nwireHostHealth();`});
   await page.evaluate(data=>globalThis.renderHostReadiness(data),unmanagedReport());
 
   // Header pills: health for the managed host, the management words otherwise, never amber.
@@ -144,10 +143,10 @@ test('unmanaged hosts read their management state everywhere, with information-o
   assert.match(await page.locator('#host-health-participation').innerText(),/not participating/i);
   assert.equal(await page.locator('#host-health-participation code').innerText(),'ak host pick --host claude,codex');
   assert.equal(await page.locator('#host-health-participation [data-copy]').getAttribute('data-copy'),'ak host pick --host claude,codex');
-  assert.equal(await page.locator('#host-health-refresh').innerText(),'Check again');
-  await page.locator('#host-health-refresh').click();
-  await page.waitForFunction(()=>globalThis.document.getElementById('host-health-message').textContent==='Check completed.');
-  assert.deepEqual(requests,['/api/host-health/local']);
+  assert.equal(await page.locator('#host-health-run-refresh').innerText(),'Refresh');
+  await page.locator('#host-health-run-refresh').click();
+  assert.deepEqual(await page.evaluate(() => globalThis.__refreshCalls), ['local']);
+  assert.deepEqual(requests, []);
   await page.keyboard.press('Escape');
 
   // Participation view (Overview → Hosts & Routing): one row per host, the hint copyable text.
@@ -200,7 +199,7 @@ test('a dialog close that lands after the user moved on does not steal focus bac
   await page.route('http://health.test/**', route => route.fulfill({ contentType: 'text/html',
     body: renderPage({ name: 'Health fixture', version: 'test' }).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '') }));
   await page.goto('http://health.test/');
-  await page.addScriptTag({ content: `${esc.toString()}\nfunction authHeaders(){return {};}\n${source('usage')}\n${source('host-readiness')}\nwireHostHealth();` });
+  await page.addScriptTag({ content: `${esc.toString()}\nfunction authHeaders(){return {};}\n${source('usage')}\nfunction refreshRunning(){return false;}\nfunction startRefresh(strength){(window.__refreshCalls ||= []).push(strength);return Promise.resolve(true); }\nfunction refreshRunning(){return false;}\nfunction startRefresh(strength){(window.__refreshCalls ||= []).push(strength);return Promise.resolve(true); }\n${source('host-readiness')}\nwireHostHealth();` });
   await page.evaluate(data => globalThis.renderHostReadiness(data), report());
   await page.locator('[data-health-host="claude"]').click();
   // The race, made deterministic: close the dialog and move focus in the SAME

@@ -789,10 +789,9 @@ const MAINTENANCE_PAYLOAD = {
   receipts: [],
 };
 
-let chainedMaintenanceScans = 0;
 const MAINTENANCE_STUB = {
   async report() { return MAINTENANCE_PAYLOAD; },
-  async scan() { chainedMaintenanceScans += 1; return MAINTENANCE_PAYLOAD; },
+  async scan() { return MAINTENANCE_PAYLOAD; },
   async plan() { return {}; },
 };
 
@@ -1133,6 +1132,12 @@ async function main() {
   console.log(`\ncorpus: ${REAL ? 'REAL (~/.claude, ~/.codex)' : 'fixtures (deterministic)'}`);
   console.log(`cache : ${cachePath} (temp — your real index is untouched)\n`);
 
+  const refreshStageGates = new Map();
+  const refreshStages = Object.fromEntries(['machine', 'maintenance', 'inventory', 'live', 'local'].map((id) => [id, async () => {
+    const gate = refreshStageGates.get(id);
+    if (gate) await gate;
+    return { ok: true };
+  }]));
   const srv = await startDashboard({
     port: 0,
     fetchStatus: STATUS_STUB,
@@ -1145,6 +1150,7 @@ async function main() {
     modelScopeKey: 'ab'.repeat(32),
     system: SYSTEM_STUB,
     maintenance: MAINTENANCE_STUB,
+    refreshStages,
   });
   const ORIGIN = new URL(srv.url).origin;
   const modelHeaders = { 'x-dash-token': srv.token };
@@ -1184,11 +1190,9 @@ async function main() {
     const group = document.getElementById('secondary-system')?.getBoundingClientRect();
     const tabs = document.getElementById('system-seg')?.getBoundingClientRect();
     const status = document.getElementById('system-freshness')?.getBoundingClientRect();
-    const button = document.getElementById('sys-rescan');
     return {
       statusText: document.getElementById('sys-asof')?.innerText,
       running: document.getElementById('system-freshness')?.getAttribute('data-running'),
-      buttonHidden: button?.hidden,
       statusBesideTabs: !!status && !!tabs && status.top < tabs.bottom && status.bottom > tabs.top
         && status.left >= tabs.right + 12,
       trailingSegmentSpace: Math.abs((tabs?.right ?? 0)
@@ -1199,10 +1203,9 @@ async function main() {
       documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
     };
   });
-  check('running full-scan progress sits beside a content-width System menu on wide screens',
+  check('running machine measurement progress sits beside a content-width System menu on wide screens',
     runningScanLayout.running === '1'
-      && /Full scan running.*Ranking disk use.*15 of 15/.test(runningScanLayout.statusText ?? '')
-      && runningScanLayout.buttonHidden === true
+      && /Machine measurement running.*Ranking disk use.*15 of 15/.test(runningScanLayout.statusText ?? '')
       && runningScanLayout.statusBesideTabs
       && runningScanLayout.trailingSegmentSpace < 6
       && runningScanLayout.statusInsideGroup
@@ -1226,7 +1229,7 @@ async function main() {
         ? getComputedStyle(document.getElementById('sys-asof')).whiteSpace : null,
     };
   });
-  check('narrow System navigation scrolls internally while scan status stays in its own rail',
+  check('narrow System navigation scrolls internally while measurement status stays in its own rail',
     narrowScanLayout.documentFits
       && narrowScanLayout.tabsScrollInternally
       && narrowScanLayout.statusBelowTabs
@@ -1264,8 +1267,34 @@ async function main() {
     `blocked-storage startup was ${JSON.stringify(blockedStorageStartup)} with status ${blockedStatus.join(',')}`);
   await storageBlockedPage.close();
 
+  const idlePage = await browser.newPage();
+  const idleRequests = [];
+  idlePage.on('request', request => {
+    const route = new URL(request.url()).pathname;
+    if (route === '/api/status' || route === '/api/refresh') idleRequests.push({ route, method: request.method() });
+  });
+  await idlePage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+  await idlePage.click('#poll-ivl');
+  await idlePage.click('#poll-menu [data-ms="15000"]');
+  const idleDeadline = Date.now() + 35_000;
+  while (idleRequests.filter(request => request.route === '/api/status').length < 3 && Date.now() < idleDeadline) {
+    await idlePage.waitForTimeout(250);
+  }
+  check('two idle poll ticks issue no /api/refresh request or POST',
+    idleRequests.filter(request => request.route === '/api/status').length >= 3
+      && idleRequests.every(request => request.route !== '/api/refresh'),
+    JSON.stringify(idleRequests));
+  await idlePage.close();
+
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 }, locale: 'en-US', timezoneId: 'America/Los_Angeles',
+  });
+  const refreshRequests = [];
+  const statusRequests = [];
+  page.on('request', (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/refresh') refreshRequests.push({ method: request.method(), body: request.method() === 'POST' ? request.postDataJSON() : null });
+    if (pathname === '/api/status') statusRequests.push(request.url());
   });
 
   // Anything the page logs as an error, or any request it fails, is a defect —
@@ -1424,7 +1453,6 @@ async function main() {
   // check: the inventory stub answers `running` that many times, then flips
   // scanRequired off so the workspace's bounded polling sees the built page.
   let maintenanceBuildPollsRemaining = 0;
-  let maintenanceRunningPollsServed = 0;
   // Per-label override for a coverage entry's `filesystem` flag, applied
   // on top of whatever the sentinel fixture's coverage() helper produced
   // (which never sets `filesystem` at all, exercising the "flag absent ->
@@ -1496,7 +1524,6 @@ async function main() {
       maintenanceInventoryRequests.push(params);
       if (maintenanceBuildPollsRemaining > 0) {
         maintenanceBuildPollsRemaining -= 1;
-        maintenanceRunningPollsServed += 1;
         if (maintenanceBuildPollsRemaining === 0) maintenanceScanRequired = false;
         return reply(200, {
           scanRequired: true, total: 0, groups: [], facetCounts: {}, sortGroups: [], partialSources: [],
@@ -1816,6 +1843,11 @@ async function main() {
     // connections. DOM readiness plus the application shell is the stable
     // navigation contract; network-idle can never be guaranteed by a Live UI.
     await page.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+    check('Refresh and Reload controls replace the retired scan buttons',
+      await page.locator('#refresh-run').count() === 1
+        && await page.locator('#refresh-strength').count() === 1
+        && await page.locator('#poll-now').getAttribute('aria-label') === 'Reload — re-read this view; runs no checks'
+        && await page.locator('#sys-rescan, #mnt-check-providers, #mnt-remeasure, #host-health-refresh').count() === 0);
     await page.waitForSelector('#panel-overview', { state: 'attached' });
 
     // ── ADR-0026 · About leads the bar but must NOT hijack the landing view ──
@@ -2588,7 +2620,7 @@ async function main() {
     check('a fresh install names coverage gaps and keeps measurement in the toolbar only',
       /^4 sources have not been scanned yet\./.test((freshInstallBanner || '').trim())
         && await page.locator('#mnt-partial button').count() === 0
-        && await page.isVisible('#mnt-remeasure')
+        && await page.locator('#mnt-remeasure').count() === 0
         && !/Fresh source/.test(freshInstallBanner || ''),
       `fresh-install banner read ${JSON.stringify(freshInstallBanner)}`);
 
@@ -2602,8 +2634,7 @@ async function main() {
     await page.fill('#mnt-search', '');
     await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length > 3);
 
-    // ── Refresh evidence (MNT-DSC-010): explicit, labeled; disables Apply/
-    // Undo while it runs; never fires on its own ──
+    // The shared Refresh control owns provider checks; opening Maintenance does not start one.
     await page.click('[data-mnt-dest="guidance"]');
     await page.waitForSelector('#mnt-tab-guidance[aria-selected="true"]');
     await page.waitForSelector('[data-mnt-plan-plc]');
@@ -2611,177 +2642,8 @@ async function main() {
     check('MNT-GUD-001: Guidance has exactly the visible lanes Can apply here, Steps available, Decisions to make, Updates available, and Recovery to finish',
       JSON.stringify(guidanceLaneLabels) === JSON.stringify([
         'Can apply here', 'Steps available', 'Decisions to make', 'Updates available', 'Recovery to finish',
-      ]),
-      `guidance lane labels read ${JSON.stringify(guidanceLaneLabels)}`);
-    check('a provider check never starts on its own',
-      maintenanceCheckProvidersReads === 0, 'the workspace probed providers without an explicit click');
-    const providerRefreshResponse = page.waitForResponse((response) => new URL(response.url()).searchParams.get('refresh') === 'scan');
-    await page.click('#mnt-check-providers');
-    await providerRefreshResponse;
-    // The button disables synchronously; Apply's disabled attribute follows
-    // once the guidance re-render that mntCheckProviders() triggers resolves.
-    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === true, null, { timeout: 5000 });
-    const providersRunning = await page.evaluate(() => ({
-      buttonDisabled: document.getElementById('mnt-check-providers')?.disabled,
-      applyDisabled: document.querySelector('[data-mnt-plan-plc]')?.disabled,
-    }));
-    check('Refresh evidence is explicit, labeled, and disables Apply while it runs',
-      maintenanceCheckProvidersReads === 1 && providersRunning.buttonDisabled === true
-        && providersRunning.applyDisabled === true,
-      `providers-running state was ${JSON.stringify(providersRunning)}`);
-    await page.waitForFunction(() => document.getElementById('mnt-check-providers')?.disabled === false, null, { timeout: 8000 });
-    check('the provider check settles and re-enables Apply',
-      await page.$eval('[data-mnt-plan-plc]', (button) => button.disabled === false),
-      'Apply stayed disabled after the provider check settled');
-
-    // ── Dispositions (MNT-GUD-009/011): explained before confirmation, one
-    // exact guidanceId per write ──
-    await page.waitForSelector('.mnt-dispositions [data-mnt-disposition-open="acknowledged"]');
-    await page.click('.mnt-dispositions [data-mnt-disposition-open="acknowledged"]');
-    const dispositionExplanation = await visibleText(page, '.mnt-disposition-confirm');
-    check('a disposition explains its effect before it can be confirmed',
-      /keeps this outcome visible/i.test(dispositionExplanation) && maintenanceDispositionRequests.length === 0,
-      `disposition explanation read ${JSON.stringify(dispositionExplanation)}`);
-    await Promise.all([
-      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/maintenance/v2/dispositions' && response.request().method() === 'POST'),
-      page.click('.mnt-disposition-confirm [data-mnt-disposition-confirm="acknowledged"]'),
-    ]);
-    check('confirming a disposition posts exactly one guidanceId and kind, with confirm:true',
-      maintenanceDispositionRequests.length === 1
-        && Object.keys(maintenanceDispositionRequests[0]).sort().join(',') === 'confirm,guidanceId,kind'
-        && maintenanceDispositionRequests[0].kind === 'acknowledged' && maintenanceDispositionRequests[0].confirm === true,
-      `disposition requests were ${JSON.stringify(maintenanceDispositionRequests)}`);
-    await page.waitForSelector('[data-mnt-plan-plc]');
-
-    // ── Guidance: Can apply here — reuses the v1 apply/undo confirm dialog,
-    // now driven by placementId + guidanceId against the v2 plan route ──
-    const applyButtonLabel = await page.textContent('[data-mnt-plan-plc]');
-    check('MNT-EVD-006: the Can apply here row uses a specific verb, never generic Fix',
-      /Update plugin/i.test(applyButtonLabel || '') && !/\bFix\b/i.test(applyButtonLabel || ''),
-      `apply button read ${JSON.stringify(applyButtonLabel)}`);
-    await page.click('[data-mnt-plan-plc]');
-    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
-    const firstPreview = await page.evaluate(() => ({
-      title: document.getElementById('sys-maint-confirm-title')?.textContent,
-      body: document.getElementById('sys-maint-confirm-body')?.innerText,
-      xss: globalThis.__maintConfirmXss,
-      secretInDom: document.documentElement.innerHTML.includes('cap-ui-plan-secret'),
-      secretInUrl: location.href.includes('cap-ui-plan-secret'),
-    }));
-    check('the plan preview posts exactly one exact placementId + guidanceId, renders hostile copy as text, and keeps its capability out of DOM/URL',
-      Object.keys(maintenancePlanRequests[0] || {}).sort().join(',') === 'guidanceId,placementId'
-        && !!maintenancePlanRequests[0].placementId && !!maintenancePlanRequests[0].guidanceId
-        && /<img src=x onerror=/.test(String(firstPreview.title))
-        && /<svg onload=/.test(String(firstPreview.body))
-        && firstPreview.xss === undefined && !firstPreview.secretInDom && !firstPreview.secretInUrl,
-      `first preview was ${JSON.stringify(firstPreview)}; plan request was ${JSON.stringify(maintenancePlanRequests[0])}`);
-    await page.fill('#sys-maint-typed', 'UPDATE wrong');
-    check('a partial typed phrase leaves Apply disabled',
-      await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled), 'a partial phrase enabled Apply');
-    await page.fill('#sys-maint-typed', 'UPDATE frontend-design');
-    check('the exact typed phrase enables the named action',
-      !(await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled)), 'the exact phrase did not enable Apply');
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
-    check('MNT-UX-012: a successful apply becomes a retained receipt, and the active destination refreshes',
-      /receipt-update-ui/.test(await visibleText(page, '#sys-maint-confirm')),
-      `receipt sheet read ${JSON.stringify(await visibleText(page, '#sys-maint-confirm'))}`);
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-
-    await page.click('[data-mnt-plan-plc]');
-    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Evidence changed');
-    check('a preview-phase drift fails closed with specific recovery copy and no capability echo',
-      /changed while the preview was being prepared/i.test(await visibleText(page, '#sys-maint-confirm'))
-        && !/cap-ui-plan-secret/.test(await visibleText(page, '#sys-maint-confirm')),
-      'drift copy did not read as expected');
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-
-    await page.click('[data-mnt-plan-plc]');
-    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
-    await page.fill('#sys-maint-typed', 'UPDATE frontend-design');
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Recovery required');
-    check('MNT-UX-012: an apply-phase 409 retains its receipt and never claims the resource is unchanged',
-      /provider may have changed this resource/i.test(await visibleText(page, '#sys-maint-confirm'))
-        && /receipt-recovery-ui/.test(await visibleText(page, '#sys-maint-confirm'))
-        && !/Nothing changed/.test(await visibleText(page, '#sys-maint-confirm')),
-      'recovery copy did not read as expected');
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-
-    // ── J5 — interrupted cache cleanup: Audit interruption → disclosure and
-    // result → exactly one Record button → reconcile via the same reused
-    // typed-confirmation dialog ──
-    await page.click('[data-mnt-dest="activity"]');
-    await page.waitForSelector('#mnt-tab-activity[aria-selected="true"]');
-    await page.waitForSelector('[data-mnt-audit-receipt]');
-    const auditTriggerLabel = await page.textContent('[data-mnt-audit-receipt]');
-    check('MNT-RCV-001: an interrupted receipt offers Audit interruption, not generic Verify again',
-      auditTriggerLabel.trim() === 'Audit interruption',
-      `interrupted-receipt action label read ${JSON.stringify(auditTriggerLabel)}`);
-    await page.click('[data-mnt-audit-receipt]');
-    await page.waitForFunction(() => /Result:/.test(document.getElementById('mnt-audit-body')?.innerText || ''));
-    const auditBody = await visibleText(page, '#mnt-audit-body');
-    check('J5: Audit interruption discloses the receipt, phase, provider, checks, and policies, then a conclusive result',
-      JSON.stringify(maintenanceAuditRequests[0]) === JSON.stringify({ receiptIds: [INTERRUPTED_RECEIPT.id] })
-        && new RegExp(INTERRUPTED_RECEIPT.id).test(auditBody)
-        && /applying/.test(auditBody) && /owned-npx-cache/.test(auditBody)
-        // Raw machine check statuses never render verbatim (one, "matched",
-        // could otherwise collide with real evidence text) — the humanized
-        // name+label pairing is what proves the mapping ran.
-        && /Receipt integrity.*Passed/i.test(auditBody) && /Preimage comparison.*Matched/i.test(auditBody)
-        && /read-only-provider-inspector-only/.test(auditBody)
-        && /Matches recorded before state/.test(auditBody),
-      `audit body read ${JSON.stringify(auditBody)}`);
-    const recordButtons = await page.$$('#mnt-audit-actions [data-mnt-reconcile-receipt]');
-    check('J5: the audit offers exactly one enabled Record button',
-      recordButtons.length === 1 && /Record no change/.test(await page.textContent('#mnt-audit-actions')),
-      `record actions read ${await visibleText(page, '#mnt-audit-actions')}`);
-    await page.click('[data-mnt-reconcile-receipt]');
-    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
-    check('J5: reconcile reuses the same typed-confirmation dialog as apply/undo',
-      /Record no change/.test(await visibleText(page, '#sys-maint-confirm')),
-      'reconcile did not present the shared confirmation dialog');
-    await page.fill('#sys-maint-typed', 'RECORD no-change');
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
-    check('MNT-UX-012/J5: a confirmed reconciliation records exactly one receipt via the reconcile route',
-      maintenanceReconcileRequests.length === 1 && maintenanceReconcileRequests[0].capability === 'cap-ui-reconcile-secret'
-        && maintenanceReconcileRequests[0].confirm === true,
-      `reconcile requests were ${JSON.stringify(maintenanceReconcileRequests)}`);
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-
-    // ── Export (MNT-RCV-011/012): sanitized default; "Include local paths"
-    // is a fresh, separately warned selection every time ──
-    await page.click('[data-mnt-export-receipt]');
-    await page.waitForSelector('#mnt-export-local-paths');
-    check('export defaults to sanitized, with no warning shown yet',
-      maintenanceExportRequests.length === 1 && maintenanceExportRequests[0].includeLocalPaths === false
-        && await page.isHidden('#mnt-export-warning'),
-      `export requests were ${JSON.stringify(maintenanceExportRequests)}`);
-    await page.check('#mnt-export-local-paths');
-    check('checking Include local paths reveals the warning before any request is sent',
-      await page.isVisible('#mnt-export-warning') && maintenanceExportRequests.length === 1,
-      'the local-paths warning did not appear, or a request fired before confirmation');
-    await Promise.all([
-      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/maintenance/v2/receipts/export' && response.request().method() === 'POST'),
-      page.click('#mnt-export-again'),
-    ]);
-    check('re-exporting with local paths sends acknowledgedWarning:true in the SAME request',
-      maintenanceExportRequests.length === 2 && maintenanceExportRequests[1].includeLocalPaths === true
-        && maintenanceExportRequests[1].acknowledgedWarning === true,
-      `export requests were ${JSON.stringify(maintenanceExportRequests)}`);
-    await page.click('#mnt-receipt-close');
-
-    // ── Discovery: a light smoke check of the fourth destination. Waits for
-    // the CONTENT of #mnt-scan-progress specifically (not just an <li> in
-    // #mnt-automatic-sources, whose two rows are static and already present
-    // from the earlier group-collapse fixture's own stale Discovery visits)
-    // — a fresh fetch against base()'s real coverage can otherwise still be
-    // in flight when a weaker wait resolves on leftover data. ──
+      ]));
+    check('a provider check never starts on its own', maintenanceCheckProvidersReads === 0);
     await page.click('[data-mnt-dest="discovery"]');
     await page.waitForSelector('#mnt-tab-discovery[aria-selected="true"]');
     await page.waitForFunction(() => /Claude user configuration/.test(
@@ -2893,37 +2755,22 @@ async function main() {
     ));
     const failedRefreshEmpty = await visibleText(page, '#mnt-results');
     const failedRefreshStatus = await page.textContent('#mnt-status');
-    check('a failed lastRefresh names "did not complete" plus the sanitized message, never the raw code, and keeps Refresh evidence available',
+    check('a failed lastRefresh names "did not complete" plus the sanitized message, never the raw code, and keeps Refresh available',
       /did not complete/.test(failedRefreshEmpty) && /did not respond before the timeout/.test(failedRefreshEmpty)
         && !/PROVIDER_TIMEOUT/.test(failedRefreshEmpty) && !/PROVIDER_TIMEOUT/.test(failedRefreshStatus || '')
         && /did not respond before the timeout/.test(failedRefreshStatus || '')
-        && await page.isEnabled('#mnt-check-providers'),
+        && await page.isEnabled('#refresh-run'),
       `empty state read ${JSON.stringify(failedRefreshEmpty)}, status read ${JSON.stringify(failedRefreshStatus)}`);
     maintenanceInventoryLastRefresh = null;
 
-    // ── D5: scanRequired points at Refresh evidence, and settling it
-    // refreshes Inventory in place, with no page reload. Hops off Inventory
-    // and back so the destination switch re-fetches against the reset
-    // (no-lastRefresh) fixture state above, without duplicating route
-    // handlers on a fresh page. ──
+    // A missing inventory points to the shared Refresh control.
     await page.click('[data-mnt-dest="discovery"]');
     await page.click('[data-mnt-dest="inventory"]');
     await page.waitForFunction(() => /No inventory has been built yet/.test(
       document.getElementById('mnt-results')?.innerText || '',
     ));
     const scanRequiredEmpty = await visibleText(page, '#mnt-results');
-    check('the scanRequired empty state points at Refresh evidence on this workspace, not a System full scan',
-      /Refresh evidence/.test(scanRequiredEmpty) && !/full scan from System/i.test(scanRequiredEmpty),
-      `scanRequired empty state read ${JSON.stringify(scanRequiredEmpty)}`);
-    await page.click('#mnt-check-providers');
-    await page.waitForFunction(() => document.getElementById('mnt-check-providers')?.disabled === false, null, { timeout: 8000 });
-    await page.waitForSelector('#mnt-results .mnt-row', { timeout: 8000 });
-    check('settling Refresh evidence clears scanRequired and shows Inventory results in place, with no reload',
-      await page.$$eval('#mnt-results .mnt-row', (els) => els.length) > 0,
-      'Inventory did not refresh in place once the provider check settled');
-    check('D8: the workspace polled the inventory through the running build (bounded, 1.5 s apart) instead of re-fetching once',
-      maintenanceRunningPollsServed >= 2 && maintenanceBuildPollsRemaining === 0,
-      `running polls served: ${maintenanceRunningPollsServed}, remaining ${maintenanceBuildPollsRemaining}`);
+    check('the scanRequired empty state points at Refresh', /Refresh/.test(scanRequiredEmpty));
     maintenanceScanRequired = false;
 
     // ── D8: while the server reports a running build, the empty state says
@@ -2937,67 +2784,12 @@ async function main() {
       document.getElementById('mnt-results')?.innerText || '',
     ));
     const runningEmpty = await visibleText(page, '#mnt-results');
-    check('a running lastRefresh renders "Building the inventory…" and keeps Refresh evidence available',
+    check('a running lastRefresh renders "Building the inventory…" and keeps Refresh available',
       /Building the inventory/.test(runningEmpty) && !/not been built yet/.test(runningEmpty)
-        && await page.isEnabled('#mnt-check-providers'),
+        && await page.isEnabled('#refresh-run'),
       `running empty state read ${JSON.stringify(runningEmpty)}`);
     maintenanceInventoryLastRefresh = null;
     maintenanceScanRequired = false;
-
-    // ── Re-measure machine (System Full scan, exposed beside Refresh
-    // evidence): delegates to System's own #sys-rescan, then blocks writes
-    // (mntWritesBlocked) for the whole measurement + provider-check +
-    // inventory-rebuild chain. Uses its own temporary /api/system route
-    // rather than the real SYSTEM_STUB — that stub's systemDeepScans counter
-    // is asserted against a clean slate by the dedicated System-tab Rescan
-    // tests later in this run, and this block must neither depend on nor
-    // perturb that count. ──
-    await page.click('[data-mnt-dest="guidance"]');
-    await page.waitForSelector('[data-mnt-plan-plc]');
-    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
-    let remeasureSystemReadCount = 0;
-    let remeasureDeepScanRequests = 0;
-    // Deterministic on REQUEST COUNT, not wall-clock: the deep-scan kickoff
-    // itself is always the first read (reports running), every read after is
-    // settled. This cannot race system-projects.mjs's own poll cadence and
-    // mntPollSystemMeasurement's independent one against a Node-side timer.
-    await page.route(/\/api\/system(\/summary)?(\?|$)/, (route) => {
-      const reqUrl = new URL(route.request().url());
-      if (reqUrl.searchParams.get('refresh') === 'deep') remeasureDeepScanRequests += 1;
-      remeasureSystemReadCount += 1;
-      if (remeasureSystemReadCount === 2) {
-        // Deep measurement also completes a fresh provider check and inventory build.
-        maintenanceCheckProvidersReads += 1;
-        maintenanceProviderPollCount = 2;
-      }
-      return route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ ...SYSTEM_PAYLOAD, scan: { ...SYSTEM_PAYLOAD.scan, running: remeasureSystemReadCount <= 1 } }),
-      });
-    });
-    await page.click('#mnt-remeasure');
-    // mntRemeasureMachine() re-renders the active destination the instant it
-    // sets MNT.remeasureBusy — before it even clicks #sys-rescan — so both
-    // of these are observable synchronously, exactly like Refresh evidence.
-    const remeasureStarted = await page.evaluate(() => ({
-      remeasureDisabled: document.getElementById('mnt-remeasure')?.disabled,
-      applyDisabled: document.querySelector('[data-mnt-plan-plc]')?.disabled,
-    }));
-    check('Re-measure machine disables itself and blocks writes (mntWritesBlocked) the instant it starts',
-      remeasureStarted.remeasureDisabled === true && remeasureStarted.applyDisabled === true,
-      `remeasure-start state was ${JSON.stringify(remeasureStarted)}`);
-    await page.waitForFunction(() => document.getElementById('mnt-remeasure')?.disabled === false, null, { timeout: 15_000 });
-    check('Re-measure machine delegates to #sys-rescan (a real deep scan) and settles, re-enabling itself and Apply',
-      remeasureDeepScanRequests === 1 && await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled === false),
-      `deep scan requests: ${remeasureDeepScanRequests}, Apply stayed disabled after Re-measure machine settled: ${await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled)}`);
-    // A stale scheduled System poll used to restart a completed owned scan as
-    // an external operation, waiting forever for a second evidence generation.
-    await page.waitForTimeout(3200);
-    check('a completed remeasurement stays settled after the System poll interval',
-      await page.isEnabled('#mnt-remeasure') && await page.isEnabled('[data-mnt-plan-plc]')
-        && remeasureSystemReadCount === 2,
-      `system reads: ${remeasureSystemReadCount}; operation: ${await page.textContent('#mnt-check-providers-status')}`);
-    await page.unroute(/\/api\/system(\/summary)?(\?|$)/);
 
     // ── #system/catalog redirects to Maintenance Inventory (ADR-0048) ──
     await page.evaluate(() => { location.hash = '#system/catalog'; });
@@ -3518,8 +3310,6 @@ async function main() {
         text: el?.textContent.trim(),
         stale: el?.getAttribute('data-stale'),
         title: el?.getAttribute('title'),
-        rescanDisabled: document.getElementById('sys-rescan')?.disabled,
-        fullScanLabel: document.getElementById('sys-rescan')?.innerText,
         live: el?.getAttribute('aria-live'),
       };
     });
@@ -3528,27 +3318,11 @@ async function main() {
       `the freshness label read ${JSON.stringify(freshness)} — the snapshot is nine days old`);
     check('past the staleness horizon the label nudges without scanning',
       freshness.stale === '1' && /stale/i.test(String(freshness.text))
-        && freshness.rescanDisabled === false && /Full scan/.test(String(freshness.fullScanLabel))
         && freshness.live === 'polite',
       `staleness presentation was ${JSON.stringify(freshness)}`);
     check('opening System never starts a deep scan',
       systemDeepScans === 0,
       `${systemDeepScans} deep scan(s) had already run after opening the area and all five views`);
-
-    const deepResponse = page.waitForResponse(
-      (r) => r.url().includes('/api/system') && r.url().includes('refresh=deep'),
-      { timeout: 8000 },
-    ).catch(() => null);
-    await page.click('#sys-rescan');
-    await deepResponse;
-    await page.waitForTimeout(200);
-    check('Rescan is the only thing that starts a deep scan, and it starts exactly one',
-      systemDeepScans === 1,
-      `the collector saw ${systemDeepScans} deep scan(s) after one Rescan click`);
-    await page.waitForTimeout(50);
-    check('a successful deep System rescan refreshes Maintenance provider evidence once',
-      chainedMaintenanceScans === 1,
-      `the Maintenance service saw ${chainedMaintenanceScans} scan(s)`);
 
     // ── Observability: execution workspace + synchronized evidence ──
     await page.click('[data-tab="observability"]');
@@ -5770,6 +5544,58 @@ async function main() {
     const c2 = await readCollapse();
     check('and survives a reload rather than snapping back to the default',
       c2.expanded === 'true' && c2.hidden === false, JSON.stringify(c2));
+
+    // Refresh is the only route that starts checks. Its stage state is server authored.
+    check('idle dashboard requested no refresh state or operation', refreshRequests.length === 0,
+      JSON.stringify(refreshRequests));
+    await page.click('#tab-system');
+    await page.click('[data-system-view="maintenance"]');
+    await page.click('[data-mnt-dest="guidance"]');
+    await page.waitForSelector('[data-mnt-plan-plc]');
+    const stageRelease = new Map();
+    for (const id of ['maintenance', 'inventory', 'local']) {
+      refreshStageGates.set(id, new Promise((resolve) => stageRelease.set(id, resolve)));
+    }
+    const statusReadsBefore = statusRequests.length;
+    await page.click('#refresh-run');
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent.includes('Refreshing Maintenance evidence'));
+    check('Refresh starts exactly one local POST', refreshRequests.filter((r) => r.method === 'POST').length === 1
+      && JSON.stringify(refreshRequests.find((r) => r.method === 'POST')?.body) === JSON.stringify({ strength: 'local' }));
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === true);
+    check('Maintenance Apply is disabled during Refresh', await page.locator('[data-mnt-plan-plc]').first().isDisabled());
+    for (const [id, label] of [['maintenance', 'Rebuilding the inventory'], ['inventory', 'Re-checking local evidence and versions']]) {
+      stageRelease.get(id)();
+      await page.waitForFunction((text) => document.getElementById('refresh-status')?.textContent.includes(text), label);
+    }
+    stageRelease.get('local')();
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.');
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
+    check('Maintenance Apply is restored after Refresh', await page.locator('[data-mnt-plan-plc]').first().isEnabled());
+    await page.waitForTimeout(200);
+    check('Refresh re-reads the view and host readiness after completion', statusRequests.length > statusReadsBefore);
+    await page.selectOption('#refresh-strength', 'machine');
+    await page.check('#refresh-project-trees');
+    await page.click('#refresh-run');
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.');
+    check('machine Refresh carries the project tree scope', refreshRequests.filter((r) => r.method === 'POST').length === 2
+      && JSON.stringify(refreshRequests.filter((r) => r.method === 'POST')[1].body) === JSON.stringify({ strength: 'machine', projectTrees: true }));
+    const postCount = refreshRequests.filter((r) => r.method === 'POST').length;
+    await page.click('#poll-now');
+    await page.waitForTimeout(150);
+    check('Reload starts no checks', refreshRequests.filter((r) => r.method === 'POST').length === postCount);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+    await page.screenshot({ path: path.join(SHOTS, 'refresh-header-light-390.png'), animations: 'disabled' });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    await page.screenshot({ path: path.join(SHOTS, 'refresh-header-dark-390.png'), animations: 'disabled' });
+    check('Refresh header fits at 390px in light and dark themes',
+      await page.evaluate(() => {
+        const header = document.querySelector('.band');
+        const refresh = document.querySelector('.refresh-control');
+        return header.getBoundingClientRect().right <= globalThis.innerWidth
+          && refresh.getBoundingClientRect().right <= globalThis.innerWidth;
+      }));
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does

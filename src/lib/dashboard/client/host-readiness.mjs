@@ -1,6 +1,7 @@
 // @ts-nocheck — browser bundle source; assembled by ../client.mjs.
 import { esc, authHeaders } from './bootstrap.mjs';
 import { sourceHostIcon } from './usage.mjs';
+import { startRefresh, refreshRunning } from './refresh-control.mjs';
 
 var HEALTH_REPORT=null, HEALTH_HOST=null, HEALTH_BUSY=false, HEALTH_BUSY_HOST=null, HEALTH_ACK=null;
 var HEALTH_NAMES={claude:'Claude Code',codex:'Codex',opencode:'OpenCode'};
@@ -123,7 +124,7 @@ function renderHealthDialog(){
   if(!row||HEALTH_ACK!==row.evidenceKey){consent.checked=false;HEALTH_ACK=null;}
   consent.disabled=HEALTH_BUSY||!row||!row.canCheckConnection;
   document.getElementById('host-health-connect').disabled=HEALTH_BUSY||!row||!row.canCheckConnection||!consent.checked;
-  document.getElementById('host-health-refresh').disabled=HEALTH_BUSY;
+  document.getElementById('host-health-run-refresh').disabled=HEALTH_BUSY||refreshRunning();
 }
 
 async function runHealthCheck(connected){
@@ -175,7 +176,7 @@ export function wireHostHealth(){
     var button=region.querySelector('[data-health-host="'+HEALTH_HOST+'"]');if(button)button.focus();
   });
   document.getElementById('host-health-consent').addEventListener('change',function(event){HEALTH_ACK=event.target.checked&&healthRow()?healthRow().evidenceKey:null;renderHealthDialog();});
-  document.getElementById('host-health-refresh').addEventListener('click',function(){runHealthCheck(false);});
+  document.getElementById('host-health-run-refresh').addEventListener('click',function(){startRefresh('local');});
   document.getElementById('host-health-connect').addEventListener('click',function(){runHealthCheck(true);});
   dialog.addEventListener('click',function(event){
     var button=event.target.closest('[data-copy]');
