@@ -85,6 +85,23 @@ test('SUITES keeps the exact commands package.json ran before', async () => {
   assert.equal(pkg.scripts['test:ui'], 'node scripts/run-tests.mjs ui');
 });
 
+test('coverage is enabled by default for the complete unit suite', async () => {
+  const { commandsFor, SUITES } = await import('../../scripts/run-tests.mjs');
+  assert.deepEqual(commandsFor('unit', {}), SUITES.unit);
+});
+
+test('the explicit CI opt-out removes coverage flags but keeps every test command', async () => {
+  const { commandsFor, SUITES } = await import('../../scripts/run-tests.mjs');
+  const commands = commandsFor('unit', { AK_TEST_COVERAGE: '0' });
+  assert.deepEqual(commands[0], ['--test', 'tests/kit/*.test.mjs']);
+  assert.deepEqual(commands.slice(1), SUITES.unit.slice(1));
+});
+
+test('an unrecognized coverage value retains the coverage gate', async () => {
+  const { commandsFor, SUITES } = await import('../../scripts/run-tests.mjs');
+  assert.deepEqual(commandsFor('unit', { AK_TEST_COVERAGE: 'false' }), SUITES.unit);
+});
+
 test('a leftover temp folder fails the run and is named', (t) => {
   const { home, repo, env } = sandbox(t);
   const leaky = stub(home, 'leaky.mjs', `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';

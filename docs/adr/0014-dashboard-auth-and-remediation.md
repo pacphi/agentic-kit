@@ -2,7 +2,8 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-28
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-28 — CI runs the full test matrix but collects coverage on Ubuntu/Node 24; local coverage remains the default
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-08-04
 - **Earlier update:** 2026-09-03 — ADR-0044 implements a Maintenance-only POST extension with one-use,
   plan-bound action capabilities. Every other dashboard route retains the non-GET rejection.
@@ -121,9 +122,11 @@ Found by the same audit, fixed in the same remediation pass:
   dispatch tables were plain object literals, so `cmd in table` resolved
   `Object.prototype` members as legitimate commands. Both tables are now
   `Object.create(null)`-based.
-- **Coverage instrumentation.** `pnpm test` now runs with
+- **Coverage instrumentation.** `pnpm test` runs by default with
   `--experimental-test-coverage` and enforced floors (70% lines/branches/functions on
   the `tests/kit/*.test.mjs` suite) — a zero-dependency Node built-in, no new tooling.
+  CI runs all tests on every OS/Node leg, setting `AK_TEST_COVERAGE=0` on eight
+  legs and keeping the coverage gate on Ubuntu/Node 24.
 - **Flaky-sleep tests.** ~10 hardcoded `setTimeout` waits in the live-transcript/
   live-service tests (a 35ms sleep against a 10ms tailer interval — 3.5 ticks of
   margin) replaced with condition-polling (`tests/kit/helpers/wait-until.mjs`), except

@@ -37,6 +37,9 @@ jobs:
 
       # Zero runtime dependencies — no install step by design.
       - name: Unit + statusline tests
+        env:
+          # Every leg runs the full suite; Ubuntu/Node 24 owns the coverage gate.
+          AK_TEST_COVERAGE: ${{ matrix.os == 'ubuntu-latest' && matrix.node == 24 && '1' || '0' }}
         run: pnpm test
 
       # Explicit guard: every dispatchable command must ship a --help/Examples
