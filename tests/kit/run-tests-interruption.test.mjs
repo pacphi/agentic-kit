@@ -25,6 +25,11 @@ function roots(parent) {
   return fs.readdirSync(parent).filter((name) => /^ak-suite-[A-Za-z0-9]{6}$/.test(name)).sort();
 }
 
+function childGone(pid) {
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return error.code === 'ESRCH'; }
+}
+
 function runnerFor(repo, script, handshake, stop, done, env, log) {
   const fd = fs.openSync(log, 'w');
   try {
@@ -50,7 +55,10 @@ test('interrupted and live sibling roots stay listed, including after the orphan
     const [handshake, stop, done] = process.argv.slice(2);
     fs.writeFileSync(handshake, JSON.stringify({ pid: process.pid, cwd: process.cwd(), tmpdir: process.env.TMPDIR }));
     const timer = setInterval(() => {
-      if (fs.existsSync(stop)) { fs.writeFileSync(done, 'stopped'); clearInterval(timer); process.exit(0); }
+      if (!fs.existsSync(stop)) return;
+      const request = fs.readFileSync(stop, 'utf8');
+      if (!fs.existsSync(done)) fs.writeFileSync(done, 'stopped');
+      if (request === 'exit') { clearInterval(timer); process.exit(0); }
     }, 25);
     setTimeout(() => process.exit(8), 12000);`);
   const clean = path.join(home, 'clean.test.mjs');
@@ -91,6 +99,10 @@ test('interrupted and live sibling roots stay listed, including after the orphan
     assert.equal(liveData.tmpdir, root4);
     fs.writeFileSync(first[1], 'stop');
     await until(() => fs.existsSync(first[2]), 'orphan private stop acknowledgement');
+    assert.equal(childGone(firstData.pid), false, 'acknowledgement precedes child exit');
+    fs.writeFileSync(first[1], 'exit');
+    await until(() => childGone(firstData.pid), 'orphan PID absent after private exit request');
+    assert.equal(childGone(liveData.pid), false, 'concurrent child remains alive');
     const third = runFocus();
     assert.equal(third.status, 0, third.stdout + third.stderr);
     assert.match(third.stderr, /kept run root.*cannot prove complete descendant exit \(list-only\)/);
@@ -99,14 +111,20 @@ test('interrupted and live sibling roots stay listed, including after the orphan
     assert.ok(fs.existsSync(root4), 'concurrently live sibling remains');
   } finally {
     // Stop only children created by this fixture, through their private channels.
-    fs.writeFileSync(first[1], 'stop');
-    fs.writeFileSync(live[1], 'stop');
+    fs.writeFileSync(first[1], 'exit');
+    fs.writeFileSync(live[1], 'exit');
     if (runner1 && runner1.exitCode === null && runner1.signalCode === null) runner1.kill('SIGTERM');
     if (runner4 && runner4.exitCode === null && runner4.signalCode === null) {
       await until(() => runner4.exitCode !== null || runner4.signalCode !== null, 'live runner completion', 14000);
     }
-    if (fs.existsSync(first[0])) await until(() => fs.existsSync(first[2]), 'first child exit', 14000);
-    if (fs.existsSync(live[0])) await until(() => fs.existsSync(live[2]), 'live child exit', 14000);
+    if (fs.existsSync(first[0])) {
+      const { pid } = JSON.parse(fs.readFileSync(first[0], 'utf8'));
+      await until(() => childGone(pid), 'first child exit', 14000);
+    }
+    if (fs.existsSync(live[0])) {
+      const { pid } = JSON.parse(fs.readFileSync(live[0], 'utf8'));
+      await until(() => childGone(pid), 'live child exit', 14000);
+    }
   }
   // Only this test's disposable fixture root is removed after its child stops.
   assert.deepEqual(roots(parent), [path.basename(interruptedRoot)]);
