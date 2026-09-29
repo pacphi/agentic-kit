@@ -1,0 +1,549 @@
+# Maintainer's guide — `@pacphi/agentic-kit`
+
+Everything a repository owner or maintainer needs to develop, test, package, and
+release this kit. User-facing docs live in [README.md](../README.md); this file is the
+*inside* view.
+
+> **What this package is:** a zero-runtime-dependency, cross-platform CLI (`ak` /
+> `agentic-kit`) that installs, repairs, and runs scoped checks for a Ruflo + Agentic QE stack across
+> Claude Code, Codex, and opt-in OpenCode. It develops with **pnpm** but heals **npm-managed** global trees,
+> because that's how ruflo/agentic-qe land on target machines.
+
+---
+
+## 1. Architecture at a glance
+
+| Property | Value | Why it matters |
+|----------|-------|----------------|
+| Module system | **ESM only** (`.mjs`); `.cjs` used for shipped hook/statusline helpers and legacy tests | `"type": "module"` in `package.json` |
+| Runtime deps | **Zero** | Uses `node:` builtins only — `node:sqlite`, `node:test`, `node:util` (`parseArgs`), `node:child_process`, `node:fs`. Keeps installs instant and supply-chain surface tiny |
+| Node | **≥ 22** (`engines.node`) | `node:sqlite` is available unflagged from 22.13; use maintained patch releases. The manifest is broader than that effective floor. CI covers 22 / 24 / 26 |
+| Package manager (dev) | **pnpm** pinned via `packageManager: pnpm@11.17.0` | CI uses `pnpm/action-setup` which reads that field — don't drift it casually |
+| Package manager (target) | **npm** | The kit heals `npm root -g` trees; `lib/heal.mjs` shells `npm install -g` |
+| Version source of truth | `package.json` `version` **only** | `bin/agentic-kit.mjs --version` reads it at runtime; no version string is duplicated anywhere else in source |
+
+### CLI shape (`bin/agentic-kit.mjs`)
+
+- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `telemetry`, `models`, `system`,
+  `about`, `audit`, `heal`, `run`, `host`, `maintain`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
+  are also reachable under `ak x`.)
+- **Plumbing** (power users): `ak x admin | codex-context | daemon-gc | dashboard | harvest | host | mcp |
+  reference | skills | statusline | verify | improvement-eval`.
+- Each command module exports `options` (a `parseArgs` config) and `run({ flags, positionals, pkgRoot })`.
+- A best-effort drift nudge runs after non-`sync`, non-`--json` commands.
+
+---
+
+## 2. Repository layout
+
+```text
+bin/agentic-kit.mjs      # single entrypoint — arg parse + command dispatch (PORCELAIN/PLUMBING maps)
+src/
+  commands/              # porcelain verbs
+    setup.mjs  status.mjs  sync.mjs  run.mjs  maintain.mjs  uninstall.mjs
+    x/                   # plumbing verbs
+      admin.mjs  codex-context.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  host.mjs  mcp.mjs  reference.mjs  statusline.mjs  verify.mjs
+  lib/                   # the engine — each file is one concern
+    heal.mjs             # the mutations sync/setup apply (idempotent, {ok,detail})
+    natives.mjs          # better-sqlite3 / agentdb native detection
+    sqlite.mjs           # node:sqlite helpers (scalar, checkpoint, withDb)
+    versions.mjs         # installedVersion, driftReport, KIT_PKG
+    ruvnet-brain.mjs     # RuvNet Brain: on-disk detection + GitHub-release drift (NOT an npm pkg)
+    blocks.mjs           # managed-block registry + syncBlocks + guidanceTargets (enabled host-specific user/project targets; see guidanceTargets)
+    hosts.mjs            # host-adapter core: drivingHost() + HOST_ADAPTERS (guidance file, auth, statusline)
+    codex-statusline.mjs # owned presets + narrow ~/.codex/config.toml projection
+    providers.mjs        # frontier-host + LLM-provider detect/wire (hosts, auth, MCP bridges, aqe router)
+    routing.mjs          # pure dual-host routing policy: defaults, projections, primary-host swap
+    qeCourt.mjs          # qe-court vendor-diversity panel helpers
+    agentdb.mjs          # Ruflo's bundled agentdb version (read-only; ak installs no copy)
+    health-history.mjs   # regression ring appended by sync, read by status
+    dashboard-server.mjs # loopback dashboard: observations plus guarded Maintenance actions
+    admin-server.mjs     # maintainer admin: loopback server, per-session token auth, page assembly (ADR-0007)
+    admin-styles.mjs     # admin presentation: dashboard-aligned dark/light design tokens
+    admin-theme.mjs      # embedded theme controller; shares the dashboard preference key
+    admin-collect.mjs    # admin's server-side GitHub/npm fan-out → typed payload (injectable fetchers)
+    admin-model.mjs      # PURE admin number model — imports nothing; embedded in the page AND node-tested
+    admin-view.mjs       # admin browser controller (embedded into the page; not node-imported)
+    browser.mjs          # openInBrowser — shared by dashboard + admin
+    usage-index.mjs      # canonical usage aggregation by host, provider, model, project, and category
+    model-inventory/     # model evidence contracts, source adapters, snapshots, diffs, impact, read models
+    maintenance/         # findings, sealed plans, exact providers, receipts, recovery, and transaction journal
+    npx.mjs              # stale npx-cache detection/prune
+    mcp.mjs  settings.mjs  config.mjs  paths.mjs  statusline.mjs
+    rvf.mjs  daemons.mjs  exec.mjs  output.mjs
+  templates/statusline-footer.cjs   # injected into projects
+  tools/improvement-eval.mjs        # causal self-improvement eval (raw passthrough)
+claude/                  # skills + managed CLAUDE.md/AGENTS.md block templates (shipped)
+tests/
+  kit/*.test.mjs         # node:test unit suites
+  statusline-segments.test.cjs      # statusline renderer suite
+docs/
+  deja-vu.md             # managed companion lifecycle and privacy runbook (shipped)
+  dashboard.md           # local dashboard navigation, evidence, and guarded action surfaces (shipped)
+  host-support.md        # canonical host/Ruflo/AQE/Brain compatibility matrix (shipped)
+  installation.md        # package scope versus machine/user/project effects (shipped)
+  maintenance.md         # operator workflow, provider matrix, receipts, and recovery runbook (shipped)
+  models.md              # model lifecycle inventory and read-only planning guide (shipped)
+  providers.md           # provider and routing guide (shipped)
+  setup.md               # setup mutation contract (shipped)
+  troubleshooting.md     # symptom-to-fix runbook (shipped)
+  upgrading.md           # upgrade and capability-adoption motion (shipped)
+  archive/               # investigative history behind each guard (not shipped)
+.github/
+  workflows/{ci,release,nightly,devcontainers,pages}.yml
+  dependabot.yml
+```
+
+**Published tarball** = the `files` whitelist in `package.json`:
+`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/deja-vu.md`, `docs/dashboard.md`, `docs/host-support.md`, `docs/hooks.md`,
+`docs/installation.md`, `docs/models.md`, `docs/telemetry.md`, `docs/providers.md`, `docs/setup.md`, `docs/aqe-embeddings.md`,
+`docs/maintenance.md`, `docs/troubleshooting.md`, `docs/upgrading.md`, `docs/codex-statusline.md`,
+`docs/archive/2026-09-09-evidence-codex-context-0.153.4.md`,
+`docs/adr/0015-managed-codex-native-statusline.md`,
+`docs/adr/0032-model-lifecycle-intelligence.md`,
+`docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md`,
+`docs/adr/0043-managed-ruflo-browser-executor.md`,
+`docs/adr/0044-receipt-aware-maintenance-control-plane.md`,
+`docs/adr/0051-supported-peer-delegation-and-host-realignment.md`,
+`docs/adr/0054-fleet-evidence-export.md`, `docs/adr/0055-aqe-embedding-lifecycle.md`,
+`tests/live/aqe-external-provider-transport.test.mjs`,
+`tests/live/aqe-stop-hook-conformance.test.mjs`, `tests/live/aqe-codex-guidance-conformance.test.mjs`
+(opt-in AQE conformance: `pnpm test:aqe-stop-hook-live`, `pnpm test:aqe-codex-guidance-live`),
+`tests/live/qe-court-participant-transport.test.mjs` (with its helper
+`tests/live/disposable-memory-project.mjs`),
+`tests/live/codex-context-contract.test.mjs`, and
+`docs/ddd/maintenance.md`, `docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
+the shipped source trees is explicitly excluded. Nothing else ships — verify with
+`npm pack --dry-run` before a release if you touch `files`.
+
+**Multi-host routing subsystem** (the `providers`/`routing` cluster): durable intent is
+split between `integrations.hosts` (which hosts are enabled) and top-level `routing`
+(`version`, `primaryHost`, and the per-activity `routes`). `routing.mjs` is pure
+(defaults, primary-host mirroring, validation, and projections to AQE
+`agentOverrides` and `ak run`); `providers.mjs` does the I/O (host/auth detection,
+environment wiring, Codex's independent Ruflo integration, legacy MCP retirement, and the AQE
+router file). Seeded/healed by
+`setup` + `sync` + `x host pick`, surfaced by `status` + `dashboard`. Design records:
+ADRs [0001–0006](adr/); user guide: `docs/providers.md`.
+
+**Status-line capability is host-specific.** Claude owns a project-scoped,
+command-backed renderer; Codex offers a user-scoped, built-in field list.
+`ak x statusline codex native|extended` explicitly opts the user into management
+of only `tui.status_line` and `tui.status_line_use_colors`; `sync` must not touch
+those keys without that ownership record. The textual TOML merge is
+backup-first and must preserve unknown keys, comments, ordering, and newline
+style. `off` and uninstall remove each key only if its managed value is
+unchanged. See
+[the Codex status-line guide](codex-statusline.md) and
+[ADR-0015](adr/0015-managed-codex-native-statusline.md).
+
+> The consistency contract all managed tools share — install/update/version/display
+> invariants, the per-tool table, and the add-a-tool checklist — lives in
+> [docs/managed-tools.md](managed-tools.md). The notes below are the
+> brain-specific details behind that contract.
+
+**RuvNet Brain is the odd one out.** ruflo/agentic-qe/the host CLIs are global npm
+packages: detected via `installedVersion` (npm global root) and drift-checked with
+`npm view`. The RuvNet Brain is *not* — `npx ruvnet-brain@latest` (the **published**
+installer; never `github:`, which runs the unreleased default-branch HEAD) installs a
+~2 GB offline KB to `~/.cache/ruvnet-brain/kb` (override `$RUVNET_BRAIN_KB`) and a
+user-scope Claude Code plugin (the `search_ruvnet` MCP + hooks + a skill). So it gets a
+*parallel* lifecycle in `src/lib/ruvnet-brain.mjs`: `present()` probes disk,
+`latestVersion()`/`drift()` hit the GitHub releases API (TTL-cached in kit.json like
+`selfDrift`). setup/sync go through `heal.installRuvnetBrain()`, which chooses the path
+from disk: when the KB ships its own updater (`kb/forge-update.mjs`) it runs
+`--update --no-nightly-prompt --no-telemetry` with `RUVNET_BRAIN_NO_UPDATE_FALLBACK=1`
+(the installer's fallback is a fresh `--force` install without ak's opt-out flags); a
+present bundle without the updater gets a `--version v<tag>`-pinned `--force` reinstall;
+nothing installed gets a pinned fresh install. `--update` ignores `--version`, so every
+path stamps only the release it then observes on disk (`SOURCE.json` → `releaseTag`); an
+update that exits 0 with the release unchanged is `degraded` and stamps nothing.
+Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
+
+> **Installer flag gotcha — `--yes` accepts *every* optional offer.** Audited live on the
+> v3.3.1 installer (2026-07-17): under `--yes` it silently enables a nightly self-update
+> LaunchAgent (`com.ruvnet.brain-update`, macOS, 03:47 — runs the bundle's
+> `forge-update.mjs --apply`, which at v3.3.1 applies downloads **without signature
+> verification**), writes telemetry consent, installs a spend-watchdog agent, and
+> materializes model-router files. Hence `INSTALL_ARGS` carries FOUR suppression flags:
+> `--no-stack --no-enhance` (ak manages ruflo/RuVector + the CLAUDE.md block) and
+> `--no-nightly-prompt --no-telemetry` (ak owns updates; consent stays the user's).
+> The nightly self-updater bypasses ak-managed updates, so `ak status` flags an existing
+> agent as its own subsystem (`ruvnet-brain-nightly`) and `ak sync` disables it
+> (`heal.disableRuvnetBrainNightly()`: `launchctl bootout` + plist removal — both steps,
+> mirroring the installer's own `--disable-nightly`). Deliberate re-enrollment
+> (`npx ruvnet-brain --enable-nightly`) gets re-flagged; opt ak out entirely with
+> `ruvnetBrain:false`. The spend watchdog and telemetry consent of already-affected
+> machines are left alone on purpose — local-only / a recorded user answer.
+>
+> **Version gotcha — three unrelated namespaces.** The plugin semver (`plugin.json`, e.g.
+> `0.5.0-dev`), the KB bundle's `brainVersion` (e.g. `v0.3.0-dev`), and the GitHub **release
+> tags** the installer downloads by (e.g. `v3.3.1`) are all different tracks. Evergreen-era
+> release bundles stamp the release tag **on disk** (`SOURCE.json` → `releaseTag`), so the
+> installed side resolves disk-first: `installedReleaseOnDisk()`, then **ak's own record**
+> of the release it last pulled (`kit.json` → `versionCheck.ruvnetBrain.installedRelease`,
+> written by `recordInstalledRelease()` after a successful install) for pre-stamping
+> bundles. The statusline footer mirrors the same order, and the dashboard's update
+> banner folds the brain in from the same `drift()` result (`foldBrainDrift()` in
+> dashboard-server.mjs — driftReport only carries npm tools; the kit's own
+> `selfDrift` is folded the same way), so `ak status`, the footer, and the
+> displays share version logic, while different capture/cache times can still disagree.
+> `classifyDrift()` compares that resolved value vs `releases/latest` —
+> same namespace, so it converges. A present-but-unstamped install (manual / pre-existing)
+> surfaces as outdated once, so `ak sync` pulls it onto the managed track. Do **not**
+> compare `installedVersion()` (plugin semver) against a release tag — that was the
+> original bug and it can never converge.
+
+### Dogfooding artifacts are NOT source
+
+Running `ruflo init` / `aqe init` against *this* repo writes `.agentic-qe/`,
+`.claude/`, `.claude-flow/`, `.swarm/`, `.mcp.json`, `*.db`, `*.rvf`, `ruvector.db`.
+All are `.gitignore`d. **Never commit them.** If you see them staged, something
+generated them in-tree. The one authored exception is the `upstream-status` maintainer
+skill, tracked at `.claude/skills/upstream-status/` and `.agents/skills/upstream-status/`.
+
+---
+
+## 3. Local development
+
+```bash
+pnpm install                      # dev only; repo is zero-dependency so this is tiny
+node bin/agentic-kit.mjs --help --all
+node bin/agentic-kit.mjs status --json     # exercise a command directly
+
+# Optional: link the CLI globally to dogfood `ak` end-to-end
+npm link                          # then `ak status`, `ak setup`, …  (npm, not pnpm, to match target)
+```
+
+There is no compilation step: source runs as-is. `pnpm run build` performs syntax,
+CLI-load, and package-manifest checks; it does not produce a compiled application.
+Edit a file under `src/`, re-run the CLI, done.
+
+### House conventions
+
+- Output goes through `src/lib/output.mjs` (`ok`/`warn`/`fail`/`info`/`heading`/`bold`/`dim`) — never raw `console.log` for status lines, so formatting stays consistent.
+- Heal actions in `lib/heal.mjs` return `{ ok, detail }` and **must be idempotent** (they run on every `sync`).
+- Keep files focused and under ~500 lines; one concern per `lib/` file.
+- Validate at boundaries; degrade gracefully when ruflo/aqe aren't installed (`status` must still emit valid JSON — CI asserts this).
+
+---
+
+## 4. Testing
+
+```bash
+pnpm test        # coverage-enforced unit + renderer/server suites
+pnpm run check   # local static/build/unit gate
+pnpm run test:ui # browser checks (separate from check)
+pnpm run lint:links:internal # requires lychee
+```
+
+- `tests/kit/*.test.mjs` — the broad `node:test` suite, run with 70% line, branch, and
+  function coverage floors.
+- Seven `.cjs` suites exercise statusline rendering, Brain display, health history,
+  dashboard, and admin behavior.
+- `pnpm run build` validates the CLI load and dry-run package manifest, including
+  forbidden generated/private paths.
+
+Run one suite while iterating: `node --test tests/kit/versions.test.mjs`.
+
+`pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`, a guard around the
+suite. It fingerprints real user state (ak's config and state folders, the Claude Code, Codex
+CLI and OpenCode files ak writes in their homes, this repository's root `CLAUDE.md`, `AGENTS.md`
+and `.mcp.json`, and its `.claude`, `.swarm`, `.agentic-qe`, `.claude-flow` and `.harness`)
+before and after the run, and points `TMPDIR`/`TEMP`/`TMP` at a fresh
+`ak-suite-*` folder. Its exit code tells you what went wrong:
+
+| Exit | Meaning |
+| ---- | ------- |
+| the failing command's code | a test command failed (the after-check still runs) |
+| 2 | the `ak-suite-*` folder is inside a git repository; point `TMPDIR` elsewhere |
+| 3 | real user state changed; the changed paths are listed |
+| 4 | the run left temporary folders behind; they are listed |
+
+Files a live Claude Code, Ruflo or AQE session writes during the run are listed as
+concurrent writers and do not fail a local run; CI, or `AK_TRIPWIRE_STRICT=1`, fails on
+them too. Guard a single command the same way with
+`node scripts/run-tests.mjs exec -- <node args>`.
+
+Inside the suite, isolation comes from shared helpers:
+
+- `sandboxHome()` (`tests/kit/helpers/home-sandbox.mjs`) redirects every home-relative
+  path for tests that run machine-mutating commands in process.
+- `spawnEnv()` (same file) builds the environment for every spawned child, with all
+  per-user bases inside a sandbox home. `tests/kit/spawn-env-guard.test.mjs` fails on a
+  line that spreads `process.env` and on a `child_process` call with no `env` option (an
+  implicit inherit), unless the line carries `spawn-env: inherits (<reason>)`. It reads
+  source text: a call whose options object is built elsewhere needs the marker, and a call
+  through a local wrapper function is not seen. On Windows `spawnEnv()` matches variable
+  names case-insensitively and keeps the parent's spelling (the search path is usually
+  `Path`), so read a value from its result with `envValue()`.
+- `launchChrome()` (`tests/ui/helpers/launch-chrome.mjs`) starts the system Chrome for UI
+  tests with `TMPDIR`, `TEMP`, `TMP` and `MAC_CHROMIUM_TMPDIR` pointed at its own folder, and
+  removes that folder on `browser.close()`. Chrome leaves
+  `com.google.Chrome.chrome_chrome_url_fetcher_.*` folders in its temp dir, which on Linux
+  would otherwise fail the runner's leftover check. `tests/kit/ui-chrome-launch.test.mjs`
+  fails on a UI test that calls `chromium.launch` directly.
+- `redirectToolState()` (same file) moves the config, state, data, cache and temp bases for
+  in-process tests whose code under test spawns real tools such as OpenCode.
+- `tempDir()` (`tests/kit/helpers/temp-dir.mjs`) makes temporary folders that are removed
+  when the test (or the file) finishes.
+- `isolateProject()` (`tests/kit/helpers/project-isolation.mjs`) covers commands that write
+  relative to the current directory: any test file that calls `sync.run`, `setup.run*` or
+  `uninstall.run` calls it once at module scope. It moves the file into a throwaway project
+  and fails the file if the real repository's project files change.
+  `tests/kit/project-isolation.test.mjs` fails when a new test file skips it. A live Claude
+  Code or Ruflo session that edits those files in the same checkout also trips this guard;
+  rerun with the session idle.
+
+[AGENTS.md](../AGENTS.md#testing) has the exact list of watched paths.
+
+CI additionally runs a **CLI smoke** against a sandboxed `HOME` (see `ci.yml`):
+`--version`, `--help --all`, `status --json` (asserts valid JSON + `overall`),
+`x reference sync` (asserts managed blocks present), `uninstall --dry-run`. If you
+change CLI output shape, expect the smoke to catch it.
+
+Two further workflows cover surfaces `ci.yml` doesn't:
+
+- **`devcontainers.yml`** builds and smoke-tests both dev container configs with
+  the reference `devcontainer` CLI — on PRs touching what each config depends on
+  (a `dorny/paths-filter` job scopes the maintainer and consumer jobs
+  independently) and monthly, to catch base-image or published-package drift with
+  no repo change. Guide: [docs/devcontainers.md](devcontainers.md).
+- **`pages.yml`** publishes `docs/explainer.html` as the GitHub Pages site
+  (<https://pacphi.github.io/agentic-kit/>): on any push to `main` touching that
+  file, it stages it as `index.html` and deploys. Pages source is "GitHub
+  Actions" (`build_type: workflow`) — there is no `gh-pages` branch, and the
+  file on `main` is the single source of truth.
+
+---
+
+## 5. Branching methodology
+
+- **Default branch:** `main`. CI runs on every push; release readiness still requires the relevant
+  source/artifact and authorization gates.
+- Use a branch and PR for changes, including documentation. Historical direct-to-main
+  commits are not standing authorization for new direct pushes.
+- **Features and non-trivial fixes** go through a **short-lived branch → PR →
+  squash-merge** with the PR number appended to the subject, e.g.
+  `fix(setup): … (#20)`, `feat(sync): … (#18)`. GitHub auto-deletes the branch on
+  merge; prune stale local refs with `git remote prune origin`.
+- **Commit convention:** Conventional Commits — `feat` / `fix` / `docs` / `chore` /
+  `release`. Release commits are exactly `release: vX.Y.Z`.
+- **No `Co-Authored-By` trailers** on commits (repo history is clean of them; the
+  tool is a facilitator, not an author).
+
+Typical feature flow:
+
+```bash
+git checkout -b feat/thing            # off main
+# … work, with `pnpm test` green …
+git push -u origin feat/thing
+gh pr create --fill                   # or --web
+gh pr merge --squash --delete-branch  # after CI passes
+git checkout main && git pull --ff-only
+```
+
+---
+
+## 6. Versioning (SemVer)
+
+`package.json` `version` is the single source of truth. The npm dist-tag is chosen
+**by the shape of the version string** in `release.yml`:
+
+| Version | Example | dist-tag | Meaning |
+|---------|---------|----------|---------|
+| Prerelease (`-…`) | `4.0.0-alpha.4` | **`next`** | Alpha/beta channel. `ak sync` on a prerelease install tracks `next` *and* `latest` |
+| Stable | `4.0.1` | **`latest`** | GA. Stable installs only ever follow `latest` |
+
+Bump rules while in the `4.0.0` alpha line:
+
+- Bug fix or docs → `-alpha.N` → `-alpha.(N+1)`.
+- Feature-complete / stabilizing → graduate to `-beta.0`.
+- Ship 4.0 → drop the prerelease suffix → `4.0.0` (goes to `latest`).
+
+No feature or breaking change is implied by an alpha bump — those are still 4.0.0.
+
+---
+
+## 7. Release & publish
+
+Publishing is driven **entirely by pushing a `v*` tag**. `release.yml` re-runs the
+test gate, enforces `tag == package.json version`, and `pnpm publish`es with npm
+provenance. There is no manual `npm publish` step — and you should never run one.
+
+After a successful publish, the workflow's `github-release` job **automatically
+creates the matching GitHub Release** with auto-generated notes. Prereleases are
+flagged `--prerelease` (excluded from `releases/latest`); stable versions are
+marked `--latest` — the same version-shape split as the npm dist-tag. No manual
+`gh release create` step exists anymore.
+
+### Checklist
+
+```bash
+# 0. Be on an up-to-date main with the release contents already merged.
+git checkout main && git pull --ff-only
+pnpm test                                   # must be green — CI will re-check anyway
+
+# 1. Bump the version (edit package.json — the ONLY place it lives).
+#    e.g. 4.0.0-alpha.4 -> 4.0.0-alpha.5
+
+# 2. Sanity-check the CLI reports the new version.
+node bin/agentic-kit.mjs --version          # -> 4.0.0-alpha.5
+
+# 3. Commit with the release convention and push main.
+git commit -am "release: v4.0.0-alpha.5"
+git push origin main
+
+# 4. Tag (annotated) to match EXACTLY, and push the tag — this is the deploy trigger.
+git tag -a v4.0.0-alpha.5 -m "v4.0.0-alpha.5"
+git push origin v4.0.0-alpha.5
+
+# 5. Watch the publish.
+gh run list --workflow=release.yml --limit 1
+gh run watch "$(gh run list --workflow=release.yml -L1 --json databaseId -q '.[0].databaseId')" --exit-status
+
+# 6. Verify it landed on the right dist-tag.
+npm dist-tag ls @pacphi/agentic-kit
+npm view @pacphi/agentic-kit@4.0.0-alpha.5 version dist.tarball
+
+# 7. Confirm the GitHub Release object was created (automatic, after publish).
+gh release view v4.0.0-alpha.5 --json tagName,isPrerelease
+```
+
+**The tag↔version guard is unforgiving:** if the tag name and `package.json`
+version don't match, `release.yml` fails before publishing. That's the safety net —
+if a release run fails on the guard, you tagged the wrong string.
+
+### Requirements for publishing to work
+
+- The current workflow supplies `NPM_TOKEN` as `NODE_AUTH_TOKEN`. Configure a valid
+  package-scoped granular token with the required publish/2FA capability and expiry.
+  Secret presence and validity must be checked by the release owner; they are not
+  guaranteed by this checkout. See [npm CI authentication](https://docs.npmjs.com/using-private-packages-in-a-ci-cd-workflow/).
+  Trusted publishing is an alternative design, not the authentication this workflow configures.
+- `release.yml` has `id-token: write` for provenance attestation — keep it.
+
+### If a release goes wrong
+
+- **Failed on the guard / tests:** the package was NOT published. Fix, then move the
+  tag (`git tag -d vX && git push origin :vX`, correct, re-tag, re-push) or cut the
+  next patch.
+- **Published a bad version:** don't try to re-publish the same version (npm forbids
+  it). Publish a superseding version. Use `npm deprecate @pacphi/agentic-kit@X "…"`
+  to warn installers; `npm unpublish` is a last resort and time-limited by npm policy.
+- **Wrong dist-tag:** `npm dist-tag add @pacphi/agentic-kit@X next` / `… latest` to
+  correct it without republishing.
+
+---
+
+## 8. GitHub workflow automation
+
+| Workflow | Trigger | What it does | Gate? |
+|----------|---------|--------------|-------|
+| **`ci.yml`** | push to `main`/`npm-kit`, any PR, `workflow_dispatch` | Matrix **3 OS × 3 Node** (ubuntu/macos/windows × 22/24/26): `pnpm test` + CLI smoke against a sandboxed `HOME` | PR merge signal |
+| **`release.yml`** | push tag `v*` | Test gate → **tag↔version guard** → `pnpm publish --provenance` (prerelease→`next`, stable→`latest`) → **GitHub Release** with generated notes (prerelease-flagged by version shape) | **Publishes** |
+| **`nightly.yml`** | cron `17 6 * * *` (06:17 UTC), `workflow_dispatch` | Installs the **real latest** ruflo + agentic-qe via `npm -g`, runs `ak sync --no-upgrade` + deep proofs; fails on upstream drift in `natives`/`security` | Upstream-drift alarm |
+| **`dependabot.yml`** | weekly, Monday | Grouped bumps: `github-actions` (keeps action majors current) + `npm` (watchdog even though repo is zero-dep) | Opens PRs |
+
+Notes:
+
+- `release.yml` is **independent of `ci.yml`** — it runs its own test gate on the
+  tagged commit. A green `main` CI is reassurance, not a precondition for release.
+- Every job stops after **30 minutes** (`timeout-minutes: 30`); the upstream-watch jobs
+  use shorter limits (15 and 20). The Windows test legs are the slowest and usually
+  finish in under 20 minutes, so a job that reaches the limit is stuck, not slow.
+- A nightly failure may be upstream drift, a runner/network problem, or a kit defect.
+  Inspect the failing step and captured evidence before assigning a cause.
+- Dependabot PRs carry `dependencies` (+ `ci`) labels; merge like any PR after CI.
+
+---
+
+## 9. `gh` CLI cookbook (by use case)
+
+### Releases / publishing
+
+```bash
+gh run list --workflow=release.yml --limit 5          # recent publish runs
+gh run watch <run-id> --exit-status                   # follow one to completion
+gh run view <run-id> --log-failed                     # why a publish failed
+```
+
+### CI
+
+```bash
+gh workflow run ci.yml                                # manual matrix run (workflow_dispatch)
+gh run list --workflow=ci.yml --branch main --limit 5
+gh run rerun <run-id> --failed                        # re-run only failed jobs
+```
+
+### Nightly upstream-drift probe
+
+```bash
+gh workflow run nightly.yml                           # force a live-drift check now
+gh run list --workflow=nightly.yml --limit 3
+```
+
+### Upstream watch
+
+```bash
+node scripts/upstream-watch.mjs report                     # counts, last run, then action items with links
+node scripts/upstream-watch.mjs check --since 2026-09-26   # ledger lines for activity since then
+node scripts/upstream-watch.mjs record --dry-run           # what the daily workflow would record, notify and fire
+node scripts/upstream-watch.mjs ledger --since 2026-09-26  # recorded events dated since then
+node scripts/upstream-watch.mjs ledger --recorded-since 2026-09-26T14:17:00Z  # what the runs since then recorded
+gh workflow run upstream-watch.yml -f record=false         # run the daily workflow now, summary only
+```
+
+`report`, `check` and `ledger` only read. `record` fires the dispatch routine when a fix is
+released and builds a local ledger commit, which the `upstream-watch` workflow pushes to the
+`upstream-watch-ledger` branch daily, commenting on it when something needs you. The registry,
+lifecycle, ledger, workflow and dispatch routine are in [upstream-watch.md](upstream-watch.md).
+
+### Pull requests
+
+```bash
+gh pr create --fill                                   # open PR from current branch
+gh pr checks                                          # CI status for the PR
+gh pr merge --squash --delete-branch                  # standard merge
+gh pr list --label dependencies                       # pending Dependabot PRs
+```
+
+### Repo config / secrets
+
+```bash
+gh secret list                                        # confirm NPM_TOKEN present
+gh secret set NPM_TOKEN                               # rotate the publish token
+gh repo view --web                                    # open on GitHub
+```
+
+### GitHub Releases (automated)
+
+Every tag push that publishes successfully also creates the GitHub Release
+automatically (`github-release` job in `release.yml`). Manual `gh release`
+commands are only for inspection or repair:
+
+```bash
+gh release view v4.0.0-alpha.5                        # inspect one
+gh release list --limit 10                            # recent ledger
+# Backfill/repair only — notes bounded to exactly one release:
+gh release create vX --verify-tag --prerelease --generate-notes --notes-start-tag vW
+```
+
+Note: `--generate-notes` diffs against the **previous Release object**, not the
+previous tag — a missing Release corrupts the next one's notes window, which is
+why the ledger must stay gap-free (history was backfilled 2026-07-24).
+
+---
+
+## 10. Quick reference
+
+| I want to… | Do this |
+|------------|---------|
+| Run local validation | `pnpm run check`, `pnpm run test:ui`, and `pnpm run lint:links:internal`; CI additionally runs the OS/Node matrix |
+| Try the CLI locally | `node bin/agentic-kit.mjs <cmd>` |
+| Cut a release | Bump `package.json` → `release: vX` commit → push `main` → push `vX` tag |
+| See why a publish failed | `gh run view <id> --log-failed` |
+| Force an upstream-drift check | `gh workflow run nightly.yml` |
+| Confirm what npm sees | `npm dist-tag ls @pacphi/agentic-kit` |
+| Clean merged branch references | `git fetch --prune` removes stale remote-tracking refs; inspect then delete the local branch separately (`git branch -d <branch>`, or deliberate `-D` after verifying a squash merge) |
+| Verify the published tarball contents | `npm pack --dry-run` |

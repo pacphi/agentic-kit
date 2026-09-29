@@ -940,7 +940,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     }).join(""):'<div class="empty">no models in window.</div>';
     // Dropped-connection / rate-limit / auth-failure turns never resolve to a
     // model — excluded from this list entirely rather than shown as a $0 row
-    // (see docs/USAGE-SCORECARD-METRICS.md §10). Surfaced here instead, only
+    // (see docs/usage-scorecard-metrics.md §10). Surfaced here instead, only
     // when nonzero, so they stay visible rather than silently vanishing.
     // On its own line (.n-sub), so no leading separator — a "·" would read as a
     // continuation of the caption above rather than the start of a new fact.

@@ -181,7 +181,7 @@ archaeology:
 Everything needed is already locally readable at trust boundaries the kit already crosses:
 
 - the install trees it manages and their install methods
-  ([MANAGED-TOOLS.md](../MANAGED-TOOLS.md); npm/mise/brew awareness already exists for drift
+  ([managed-tools.md](../managed-tools.md); npm/mise/brew awareness already exists for drift
   reporting);
 - the current-user, argv-minimized process survey Observability already runs
   (`src/lib/live/process-sessions.mjs`, hardened under
@@ -599,12 +599,12 @@ All complete:
 ## References
 
 - [Machine footprint domain](../ddd/machine-footprint.md) — the domain model and invariants
-- [Design mock-up](../assets/system-tab-mock.html) — a self-contained, both-theme HTML mock of
+- [Design mock-up](../archive/2026-08-08-artifact-system-tab-mock.html) — a self-contained, both-theme HTML mock of
   the System area with illustrative data: per-metric chart forms (odometer KPIs, radial disk
   gauge, donut, stacked bars, small-multiple growth areas, radar, presence matrix, composed
   project bars), each card annotated with its form choice and rationale
-- [Dashboard guide](../DASHBOARD.md)
-- [Managed tools](../MANAGED-TOOLS.md)
+- [Dashboard guide](../dashboard.md)
+- [Managed tools](../managed-tools.md)
 - `src/lib/footprint/` — the collectors: `walk.mjs` (the bounded walker and the `Measurement`
   vocabulary), `install.mjs`, `storage.mjs`, `runtime.mjs`, `catalog.mjs`, `projects.mjs`,
   `consumers.mjs` (the ranked largest-consumers view and its containment/residual accounting),

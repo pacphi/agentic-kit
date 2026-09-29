@@ -7,7 +7,7 @@ import {
 } from '../maintenance/management/model.mjs';
 import { requestRejection } from './request-security.mjs';
 
-/** v1 compatibility routes (documented in docs/MAINTENANCE.md). */
+/** v1 compatibility routes (documented in docs/maintenance.md). */
 export const MAINTENANCE_MUTATION_ROUTES = Object.freeze(new Set([
   '/api/maintenance/plans',
   '/api/maintenance/apply',

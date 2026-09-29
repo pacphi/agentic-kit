@@ -4,8 +4,8 @@ Documents in this directory are **frozen**: they describe investigations, incide
 design work that shaped this kit. Some subjects have been resolved —
 mostly by upstream ruflo/agentic-qe releases (baseline: ruflo 3.28.0 / agentic-qe 3.12.2,
 2026-07-14). They are kept verbatim as provenance for *why* the kit's surviving pieces
-exist. Do not update them; the living docs are [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md),
-[../PROVIDERS.md](../PROVIDERS.md), and [../MANAGED-TOOLS.md](../MANAGED-TOOLS.md)
+exist. Do not update them; the living docs are [../TROUBLESHOOTING.md](../troubleshooting.md),
+[../PROVIDERS.md](../providers.md), and [../MANAGED-TOOLS.md](../managed-tools.md)
 (the former `BACKGROUND.md` and `CONDITIONAL-BLOCKS.md` are themselves archived below).
 
 The complete Prompts coaching and layer-3 capability is additionally preserved as an immutable
@@ -15,14 +15,25 @@ telemetry only; [ADR-0039](../adr/0039-prompts-intelligence.md) records that bou
 
 The maintenance design package was frozen on 2026-09-08 after experimental branch
 iterations. Archiving records its history; it does not close its open release gates.
-Current contracts live in [Maintenance](../MAINTENANCE.md),
-[acceptance criteria](../MAINTENANCE-ACCEPTANCE.md), [language coverage](../LANGUAGE-COVERAGE.md),
-and the still-proposed [project metadata adapters](../PROJECT-METADATA-ADAPTERS.md).
+Current contracts live in [Maintenance](../maintenance.md),
+[acceptance criteria](../maintenance-acceptance.md), [language coverage](../language-coverage.md),
+and the still-proposed [project metadata adapters](../proposals/project-metadata-adapters.md).
 
 ## Reading archived material safely
 
 Status words such as **Draft**, **Approved**, **Implemented**, **current**, or **uncommitted**
 refer to the document's original capture date. Plans, agent prompts, shell commands and model/version
+
+### Reading audit and evidence records
+
+Audit reports and evidence records describe the source, installed artifacts, local observations,
+environment and test method they name, and only those. "Current", "implemented" or "uncommitted"
+is relative to the recorded inspection, not a claim about this checkout or another machine. A saved
+digest or passing fixture does not establish current runtime health, all-host parity, production
+readiness or permission to release. A proposed repair is not authorization to run it. Opt-in
+conformance commands inside these records may run real host processes or inference; their presence
+is not a request to run them. Machine-readable inventories are observations, not executable policy,
+ownership receipts or release capabilities.
 recommendations inside these files are historical content, not instructions to execute today or
 new authorization. The July 2026 dependency baseline above describes that archival transition;
 it is not the current installation requirement. Follow the linked living guide and current ADR
@@ -38,14 +49,14 @@ use these destinations when following their historical references:
 | --- | --- |
 | shell-kit README `docs/BACKGROUND.md` | [Archived background](2026-07-14-shell-kit-background.md) |
 | shell-kit README `docs/CONDITIONAL-BLOCKS.md` | [Archived conditional blocks](2026-07-14-shell-kit-conditional-blocks.md) |
-| shell-kit README `docs/TROUBLESHOOTING.md` | [Archived troubleshooting](2026-07-14-shell-kit-troubleshooting.md); [current guide](../TROUBLESHOOTING.md) |
+| shell-kit README `docs/TROUBLESHOOTING.md` | [Archived troubleshooting](2026-07-14-shell-kit-troubleshooting.md); [current guide](../troubleshooting.md) |
 | shell-kit README `docs/archive` | [This archive index](README.md) |
 | shell-kit README/troubleshooting `docs/archive/…` or `archive/…` incident paths | [June incident](2026-06-token-consumption-incident.md), [June recurrence](2026-06-11-token-consumption-recurrence.md) |
-| host-extensibility HTML `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../AUTHORING-HOST-ADAPTERS.md) |
+| host-extensibility HTML `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) |
 
 External links and upstream resolution claims are retained as historical evidence and were not
 reconfirmed by this metadata audit. The per-file inventory and limitations are recorded in the
-[issue 211 history matrix](../audits/211-history-matrix.md).
+[issue 211 history matrix](2026-09-09-audit-211-history-matrix.md).
 
 ## Index
 
@@ -101,15 +112,15 @@ incident reports intentionally keep their original, now-dangling paths.
 | File | Original location | What it was | Why archived / live successor |
 |---|---|---|---|
 | [2026-09-04-design-maintenance-overhaul-overview.md](2026-09-04-design-maintenance-overhaul-overview.md) | `docs/design/maintenance-overhaul/README.md` | Maintenance overhaul README.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
-| [2026-09-04-design-maintenance-overhaul-acceptance-criteria.md](2026-09-04-design-maintenance-overhaul-acceptance-criteria.md) | `docs/design/maintenance-overhaul/acceptance-criteria.md` | Maintenance overhaul acceptance-criteria.md | Live successor: [MAINTENANCE-ACCEPTANCE.md](../MAINTENANCE-ACCEPTANCE.md); original snapshot retained as provenance. |
+| [2026-09-04-design-maintenance-overhaul-acceptance-criteria.md](2026-09-04-design-maintenance-overhaul-acceptance-criteria.md) | `docs/design/maintenance-overhaul/acceptance-criteria.md` | Maintenance overhaul acceptance-criteria.md | Live successor: [MAINTENANCE-ACCEPTANCE.md](../maintenance-acceptance.md); original snapshot retained as provenance. |
 | [2026-09-04-design-maintenance-overhaul-discovery-and-scan-policy.md](2026-09-04-design-maintenance-overhaul-discovery-and-scan-policy.md) | `docs/design/maintenance-overhaul/discovery-and-scan-policy.md` | Maintenance overhaul discovery-and-scan-policy.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
 | [2026-09-04-design-maintenance-overhaul-domain-model.md](2026-09-04-design-maintenance-overhaul-domain-model.md) | `docs/design/maintenance-overhaul/domain-model.md` | Maintenance overhaul domain-model.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
 | [2026-09-04-design-maintenance-overhaul-experience-specification.md](2026-09-04-design-maintenance-overhaul-experience-specification.md) | `docs/design/maintenance-overhaul/experience-specification.md` | Maintenance overhaul experience-specification.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
 | [2026-09-08-validation-maintenance-focus.md](2026-09-08-validation-maintenance-focus.md) | `docs/design/maintenance-overhaul/focus-validation.md` | Maintenance overhaul focus-validation.md | Dated verification evidence; does not prove the current source state or close open release gates. |
-| [2026-09-08-design-maintenance-language-coverage.md](2026-09-08-design-maintenance-language-coverage.md) | `docs/design/maintenance-overhaul/language-coverage.md` | Maintenance overhaul language-coverage.md | Live successor: [LANGUAGE-COVERAGE.md](../LANGUAGE-COVERAGE.md); original snapshot retained as provenance. |
+| [2026-09-08-design-maintenance-language-coverage.md](2026-09-08-design-maintenance-language-coverage.md) | `docs/design/maintenance-overhaul/language-coverage.md` | Maintenance overhaul language-coverage.md | Live successor: [LANGUAGE-COVERAGE.md](../language-coverage.md); original snapshot retained as provenance. |
 | [2026-09-04-design-maintenance-overhaul-migration-plan.md](2026-09-04-design-maintenance-overhaul-migration-plan.md) | `docs/design/maintenance-overhaul/migration-plan.md` | Maintenance overhaul migration-plan.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
 | [2026-09-08-design-maintenance-focus-mockups.md](2026-09-08-design-maintenance-focus-mockups.md) | `docs/design/maintenance-overhaul/mockups/README.md` | Maintenance overhaul mockups/README.md | Illustrative alternatives and approved Focus prototype; not production behavior or adapter-support evidence. |
 | [2026-09-08-artifact-maintenance-progressive-inventory.html](2026-09-08-artifact-maintenance-progressive-inventory.html) | `docs/design/maintenance-overhaul/mockups/progressive-inventory.html` | Maintenance overhaul mockups/progressive-inventory.html | Illustrative alternatives and approved Focus prototype; not production behavior or adapter-support evidence. |
 | [2026-09-07-validation-maintenance-option-a.md](2026-09-07-validation-maintenance-option-a.md) | `docs/design/maintenance-overhaul/option-a-validation.md` | Maintenance overhaul option-a-validation.md | Dated verification evidence; does not prove the current source state or close open release gates. |
-| [2026-09-08-design-maintenance-project-metadata-adapters.md](2026-09-08-design-maintenance-project-metadata-adapters.md) | `docs/design/maintenance-overhaul/project-metadata-adapters.md` | Maintenance overhaul project-metadata-adapters.md | Live successor: [PROJECT-METADATA-ADAPTERS.md](../PROJECT-METADATA-ADAPTERS.md); original snapshot retained as provenance. |
+| [2026-09-08-design-maintenance-project-metadata-adapters.md](2026-09-08-design-maintenance-project-metadata-adapters.md) | `docs/design/maintenance-overhaul/project-metadata-adapters.md` | Maintenance overhaul project-metadata-adapters.md | Live successor: [PROJECT-METADATA-ADAPTERS.md](../proposals/project-metadata-adapters.md); original snapshot retained as provenance. |
 | [2026-09-04-design-maintenance-overhaul-provider-and-action-policy.md](2026-09-04-design-maintenance-overhaul-provider-and-action-policy.md) | `docs/design/maintenance-overhaul/provider-and-action-policy.md` | Maintenance overhaul provider-and-action-policy.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |

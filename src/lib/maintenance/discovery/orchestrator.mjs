@@ -1,7 +1,7 @@
 // ADR-0048 scan orchestrator — the resumable, checkpointed state machine that
 // turns a discovery source into published SourceCoverage, built as an
 // orchestration layer OVER ADR-0047's streaming observation forest rather
-// than a competing crawler (docs/MAINTENANCE.md "Work slices and safety ceilings").
+// than a competing crawler (docs/maintenance.md "Work slices and safety ceilings").
 //
 // A PARTITION (see partitions.mjs) is the atomic unit of resumable work: the
 // injected `walk` primitive (walkTree) has no external resume cursor, so the

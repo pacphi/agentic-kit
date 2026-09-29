@@ -2,7 +2,7 @@
 
 Lightweight [MADR](https://adr.github.io/madr/)-style records for **agentic-kit** (`ak`) design
 decisions. Reviewed against source on **2026-09-09**; the
-[file-by-file audit](../audits/211-adrs-matrix.md) records examined boundaries and
+[file-by-file audit](../archive/2026-09-09-audit-211-adrs-matrix.md) records examined boundaries and
 remaining limitations. Status describes each record's declared scope, not a
 blanket release or safety certification. These are ak's own ADRs — distinct from the ruflo / agentic-qe ADRs that `.claude/helpers/`
 tooling references.
@@ -93,7 +93,7 @@ unpriced unknowns, and fidelity notes. Those Usage behaviors are **not implement
 `costOf()` still uses its fallback rate. Ollama catalogue/runtime discovery ships
 separately under ADR-0032; loopback transport can also serve cloud models and
 does not prove free historical execution. See also
-`docs/PROVIDERS.md`. **0012** adds a read-only Observability workspace: host-specific evidence is
+`docs/providers.md`. **0012** adds a read-only Observability workspace: host-specific evidence is
 normalized into a versioned, provenance-bearing event model, reduced into an interactive
 agent/tool canvas, and paired with a rich selected-session transcript rail. Separate SSE planes
 keep content out of broad topology snapshots/replay while preserving masked local evidence and

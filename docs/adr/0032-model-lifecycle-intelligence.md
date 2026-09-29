@@ -308,7 +308,7 @@ The implementation branch was validated on 2026-08-25 with the following exact-h
   identifiers from `/api/models`.
 - `pnpm audit --prod` reported no known vulnerabilities. No runtime dependency was introduced;
   the implementation uses Node's built-in filesystem and cryptography APIs.
-- The package dry run included this ADR, the DDD model, and `docs/MODELS.md`; internal Markdown
+- The package dry run included this ADR, the DDD model, and `docs/models.md`; internal Markdown
   links and the stable command-surface guards passed.
 
 Current official Claude Code, OpenCode, OpenAI, Ollama, and Node documentation was rechecked on

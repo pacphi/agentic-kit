@@ -1,5 +1,5 @@
 > Archived snapshot, 2026-09-08. Original status and evidence below are historical.
-> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> Current guidance: [Maintenance](../maintenance.md), [acceptance and open gates](../maintenance-acceptance.md),
 > and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
 
 # Maintenance overhaul migration plan

@@ -10,7 +10,7 @@
   [ADR-0018](0018-generalized-host-worker-execution.md),
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Product proposal:**
-  [MetaHarness as an Optional Assurance Companion](../METAHARNESS-COMPANION-PROPOSAL.md)
+  [MetaHarness as an Optional Assurance Companion](../proposals/metaharness-companion.md)
 - **Replaces:** the direction, but not the ADR number, in the unpublished branch-only
   `ADR-0016 — Curate retrieval improvement while Ruflo retains promotion authority`; its
   retrieval-improvement DDD is retired rather than ported
@@ -238,7 +238,7 @@ Proposed until separately accepted.
 
 ## References
 
-- [Product proposal](../METAHARNESS-COMPANION-PROPOSAL.md)
+- [Product proposal](../proposals/metaharness-companion.md)
 - [MetaHarness repository](https://github.com/ruvnet/metaharness)
 - [MetaHarness harness worker contract](https://github.com/ruvnet/metaharness/blob/main/packages/harness/src/types.ts)
 - [MetaHarness repo scorecard](https://github.com/ruvnet/metaharness/blob/main/packages/create-agent-harness/src/repo-scorecard.ts)

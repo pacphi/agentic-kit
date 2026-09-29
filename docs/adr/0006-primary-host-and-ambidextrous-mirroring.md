@@ -65,4 +65,4 @@ orchestrator stays symmetric underneath.
 - `status`/dashboard must read `primaryHost` to render the correct severity + primary marker
   (done: `status.mjs` host rows, `dashboard-server.mjs` routing matrix).
 
-See also `docs/PROVIDERS.md` §3.5 and the `claude/dual-mode-reference.md` managed block.
+See also `docs/providers.md` §3.5 and the `claude/dual-mode-reference.md` managed block.

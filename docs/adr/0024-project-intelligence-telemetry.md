@@ -212,7 +212,7 @@ pipeline.
 `GET /api/live/intelligence` shares Dashboard delivery's transport primitives with, but is not part
 of, [Observability](../ddd/observability.md)'s `/api/live`, `/api/live/events`,
 `/api/live/transcripts/:host/:id/events`, and `/api/live/playback/:host/:id` family documented in
-[OBSERVABILITY.md](../OBSERVABILITY.md); it is not covered by that document's evidence, privacy, or
+[observability.md](../observability.md); it is not covered by that document's evidence, privacy, or
 capability-coverage contract, and unlike Observability's ruflo/agentic-qe sources, it requires no
 `--live-source` registration — the four files it reads are always this project's own.
 
@@ -273,4 +273,4 @@ path.
 - `src/lib/dashboard/client.mjs`, `src/lib/dashboard/page.mjs` (Intelligence panel rendering,
   machine-wide rollup, project picker, SSE subscription)
 - [Project intelligence domain](../ddd/project-intelligence.md)
-- [Dashboard guide](../DASHBOARD.md)
+- [Dashboard guide](../dashboard.md)

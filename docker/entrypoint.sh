@@ -2,7 +2,7 @@
 # First-use entrypoint: install the kit → run setup → serve the dashboard
 # (or exec whatever command was given, e.g. `bash` for an interactive shell).
 # Every knob is an env var so `docker compose run -e ...` can retune a run
-# without an image rebuild. See MAINTAINER-GUIDE.md for the full knob table.
+# without an image rebuild. See maintainer-guide.md for the full knob table.
 set -euo pipefail
 
 AK_DIST_TAG="${AK_DIST_TAG:-next}"

@@ -1,0 +1,642 @@
+# Model providers & hosts — the simple path, and how to go deeper
+
+This guide explains provider selection and routing. For the full Claude/Codex/OpenCode
+compatibility matrix across Ruflo, agentic-qe, and RuvNet Brain, see
+[Host support](host-support.md).
+
+`ak`'s job is to make **the best default the simplest thing** — and then get out of your
+way when you want to customize, exactly as you would if you drove `ruflo` and `agentic-qe`
+by hand. Everything `ak` writes is *their* standard config; `ak` just converges to it,
+proves it, and can undo it.
+
+There are two independent things you can point at a model:
+
+- **Hosts** — which agent CLI executes work: `claude` (Claude Code), `codex` (OpenAI
+  Codex), or explicitly routed `opencode`; multiple hosts may be enabled.
+- **Providers** — which LLM the *routers* use: ruflo's provider router and agentic-qe's
+  `HybridRouter`. Independent of the host; API keys always live in your environment.
+
+The full model has four separate axes:
+
+| Axis | Meaning | Examples |
+|---|---|---|
+| **Host** | Agent CLI/environment executing work | Claude Code, Codex CLI, OpenCode |
+| **Provider** | Inference service, gateway, or local runtime | Anthropic, OpenAI, OpenRouter, Ollama |
+| **Projection** | Native configuration surface receiving intent | Claude settings, Codex TOML, OpenCode JSON, ruflo/AQE routers |
+| **Observability** | Evidence source establishing facts | host JSONL, OpenRouter metadata, quota channels, Ollama catalogue |
+
+A **binding** connects a host to a provider through a projection and transport. One Ollama
+provider can therefore have independent `ollama-via-claude` and `ollama-via-codex` bindings.
+OpenRouter is a provider behind a host, never automatically a third host. OpenCode is an opt-in
+activity-routing host through `ak run`, while remaining ineligible as a primary host or AQE
+provider unless an independently admitted adapter for that host declares and earns the separate
+AQE-provider capability. A configured selector alone never establishes provider, billing, or
+vendor-diversity facts.
+
+**Account analytics is separate from routing evidence.** `ak usage refresh openrouter` explicitly
+fetches OpenRouter's supported 30-completed-UTC-day activity view with
+`OPENROUTER_MANAGEMENT_KEY` and writes a private local cache. `ak usage status` and the dashboard
+read only that cache. Because the management response has no local host/session/project/task
+correlation key, its rows appear only as provider account analytics and never alter transcript
+totals or prove which host executed a request.
+
+**Model lifecycle evidence is separate from both.** `ak models refresh` inventories host-scoped
+configuration, catalogues, and sanitized observed model ids. `ak models status|diff|explain|plan`
+are cache-only. Discovery does not prove quality or mutate provider/routing configuration, and
+`refresh --online` permits OpenCode catalogue egress; ordinary Ollama refresh can
+contact its local loopback API. See [Model lifecycle
+intelligence](models.md).
+
+Claude refresh includes a network-silent, dated Anthropic public record. It proves Anthropic's
+published model facts, not that OpenRouter or another serving provider vends that model to this
+account. OpenRouter routability still requires an exact OpenRouter/OpenCode selector plus local
+configuration, authentication, policy, and successful-use evidence for that path.
+
+The model inventory may feed mechanically eligible candidates and stale-evidence markers to Route
+Intelligence, but it explicitly makes no quality or economic claim. Status can recommend an
+explicit model command; `ak sync` never executes model refresh or model-plan actions.
+
+This capability model is
+[ADR-0016](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
+implement it. `ak host` owns execution-host lifecycle and selection (`status`, `pick`, `refresh`,
+and `off`), with `ak x host` as its plumbing spelling. Inference providers and bindings remain
+separate axes even though some provider controls share that workflow. `ak host status` also
+checks every binding declared in `kit.json` and prints a warning naming any entry with an
+unknown host, unknown provider, or unsupported transport — warnings only; nothing is changed
+or removed on your behalf.
+
+## Local OpenAI-compatible servers
+
+Running a local model behind an OpenAI-compatible endpoint — MLX, LM Studio, `llama.cpp`, vLLM —
+rather than Ollama? Declare it as a `local-openai` binding in `kit.json`:
+
+```json
+{
+  "integrations": {
+    "bindings": [
+      {
+        "id": "mlx-via-codex",
+        "host": "codex",
+        "provider": "local-openai",
+        "transport": "openai-compatible",
+        "endpoint": "http://127.0.0.1:8080/v1"
+      }
+    ]
+  }
+}
+```
+
+This records a local inference target with configured-grade provenance. A binding or
+OpenAI-compatible URL alone does not prove that a session used it or incurred no charge;
+keep configured local intent separate from observed execution and billing evidence. `local-openai` is not an AQE provider type — `ollama` is. Loopback
+`http://` is allowed; a remote endpoint requires `https://`; and the endpoint may never embed
+credentials, fragments, or secret-bearing query parameters. See
+[ADR-0028](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0028-local-openai-compatible-providers.md).
+
+A binding declares a compatible relationship; it does not add a new execution branch inside an
+upstream tool. In particular, Ruflo's direct `agent_execute` path currently dispatches persisted
+provider configuration through its explicit Ollama and OpenRouter branches. A `local-openai`
+binding remains valid for Codex/OpenCode configuration without implying that Ruflo can select the
+literal provider id `local-openai` for direct execution.
+
+## External host adapters (experimental)
+
+Want `ak` to manage a host CLI it doesn't ship in-tree — driving local models through something
+like Hermes, say? Set `AK_EXPERIMENTAL_HOST_ADAPTERS=1` and declare it as **data**, never code:
+
+```json
+{
+  "hostAdapters": [
+    { "name": "hermes", "source": "~/.config/ak/adapters/hermes.json", "contract": 1 }
+  ]
+}
+```
+
+An adapter is a manifest plus a handful of subprocess hooks — nothing an adapter declares ever
+runs inside the `ak` process itself. `source` may be a local file path, an `https://` URL (HTTPS
+only, no redirects, bounded), or `npm:<pkg>[@version]`, fetched with `npm pack --ignore-scripts`
+and extracted to stdout. npm and tar run locally, and the tarball is downloaded into a
+temporary directory; package lifecycle scripts do not run and hook files are not installed. The source is resolved *before*
+hashing, so a mutated remote surfaces as `consent-stale` rather than sliding in quietly.
+
+Consent is explicit and hash-pinned. `ak host adapters trust <name>` discloses the full validated
+manifest and records your consent against its content hash (`--expect-hash` pins it
+non-interactively); `list` shows trust state, and `revoke` works even with the flag off. Once a
+host is admitted *and* explicitly enabled in `kit.json`, its lifecycle hooks run through
+`ak setup`, `ak sync`, and uninstall — a failed detect or plan aborts the apply. A broken adapter
+is reported and skipped; it never takes down the hosts that already work.
+
+### What an external adapter can earn
+
+An external adapter can never **self-declare** that it is the primary host, an AQE provider, or
+the status-line owner. That ban is permanent — it is the safety invariant the whole extension
+point rests on. `canBePrimary`, `aqeProvider`, and `commandStatusline` are **earnable**: passing the gating
+conformance tier is evidence, and `ak host adapters grant <name> <capability>` (alias `bless`) is
+a maintainer's explicit grant, refused unless that tier is recorded passed at the adapter's
+current combined content hash.
+
+`ak host adapters conformance <name>` runs the tiered black-box kit:
+
+| Tier | Status today | Gates |
+| --- | --- | --- |
+| `admission` | Genuinely passes against a real adapter | — |
+| `session-driving` | **Gated** — a native Ruflo backend is upstream's to grant | — |
+| `activity-routing` | Genuinely passes — real supervised subprocess worker | — |
+| `aqe-provider` | Genuinely passes — real stdin/stdout provider hook through the admitted bridge | `aqeProvider` |
+| `primary-eligible` | Genuinely passes — observes a real escalation | `canBePrimary` |
+| `statusline` | **Gated** — `ak` has no render surface for it yet | `commandStatusline` |
+
+The two gated tiers are honest ceilings, not failures: they report `gated`/`skipped` and never
+`passed`. `ak host adapters gate <name> <tier> <repo>#NNN` records the upstream issue the ceiling
+is waiting on, `status [name]` shows per-tier state (stale-marked the moment the manifest changes)
+alongside granted capabilities, and `revoke-grant <name> [capability]` withdraws one or all.
+
+Be precise about what a grant buys **today**. A granted capability goes live in the effective host
+registry from the next flagged invocation — the host's tier label reflects it and it joins
+primary-eligibility. A granted `aqeProvider` also becomes a live, project-scoped Agentic-QE
+3.13.12+ external provider: its declaration is written to `.agentic-qe/llm-config.json`, and its
+host routes may populate `agentOverrides`. No path yet *selects* an external host as primary
+(`ak host pick` stays built-in-scoped), and `commandStatusline` has no runtime reader.
+
+The manifest candidate is data, not authority. It uses `aqe.provider` (never
+`host.legacy.aqeProvider`) and requires `cli-subprocess`, activity routing, and both an execution
+hook and a dedicated provider hook:
+
+```json
+{
+  "aqe": {
+    "provider": {
+      "hook": {
+        "command": ["node", "aqe-provider.mjs"],
+        "files": ["aqe-provider.mjs"],
+        "timeoutMs": 180000,
+        "passEnv": ["HERMES_API_KEY"]
+      },
+      "billingMode": "subscription",
+      "models": ["default"],
+      "defaultModel": "default",
+      "maxConcurrency": 2,
+      "stripEnv": ["OPENAI_API_KEY"],
+      "displayName": "Hermes subscription"
+    }
+  }
+}
+```
+
+`host.id` is the provider id. It must satisfy AQE's external-id grammar and cannot collide with a
+built-in/reserved provider. The hook receives the prompt on stdin and writes only the completion to
+stdout. Exit `77`/`78`, timeout, auth failure, and any other error produce no stdout because AQE
+3.13.12 treats non-empty stdout as a completion even when a CLI exits non-zero. The bridge forwards
+only declared environment variables, protects its own `AK_AQE_*` control variables, rechecks the
+content hash before spawn, and keeps the hook in a supervised subprocess. Each invocation copies
+the verified bytes of every declared adapter-owned hook file into a private execution snapshot;
+declared command-file arguments and relative imports resolve to those copies. This is byte pinning,
+not an OS sandbox: a consented hook can still deliberately access an absolute path, so adapter-owned
+imports must be relative. The interpreter and other absolute/PATH-resolved native binaries remain
+externally managed system trust, not part of the adapter content hash. Declare every adapter-owned
+imported file. The bridge re-reads host enablement, consent, and the exact-hash grant immediately
+before spawn, so revocation while it waits for a prompt fails closed. Forwarded
+secret values are redacted from bridge diagnostics, and a completion that exceeds the supervised
+output bound fails closed instead of returning a truncated success.
+Candidate metadata is bounded before admission: at most 128 model ids of 256 UTF-8 bytes each, a
+control-free display name of at most 128 bytes, concurrency from 1 through 64, and a provider-hook
+timeout no longer than 24 hours. `stripEnv` names must use canonical uppercase spelling; this keeps
+the contract unambiguous, and projection also includes the exact spelling observed in the current
+parent environment for AQE 3.13.12's exact-key deletion on Windows. Independently of that
+defense-in-depth filter, the stable trampoline forwards only explicitly allowlisted variables to
+the adapter hook.
+
+Graduation has two destinations: a **blessed external adapter** stays out-of-tree holding exactly
+the capabilities its tiers earned, or a maintainer **promotes it to a built-in** by adopting its
+descriptor as a first-party registry entry — an ordinary PR, not a command.
+
+Nothing here installs itself: you declare the adapter, you consent to it, and teardown remains
+reversible. `contract: 1` is still experimental and **not frozen** — freezing waits on a real
+external adapter clearing the conformance kit and soaking. Writing one? See
+[authoring-host-adapters.md](https://github.com/pacphi/agentic-kit/blob/main/docs/authoring-host-adapters.md). The governing decisions are
+[ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md) and
+[ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md).
+
+---
+
+## Level 0 — do nothing (the point)
+
+Install `ak`, run `ak setup`. Claude Code is the host, agentic-qe uses its own default, and
+nothing about providers is written anywhere. This is the whole feature for most people:
+**it already works, and `kit.json` stays at its defaults.**
+
+```bash
+ak setup      # claude just works; codex/other providers are opt-in
+ak status     # shows a "hosts" + "providers" row so you can see what's true
+```
+
+If you happen to have `codex` installed, `ak` notices and *offers* — it never flips it on
+for you:
+
+```text
+ℹ codex CLI detected — run `ak host pick` to let ruflo use both claude and codex
+```
+
+## Native configs, one front door
+
+A question that trips people up: **do Ruflo and agentic-qe read the same config?** No.
+They are independent routing subsystems, each with its **own config store**. There is no shared
+file they both read. What unifies them is `ak`:
+it takes your intent once (in `kit.json`) and writes **each tool's own native config** —
+converging, proving, and able to undo. `ak` is a facilitator, not a config layer the tools
+depend on.
+
+| | **agentic-qe** (`HybridRouter`) | **Ruflo direct agent execution** |
+|---|---|---|
+| **Config store** | `.agentic-qe/llm-config.json` (per project) + env | `claude-flow.config.json` or `.claude-flow/config.json` (per project), `CLAUDE_FLOW_CONFIG`, and env |
+| **Precedence** (highest wins) | explicit override → env (`AQE_LLM_*`, API keys) → disk file → built-in defaults | per-agent provider → `RUFLO_PROVIDER` → credential env → persisted `agents.providers` → inference/default |
+| **Change the provider** | `AQE_LLM_PROVIDER=<type>` (env) — a provider whose API key is in the env is auto-enabled | `ruflo providers configure -p <id> -m <model>` |
+| **Change the model** | per-provider `models` in the chain; per-activity `agentOverrides` (aqe ≥ 3.13.1) | agent model first; then the selected persisted provider's `model` |
+| **Escalation / fallback** | ordered `fallbackChain` + circuit breaker + retry/backoff | provider selection for this path; not the enhanced router fallback chain |
+| **The `ak` way** | `--aqe-provider` / `--aqe-fallback` / `--route` | `--provider <id>:<model>` |
+
+Ruflo also bundles agentic-flow's enhanced model router, whose separate store is
+`~/.agentic-flow/router.config.json` (or `--router-config`). `ak --provider` does not write that
+router's `defaultProvider`, `fallbackChain`, or routing modes; it maps specifically to
+`ruflo providers configure` and the project-scoped `agents.providers` registry.
+
+Ruflo 3.38.8 fixed direct agent execution so it can consume that persisted registry
+([upstream #2962](https://github.com/ruvnet/ruflo/issues/2962)). Registration and selection remain
+different operations: `--provider` registers an eligible provider/model; an explicit per-agent
+provider or `RUFLO_PROVIDER` still outranks it. OpenRouter registered by `ak` also needs
+`OPENROUTER_API_KEY` in the environment. For a fresh keyless Ollama entry with no endpoint env,
+`ak` supplies `http://127.0.0.1:11434`; it preserves an existing Ruflo `baseUrl`, and an explicit
+`endpoint` on the `kit.json` model entry wins. `OLLAMA_API_KEY` keeps Ruflo's cloud behavior, while
+`OLLAMA_BASE_URL` remains the environment override. `ak` surfaces a degraded warning when the
+installed Ruflo is older than 3.38.8.
+
+Registering a provider never moves project memory. In a project with no Ruflo JSON configuration,
+`ruflo providers configure` would create `claude-flow.config.json` from Ruflo's defaults, whose
+`memory.persistPath` is `./data/memory`
+([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). Whether registration runs from
+`ak setup`, `ak sync` or `ak host pick`, `ak` first writes a minimal
+`claude-flow.config.json` with `memory.persistPath: ".swarm"`, and Ruflo adds its keys to it. After
+each registration `ak` re-reads the memory setting. If Ruflo changed it, `ak` puts it back, skips the
+remaining providers, and reports the step as degraded. An existing Ruflo JSON configuration, or a
+file named by `CLAUDE_FLOW_CONFIG`, is used as it is.
+
+For a direct Ruflo agent using an OpenRouter-vended model, the complete user path is:
+
+```bash
+# Export this where the long-lived Ruflo/MCP process will inherit it, then restart that process.
+export OPENROUTER_API_KEY=...
+
+# Persist eligible provider/model intent. `ak sync` reapplies it later.
+ak host pick --provider 'openrouter:z-ai/glm-5.2'
+
+# Select the provider and model for the direct agent that will execute.
+ruflo agent spawn --type coder --provider openrouter --model z-ai/glm-5.2
+```
+
+Execute the returned agent id through Ruflo's `agent_execute` MCP tool or a Ruflo workflow. Spawning
+an agent, even with `--task`, is registration rather than execution. Treat the response's served
+model/provider evidence as the proof that routing occurred. Omitting the provider/model flags does
+not mean the `ak`-registered model becomes every agent's default. `RUFLO_PROVIDER=openrouter` can
+force the provider for the whole Ruflo process, but explicit per-agent selection is narrower and
+reproducible.
+
+`ak run` is a separate host-execution path: it invokes Claude, Codex, or OpenCode adapters and does
+not dispatch through Ruflo's direct-provider registry. To use an OpenRouter model in an `ak run`
+pipeline, route an OpenCode activity to its provider-qualified model, for example:
+
+```bash
+ak run feature "implement the change" \
+  --route 'implementation:opencode:openrouter/z-ai/glm-5.2'
+```
+
+That path requires OpenCode's OpenRouter authentication/configuration; the Ruflo provider entry is
+not a substitute for the host adapter's own credentials.
+
+Two axes cut across both (see the intro): **hosts** (which agent CLI runs the ruflo loop —
+`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`) are separate from **providers** (which LLM the routers
+use). Level 4 below is the full `ak`-way ↔ raw-tool-way map for every knob in this table.
+
+## Level 1 — turn on codex (one command)
+
+> [!NOTE]
+> Already have an older `ak` installed and want a capability that shipped later (like
+> dual-host)? Updating the binary and enabling the feature are two separate motions —
+> see [upgrading.md](upgrading.md) for the `sync` vs `host pick` distinction.
+
+```bash
+ak host pick
+```
+
+An interactive picker (or flags for scripts). Enable `codex` and `ak`:
+
+- installs it if it's missing (`npm i -g @openai/codex`) — but leaves an existing
+  mise/brew/native install alone,
+- maintains shared Ruflo/AQE access and generated host guidance,
+- writes `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` into `.claude/settings.local.json`.
+
+> [!NOTE]
+> Project scope is resolved by walking up to the repo root (`.git`), so running
+> from a subdirectory writes the same project file at the root — never the
+> machine-wide user settings. Outside any repo, user scope is used and said so.
+
+```bash
+ak host pick --host claude,codex --yes     # non-interactive
+```
+
+Or enable codex during **first-time setup**, in one shot — same gated/prompted/external-safe
+install, plus the full ambidextrous dual-host wiring:
+
+```bash
+ak setup --codex --yes                # install everything incl. codex
+ak setup --primary-host codex --yes   # …and make codex the leading host
+```
+
+## Level 2 — choose which LLM runs QE
+
+agentic-qe can run its analysis on subscription-backed host providers
+(`claude-code`, and current AQE also ships `codex`), metered API providers
+(`claude`, `openai`, `gemini`, `openrouter`, `azure-openai`, `bedrock`, or
+`cognitum`), or local providers (`ollama` and `onnx`).
+
+**Billing is the axis that isn't obvious from the names** — three categories:
+`claude-code` and AQE's `codex` provider use their host subscriptions, `ollama`
+and `onnx` are local, and the API-provider spellings bill their corresponding
+credentials. There is no `openai`-subscription or `gemini`-subscription alias:
+`openai` and `gemini` remain API-metered provider types.
+
+```bash
+ak host pick --aqe-provider claude-code    # run QE on your subscription, no API bill
+ak host pick --aqe-provider codex          # direct Codex subscription provider
+```
+
+For built-ins, `ak` writes `AQE_LLM_PROVIDER` for you. An admitted external id is selectable by
+the same flag, but its default is written only to the project `.agentic-qe/llm-config.json` — never
+to user or project host-settings environment. This prevents a project-scoped adapter identity from
+leaking into unrelated repositories. Add `OPENAI_API_KEY` to your env and agentic-qe's
+router will **auto-enable** OpenAI as a fallback on its own — you don't have to list it.
+
+## Level 3 — a deterministic fallback chain
+
+When you want explicit ordering rather than env auto-enable, `ak` manages agentic-qe's
+`.agentic-qe/llm-config.json` from `kit.json`:
+
+```bash
+ak host pick \
+  --aqe-provider claude-code \
+  --aqe-fallback 'claude-code:claude-opus-5-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
+```
+
+Each `provider:model,model` becomes an ordered chain entry (first = highest priority). `ak`
+writes a complete, schema-correct chain, tags it `_managedBy: agentic-kit`, and **never**
+writes your API keys.
+
+Agentic-QE **3.13.12 or newer** is required for an external id. The same admitted id may be the
+default, a fallback rung, or the provider projected from an explicit external-host activity route.
+Agentic-kit merges `externalProviders` without replacing foreign declarations and also writes the
+minimal compatibility activation AQE 3.13.12's MCP bootstrap requires:
+`providers[id] = { "enabled": true }`. Both values have exact ownership receipts. Fallback-derived
+defaults carry a separate exact receipt, so removing a managed chain preserves any user-selected
+replacement even when that provider was another rung in the old chain. A same-id foreign
+or user-edited declaration is preserved and reported as a conflict; an explicit foreign
+`enabled:false` is refused rather than overridden. When a grant is revoked, a host is disabled, or
+declared content changes, sync removes only a stale declaration/activation that still exactly
+matches its receipt. A user-edited value is preserved and becomes user-owned.
+
+### External-provider release proof
+
+Three checks establish different facts; do not collapse them:
+
+1. `ak host adapters conformance <name>` must pass the real `aqe-provider` tier at the current
+   content hash, then `ak host adapters grant <name> aqeProvider` must succeed.
+2. `ak status --refresh=live --only providers` proves admission plus the exact project declaration, ownership receipt,
+   default, fallback, and override projection. It deliberately warns that this is not a served
+   model response. It checks the repository that holds the current folder, from its root, even
+   when you run it in a subfolder; outside a repository it skips these project checks and says so.
+   It reads AQE's billing section (`aqe health`) only in a project where `.agentic-qe` exists, and
+   runs it in the root with the project pin and AQE's in-memory backend, so it does not open the
+   project's `memory.db`.
+3. Release proof starts fresh AQE CLI and MCP processes, lists the external id through
+   `aqe llm providers --json`, invokes the real `test_generate_enhanced` MCP tool, and requires the
+   served completion to carry the fixture's provider and model markers:
+
+   ```bash
+   pnpm test:aqe-external-provider-live
+   ```
+
+   The generated command may also be exercised directly as a transport diagnostic:
+
+   ```bash
+   printf 'Reply with exactly: OK' | agentic-kit x aqe-provider hermes \
+     --model default --expect-hash <sha256> --project-root "$PWD"
+   ```
+
+The live fixture sets `AQE_LLM_PROVIDER` only in its child-process environment for deterministic
+selection; agentic-kit never persists an external id into managed machine/user host settings. The
+direct trampoline proves bounded stdin/stdout execution; it does not replace the fresh-process AQE
+CLI/MCP proof. Neither configured `billingMode` nor a host name proves vendor diversity or a
+bill. External billing is adapter-declared and reported as unverified; vendor identity requires
+observed or independently configured provider evidence. QE-Court must not count two hosts as two
+vendors without that evidence.
+
+> Model IDs above are examples current as of July 2026 (Claude Opus 5, OpenAI GPT-5.6 —
+> or `gpt-5.3-codex` for agentic coding — Google Gemini 3.5 Flash). Use whatever IDs your
+> provider currently offers; `ak` writes the strings you give it verbatim.
+
+**GLM via OpenRouter.** Zhipu/Z.ai's GLM models are reachable through the `openrouter`
+provider — add them to the chain and put `OPENROUTER_API_KEY` in your env:
+
+```bash
+ak host pick \
+  --aqe-provider claude-code \
+  --aqe-fallback 'claude-code:claude-opus-5-5; openrouter:z-ai/glm-5.2'
+```
+
+Curated picks (verified September 8, 2026): `z-ai/glm-5.2` (flagship — 1M context, strong
+tool-use, long-horizon agent work) and `z-ai/glm-5` (value — 205K context; compare current provider per-token prices). Both are **metered** — GLM is never an auto-seed target (seeding only ever
+routes to subscription/local providers).
+
+## Level 3.5 — seeded Claude + Codex defaults, explicit OpenCode routes
+
+When **both** hosts are enabled and `agentic-qe ≥ 3.13.1` is installed, `ak` seeds a
+**per-activity routing policy**: each kind of work (architecture, implementation, testing,
+review, …) is routed to the host and model that suits it — Claude for reasoning/review,
+Codex for execution — and materialized into `.agentic-qe/llm-config.json` (`agentOverrides`).
+It's seeded automatically on `ak host pick` / `ak setup`; nothing happens for
+claude-only projects.
+
+```bash
+ak host pick --host claude,codex        # enables both → seeds routing → prints the table
+ak status                                     # a "routing" row; the dashboard shows the matrix
+ak host pick --route 'testing:claude:claude-sonnet-5'   # override one activity (persisted)
+ak host pick --primary-host codex       # make codex the lead; claude becomes the alternate
+```
+
+**Which host leads.** `--primary-host claude|codex` (default `claude`) chooses the primary.
+Codex-primary **mirrors** the default table below — codex takes the reasoning/review lead
+and claude becomes the alternate/escalation target — so the experience is ambidextrous
+regardless of which CLI drives. Models pair by tier, so each host leads reasoning work on its
+reasoning model and escalation steps up a tier either way:
+
+| Tier | Claude | Codex |
+|---|---|---|
+| reasoning | `claude-opus-5-5` | `gpt-6-astra` |
+| balanced | `claude-sonnet-5` | `gpt-6-sol` |
+| fast | `claude-haiku-4-5-20251001` | `gpt-6-luna` |
+
+With Codex leading, architecture, design, security-analysis and debugging run on `gpt-6-astra`,
+and implementation and testing run on `claude-sonnet-5`, escalating to `gpt-6-astra`. Astra costs
+more per token than Opus 5.5 ($10/$50 vs $4/$20), so Codex-led reasoning uses more Codex allowance.
+`ak status` marks the primary and fails (not warns) if the primary host is missing.
+
+**OpenCode is explicit, not seeded or AQE-projected.** Enable it, then use `ak run` with either
+a persisted route or a run-local override:
+
+```bash
+ak host pick --host claude,opencode \
+  --route 'security-scan:opencode:provider/model'  # persisted intent
+ak run security "src/auth/"                         # canonical execution command
+ak run security "src/auth/" --route 'security-scan:opencode:provider/model'  # run-local
+```
+
+Each OpenCode worker is an isolated, loopback-only supervised server session. A permission request
+is aborted and reported as `permission_required`; `ak` never auto-approves it. OpenCode routes are
+not written to AQE `agentOverrides`, cannot become `primaryHost`, and do not count as a separate
+AQE vendor. `ak run` is the only execution surface for an OpenCode route.
+
+**QE-Court validation stays upstream-owned.** Agentic-kit's local check proves only configured
+vendor diversity and writer/jury separation; it does not prove that provider seats or the court
+runtime are executable. `ak status` and `ak host status` state that boundary explicitly, and
+`ak sync` never rewrites
+`.claude/skills/qe-court/config.json`. If a config created by 3.13.2 or earlier still
+seats both `defense` and `jury` on Cognitum tiers, regenerate it with 3.13.3+ or change
+`defense` to `claude-code` so the jury and defense use distinct vendors.
+
+`primaryHost` controls the mirrored `ak run` activity policy, not QE-Court roles. The source-tree
+live regression exercises bounded participant transport from both directions without claiming a
+court verdict:
+
+```bash
+pnpm test:qe-court-live                    # one Claude-led + one Codex-led trial
+AK_QE_COURT_TRIALS=5 pnpm test:qe-court-live  # POSIX soak
+```
+
+Each seat performs an MCP-native Ruflo memory store→retrieve round trip, emits the exact returned
+value in a validated bounded handoff, and must terminate within its absolute deadline. The seats
+run in a disposable Ruflo project (its own Git repository and memory root, with Ruflo's daemon
+start-on-use off) that is deleted afterwards, so their rows never reach your project's memory. The
+check independently confirms the stored value in that project, and fails on a file edit there,
+repository mutation, orphaned state, or any proof row found in the checkout's memory.
+Full court parity remains blocked until Agentic-QE ships a supported host-neutral runner and a
+self-contained Codex QE-Court projection.
+
+Defaults (all overridable; your edits are marked `custom` and never re-seeded):
+
+| Activity | Host | Default model |
+|---|---|---|
+| specification, review, release | claude | `claude-sonnet-5` |
+| architecture, design, debugging, security-analysis | claude | `claude-opus-5-5` |
+| implementation, testing, security-scan | codex | `gpt-6-sol` |
+| documentation, packaging | codex | `gpt-6-luna` |
+
+*(packaging & release are `ak`-added — ruflo ships templates for feature/security/refactor only.)*
+
+Implementation and testing escalate to `claude-opus-5-5`. Routes seeded before a default
+changes are reported as diverged and keep their model until you run `ak host reset-routes`.
+
+**Retired Codex models.** `ak` has no automatic Codex retirement substitutions as of 2026-08-25.
+The current [OpenAI API model catalog](https://developers.openai.com/api/docs/models/all) still lists
+GPT-5.4 and GPT-5.4 mini, and no first-party withdrawal notice supports the former automatic
+replacement claims. `ak` only adds a retirement rule when it can cite the host's direct notice; a
+newer default remains a recommendation, not a route rewrite (see
+[ADR-0003](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0003-auto-seed-dual-host-provenance.md)). Once a citation-backed rule exists,
+`ak host pick`, `ak setup`, and `ak sync` all rewrite a seeded route naming the withdrawn model —
+a user-pinned route is reported, never rewritten (still routed to the replacement at run time).
+
+`claude-opus-4-8` is **not** retired — it carries no deprecation notice and stays pinnable. It is
+merely no longer the default, which `ak status` reports as routing *divergence*: a trade for you to
+weigh, cleared with `ak host reset-routes` if you want the newer default.
+
+**Configured model examples.** The route defaults above are policy choices, not a
+benchmark or entitlement guarantee. Use `ak models refresh` and `ak models status` to
+inspect the installed host's evidence, then verify the intended route in that host.
+Published model limits and prices are separate from context allocated to a session,
+subscription quota, and measured per-task cost. The dated
+[pricing audit](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-23-audit-model-pricing.md) records the bundled rate decisions; it does not
+prove a model remains available or better for a particular workload.
+
+`ak host pick --help` lists the bundled model suggestions. Tuning is per-route and reversible: hand-edit
+`kit.json` `routing.routes`, pass `--route`, or use `ak host off` to clear it entirely.
+
+**Disabling is complete, not just a flag change.** `ak host pick --host <set>` treats the
+set as authoritative. Excluding a routing host removes it from persisted routes and escalation
+ladders before AQE is reprojected; seeded entries are removed silently, while a user-pinned route
+prints a warning naming the disabled host. It also removes stale agentic-kit-curated AQE overrides
+while preserving foreign override keys. Excluding Codex retires only marker-owned integrations;
+user-registered MCP servers are left alone. The deprecated Claude→Codex MCP projection is retired
+even while Codex remains enabled, while the independent Ruflo-in-Codex registration converges.
+
+`routing.routes` intentionally names a host and model, not an inference provider. Provider resolution
+is a separate binding lookup; absent grounded evidence remains unknown or explicitly inferred.
+`ak run` is the canonical host-neutral executor for Claude, Codex, and explicit OpenCode routes.
+
+## Level 4 — drop down to raw ruflo / agentic-qe
+
+This is the part that matters: **`ak` is a facilitator, not a wall.** Every value it manages
+is the tool's own native config, and you can set it by hand — or let `ak` and hand-edits
+coexist. Managed writes merge supported native fields and make backups, but teardown has a
+broader legacy behavior described below. Do not assume every projection has exact-value
+conditional undo.
+
+The native config stores each knob below lives in — and their precedence — are summarized in
+[Native configs, one front door](#native-configs-one-front-door) above.
+
+| You want to…                         | `ak` way                          | The raw ruflo/aqe way it maps to                    |
+| ------------------------------------ | --------------------------------- | --------------------------------------------------- |
+| Enable claude/codex hosts            | `ak host pick`              | `ENABLE_CLAUDE_CODE` / `ENABLE_CODEX` env + shared Ruflo/AQE access and guidance |
+| Register a Ruflo LLM provider        | `--provider ollama:qwen3.6:27b`   | `ruflo providers configure -p ollama -m qwen3.6:27b -e http://127.0.0.1:11434` |
+| Select a direct Ruflo provider       | per-agent/raw setting             | agent `--provider` or `RUFLO_PROVIDER=ollama` / `openrouter` |
+| Set which LLM runs QE                | `--aqe-provider gemini`           | `AQE_LLM_PROVIDER=gemini` (env)                     |
+| Select an admitted external AQE provider | `--aqe-provider hermes`        | project `llm-config.json` `externalProviders` + `defaultProvider` |
+| Order QE's fallback chain            | `--aqe-fallback '…'`              | edit `.agentic-qe/llm-config.json` / `aqe llm-router config` |
+| Cap QE spend                         | (kit.json `maxBudgetUsd`)         | `AQE_MAX_BUDGET_USD` / `--max-budget-usd`           |
+
+If you hand-edit `.agentic-qe/llm-config.json`, agentic-kit preserves foreign entries. It manages
+its fallback chain and curated overrides under `_managedBy`, and each external declaration under
+an exact-value ownership receipt. A same-id foreign or edited external declaration is preserved and
+reported as a conflict rather than overwritten or pruned. Keys always stay in the environment;
+neither agentic-kit nor AQE persists them.
+
+## Undo, always
+
+```bash
+ak host off     # reset to the claude-only default, reversibly
+```
+
+This reverts only environment values that still match their saved projection
+receipts. Later edits and unowned values survive. Router teardown requires an
+exact postimage receipt and an unchanged original backup: pristine projections
+restore atomically (retaining the backup), or are removed if ak created them.
+Legacy marker-only ownership, changed files, missing/changed backups, and ambiguous
+interrupted projections are preserved with a manual-reconciliation diagnostic.
+The `_managedBy` tag alone never authorizes whole-file deletion or restoration.
+
+---
+
+**The customization boundary:** default routes and deeper native configuration use the
+same host/provider distinction. Billing depends on the actual serving path and account.
+Review each projection's ownership and teardown limits before changing or removing it.
+
+## Appendix — design references
+
+- Per-activity routing and dual-host seeding: [docs/adr/](adr/) ADR-0001..0005;
+  grounded in ruflo's own dual-mode templates.
+- Primary-host selection and ambidextrous mirroring:
+  [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md).
+- Capability-driven integration axes, bindings, and provenance:
+  [ADR-0016](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md).
+- The generic local OpenAI-compatible provider: [ADR-0028](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0028-local-openai-compatible-providers.md).
+- External host adapters (experimental): [ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md),
+  amended by [ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md) — capability
+  graduation. Authoring guide: [authoring-host-adapters.md](https://github.com/pacphi/agentic-kit/blob/main/docs/authoring-host-adapters.md).
+- Host env flags (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`): upstream ruflo
+  ADR-034, "Optional MCP Backends".

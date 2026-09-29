@@ -60,7 +60,7 @@ Backup, archive and receipt.json go to
 (<state> = $XDG_STATE_HOME or ~/.local/state; %LOCALAPPDATA% on Windows), never
 inside a .agentic-qe folder. ak keeps them until you delete them. A preview
 removes its scratch copies when it finishes; a failed merge keeps them.
-Restore steps: docs/TROUBLESHOOTING.md, "Restore an AQE store from the merge
+Restore steps: docs/troubleshooting.md, "Restore an AQE store from the merge
 archive". Needs agentic-qe 3.14.4 or later.
 
 Examples:

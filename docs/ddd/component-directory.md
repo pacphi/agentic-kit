@@ -215,7 +215,7 @@ normative and this table restates it for readers of this document.
 - [ADR-0035](../adr/0035-managed-deja-vu-companion.md) — the managed companion boundary
 - [Machine footprint](machine-footprint.md) — the measurement context this deliberately isn't
 - [Context map](context-map.md) — where this context sits
-- [Dashboard guide](../DASHBOARD.md)
+- [Dashboard guide](../dashboard.md)
 - `src/lib/dashboard/about-directory.mjs` — the directory module;
   `src/commands/about.mjs` — the CLI twin;
   `tests/kit/about-directory.test.mjs` — the parity gate and register-contract checks

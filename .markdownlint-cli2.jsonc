@@ -5,7 +5,7 @@
     "README.md",
     "CLAUDE.md",
     "AGENTS.md",
-    "MAINTAINER.md",
+    "docs/maintainer.md",
     "docker/*.md",
     "claude/**/*.md",
     "src/templates/**/*.md",

@@ -19,14 +19,14 @@ describe the current system unless a section is explicitly marked as future work
 | [Project intelligence](project-intelligence.md) | Pattern store, learning counters, reasoning-graph size, and live delivery for Overview's Intelligence view |
 | [Machine footprint](machine-footprint.md) | Read-only install, runtime, storage, catalog, and project measurement for System |
 | [Maintenance](maintenance.md) | Resource-management control plane: an inventory-led workspace (Inventory, Guidance, Discovery, Activity) over ADR-0044's transaction engine — source-bound plans, one-write-action provider operations, verification, receipts, guarded undo, and a read-only interruption audit followed by individually confirmed reconciliation |
-| [Maintenance acceptance](../MAINTENANCE-ACCEPTANCE.md) | Stable requirement IDs, sentinel journeys, and open release gates for ADR-0048 |
+| [Maintenance acceptance](../maintenance-acceptance.md) | Stable requirement IDs, sentinel journeys, and open release gates for ADR-0048 |
 | [Component directory](component-directory.md) | Curated identity for the components agentic-kit installs or configures |
 
 ## Relationship to other documentation
 
 - Domain documents define stable terms, boundaries, state, and invariants.
 - [Architecture decision records](../adr/README.md) explain why consequential decisions were made.
-- User guides such as [Providers and hosts](../PROVIDERS.md) explain how to operate the CLI.
+- User guides such as [Providers and hosts](../providers.md) explain how to operate the CLI.
 - Source and tests enforce the model. When documentation and behavior disagree, treat that as drift
   to resolve rather than silently redefining a term.
 

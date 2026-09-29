@@ -6,7 +6,7 @@
 # exercises the true first-install path against whatever `next` currently is —
 # no image rebuild per release. Apt + Node layers stay cached.
 #
-# See USER-GUIDE.md (running it) and MAINTAINER-GUIDE.md (design + knobs).
+# See user-guide.md (running it) and maintainer-guide.md (design + knobs).
 
 ARG UBUNTU_VERSION=26.04
 FROM ubuntu:${UBUNTU_VERSION}

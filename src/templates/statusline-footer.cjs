@@ -457,7 +457,7 @@ function rufloDaemonSegment(ctx){
 // namespace (what `ak status` shows, e.g. 3.3.1), never the plugin.json SEMVER
 // (e.g. 0.5.0-dev) — different namespaces for the same install; showing the semver
 // here confused users (it disagreed with `ak status`). Three-namespace gotcha; see
-// MAINTAINER.md. Resolution order MIRRORS drift() in src/lib/ruvnet-brain.mjs so
+// docs/maintainer.md. Resolution order MIRRORS drift() in src/lib/ruvnet-brain.mjs so
 // this row and `ak status` can never disagree:
 //   1) the bundle's own on-disk stamp (SOURCE.json.releaseTag) — ground truth,
 //      current even when the KB changed outside ak (e.g. a manual forge-update.mjs

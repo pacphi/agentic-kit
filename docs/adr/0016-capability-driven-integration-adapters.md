@@ -491,7 +491,7 @@ ollama-via-codex: host=codex, provider=ollama,
 Host-specific transcript parsing remains unchanged. Provider attribution becomes configured when
 the binding establishes it and observed only when bounded runtime/catalogue or correlated evidence
 does. Exact model digest and local `$0` claims remain gated by ADR-0011 and
-`docs/LOCAL-MODEL-VALIDATION.md`. Until that evidence is captured, representation of the bindings
+`docs/local-model-validation.md`. Until that evidence is captured, representation of the bindings
 does not claim that compatibility-layer behavior has been observed. Each binding has independent
 ownership and teardown.
 

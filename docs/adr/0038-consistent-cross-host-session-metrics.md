@@ -478,7 +478,7 @@ session id touches the transcript reader's path-traversal guard, so the gate is 
   restated between the CLI and the browser bundle. Values agree today and both restatements are
   tested; the `usage-rhythm.mjs` dual bundle-and-import pattern shows a shared `usage-format.mjs` is
   feasible, and one coherent refactor is worth more than a cross-lane patch now.
-- **Reconciling the OpenAI rate table (`USAGE-SCORECARD-METRICS.md` §13.2).** That section's dated
+- **Reconciling the OpenAI rate table (`usage-scorecard-metrics.md` §13.2).** That section's dated
   rates and its primary-source claim disagree with `pricing.mjs`. It is a pre-existing
   discrepant-docs item, and it is explicitly **not** to be closed by editing one side to match the
   other: the mandate on that follow-up is to establish which is true and correct whichever is wrong.
@@ -538,7 +538,7 @@ counts, and a whole-cache invalidation test. `usage-context.test.mjs` separately
 host splits, policy bands, privacy bounds and the 20-row attention cap.
 
 Both citation-bearing reference documents are machine-checked: every `file:line` citation in
-`USAGE-SCORECARD-METRICS.md` and `TRANSCRIPTS.md` is verified against the current source on every
+`usage-scorecard-metrics.md` and `transcripts.md` is verified against the current source on every
 test run by `tests/kit/doc-citations.test.mjs`.
 
 ## References
@@ -555,7 +555,7 @@ test run by `tests/kit/doc-citations.test.mjs`.
   `src/lib/context-budget.mjs` (shared policy)
 - `src/lib/dashboard/client/usage.mjs` and `src/lib/dashboard/client/usage-rhythm.mjs` (render),
   `src/commands/usage.mjs` (`ak usage score`)
-- [Usage scorecard metrics](../USAGE-SCORECARD-METRICS.md) §15–§19 —
+- [Usage scorecard metrics](../usage-scorecard-metrics.md) §15–§19 —
   the per-metric formulas and sources
-- [Transcripts & session detail](../TRANSCRIPTS.md) §1 — the per-host evidence contract
-- [Dashboard user guide](../DASHBOARD.md) — the shipped panels
+- [Transcripts & session detail](../transcripts.md) §1 — the per-host evidence contract
+- [Dashboard user guide](../dashboard.md) — the shipped panels

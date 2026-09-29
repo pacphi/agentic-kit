@@ -226,7 +226,7 @@ const ENTRIES = Object.freeze([
       // No upstream doc site exists for these two packages; ak's own troubleshooting
       // page is the honest "where to read more", not a stand-in for one.
       link('docs', 'Docs',
-        'https://github.com/pacphi/agentic-kit/blob/main/docs/TROUBLESHOOTING.md'),
+        'https://github.com/pacphi/agentic-kit/blob/main/docs/troubleshooting.md'),
     ]),
     icon: MONOGRAM('ad', '--hue-safety'),
     detectionKey: 'security',

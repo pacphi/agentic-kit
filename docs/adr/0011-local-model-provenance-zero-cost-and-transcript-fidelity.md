@@ -251,12 +251,12 @@ Before this may be marked Accepted:
    of `usage.cache_*`; whether an `ai-title` event is emitted; and what a deliberately interrupted
    stream records.
 3. Confirm `/api/tags` `digest` values match what the transcript's tag resolves to.
-4. Record the observations in `docs/USAGE-SCORECARD-METRICS.md` and correct any finding above that
+4. Record the observations in `docs/usage-scorecard-metrics.md` and correct any finding above that
    the evidence contradicts.
 
 The executable form of this list — exact commands, the six questions with their predicted answers,
 the content-free capture step, and a results table — is
-**[`docs/LOCAL-MODEL-VALIDATION.md`](../LOCAL-MODEL-VALIDATION.md)**. It also carries the optional
+**[`docs/local-model-validation.md`](../local-model-validation.md)**. It also carries the optional
 alias experiment (`ollama cp qwen3-coder claude-opus-5`) that would turn F5 from a documented claim
 into a measured one, which is the single highest-value observation available: **§1 exists entirely
 because the model id is forgeable, and if it turns out not to be, §1 collapses to something much

@@ -10,7 +10,7 @@
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (project memory status and
   stray stores), [ADR-0055](0055-aqe-embedding-lifecycle.md) (the AQE embedding projections this
   pin sits beside), the
-  [issues 237–239 audit record](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)
+  [issues 237–239 audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)
   (Addendum 3 items 2 and 3; decisions B5-D1 to B5-D5), upstream
   [agentic-qe#735](https://github.com/proffesor-for-testing/agentic-qe/issues/735),
   [#736](https://github.com/proffesor-for-testing/agentic-qe/issues/736) and
@@ -174,7 +174,7 @@ partially moved, naming the complete archive copy and the files left behind.
 
 Audit-trail (`witness_chain`) rows are not imported; they stay in the archive with the store's
 `witness-keys/`. ak keeps the archive until the user deletes it.
-[TROUBLESHOOTING](../TROUBLESHOOTING.md#restore-an-aqe-store-from-the-merge-archive) gives the
+[TROUBLESHOOTING](../troubleshooting.md#restore-an-aqe-store-from-the-merge-archive) gives the
 restore steps. Nothing ak writes lies inside any `.agentic-qe` folder, because AQE restores any
 `memory*.db` over 1 MB it finds there when `memory.db` is missing (`dist/kernel/unified-memory.js`).
 

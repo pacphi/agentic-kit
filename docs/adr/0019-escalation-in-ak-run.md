@@ -75,7 +75,7 @@ wrapper until #83 removes the wrapper; nothing here changes their behavior.
 - The rung must have an execution adapter to advance: a ladder naming a host with no
   adapter records `cli_unavailable` for that rung and continues to the next.
 - The deprecated wrapper's whole-pipeline semantics and the canonical per-worker
-  semantics differ *deliberately*; the migration note in UPGRADING.md names that as an
+  semantics differ *deliberately*; the migration note in upgrading.md names that as an
   intended improvement, not a drift.
 
 ## Alternatives considered

@@ -9,7 +9,7 @@
   scan controls), [ADR-0053](0053-host-setup-evidence-and-usage-diagnostics.md) (host setup
   checks), [ADR-0055](0055-aqe-embedding-lifecycle.md) (live-check evidence), [ADR-0058](0058-managed-ruflo-components.md)
   (ruflo-component evidence), the
-  [issues 237–239 audit record](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)
+  [issues 237–239 audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)
   (Review Focus: a 30-second dashboard poll spawning processes on every tick)
 - **Amends:** [ADR-0025](0025-machine-footprint-metrics.md) §5 (cross-reference only — Task 11
   already recorded its own `Updated:` line), [ADR-0055](0055-aqe-embedding-lifecycle.md)
@@ -400,10 +400,10 @@ state is measured by the controller, not invented by a task).
 
 Branch 6b (`feat/one-refresh-flag`) replaced the interim boolean above with the flag syntax this
 ADR originally deferred, folded `ak x verify` into it, and closed several vocabulary/wiring gaps
-the [issues 237–239 audit](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)'s
+the [issues 237–239 audit](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)'s
 Item 4 named. It closed CLI-only: the dashboard's own controls are untouched, and the dashboard
 half of this work moved to the next remediation program — see
-[the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)'s "Closing
+[the branch 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md)'s "Closing
 this branch" section, and "Ahead: the dashboard half" below.
 
 - **One flag, three strengths, one ordered stage table** — `--refresh[=live|machine]` across `ak
@@ -464,7 +464,7 @@ this branch" section, and "Ahead: the dashboard half" below.
   refresh); `ak usage prompts --deep` → `--show-text`; `ak status --deep`/`--live`, `ak system
   --deep` and `ak maintain scan`/`--deep`/`--refresh-inventory` are retired, with no alias and no
   hint (Ruling R17 of
-  [the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)) — a
+  [the branch 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md)) — a
   retired spelling gets the parser's generic unknown-command/unknown-option error.
 - **The recipe-refresh removal.** Every user-reachable path to a recipe-registry refresh (the
   `ak maintain recipes` sub-verb, its v2 route and allowlist entry, the facade method, and the
@@ -488,7 +488,7 @@ this branch" section, and "Ahead: the dashboard half" below.
 ## Ahead: the dashboard half
 
 6b closed CLI-only — see
-[the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)'s "Closing
+[the branch 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md)'s "Closing
 this branch" section. The dashboard's own controls are unchanged by this branch and remain future
 work for the next remediation program:
 

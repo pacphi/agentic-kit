@@ -169,7 +169,7 @@ evidence, and agentic-kit must not present registration as successful selection 
   generic row is required regardless and the named rows would be additive decoration. And each row
   would assert transport and discovery facts for a server this repository has not measured —
   precisely the derivation-without-measurement that
-  [docs/LOCAL-MODEL-VALIDATION.md](../LOCAL-MODEL-VALIDATION.md) exists to correct. Named rows
+  [docs/local-model-validation.md](../local-model-validation.md) exists to correct. Named rows
   remain available later, gated on an evidence pass of the same kind, and would then be able to
   claim real `/v1/models` discovery instead of guessing at it.
 - **Extend `ollama` to mean "any local server".** Rejected: it would make an established provider

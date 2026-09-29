@@ -180,7 +180,7 @@ export const PRICES = {
  *   evidence — only asserted. The Codex field is configured INTENT, not a
  *   record of the tier that served a request. And which billing SURFACE ran
  *   (plain Messages API, Batch, Managed Agents) is recorded nowhere at all.
- *   See docs/USAGE-SCORECARD-METRICS.md §13.3 for the key-presence census.
+ *   See docs/usage-scorecard-metrics.md §13.3 for the key-presence census.
  */
 export const UNMODELLED_PRICING_FACTORS = Object.freeze([
   'regional-processing-uplift', 'large-prompt-surcharge', 'service-tiers',

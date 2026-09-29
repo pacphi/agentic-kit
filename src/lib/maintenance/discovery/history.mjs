@@ -1,5 +1,5 @@
 // ADR-0048 scan history — bounded, retained scan summaries
-// (docs/MAINTENANCE.md "Retention").
+// (docs/maintenance.md "Retention").
 // This store holds ONLY terminal scan summaries. It structurally cannot reach
 // receipts, dispositions, or recipe acceptance records — those live in other
 // agents' stores — so `clearHistory` cannot violate MNT-PRV-008 by scope

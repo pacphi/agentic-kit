@@ -55,7 +55,7 @@ const RETIRED_CLI_PATTERNS = [
   { label: 'ak status/system […] --deep|--live (bracketed options before the flag)',
     pattern: /\b(?:status|system)\s+(?:\[[^\]\n]*\]\s*)*\[?--(?:deep|live)\b/g },
   // `ak usage prompts --deep` behind unrelated prose on the same line (the
-  // USAGE-SCORECARD-METRICS.md line the original guard missed had no direct
+  // usage-scorecard-metrics.md line the original guard missed had no direct
   // `prompts --deep` adjacency at all).
   { label: 'ak usage prompts …--deep (flag anywhere on the same line)', pattern: /\bprompts\b[^\n]*\[?--deep\b/g },
 ];

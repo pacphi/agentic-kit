@@ -969,7 +969,7 @@ test('renderers list counts first, then items with links and the dispatch branch
 // Spec 2026-09-28: the routine never reads the ledger; the watch fires it with
 // one line of payload, which the prompt treats as data and checks against the registry.
 test('the documented dispatch routine reads its payload as data and validates the thread', () => {
-  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8').replace(/\r\n/g, '\n');
+  const doc = fs.readFileSync('docs/upstream-watch.md', 'utf8').replace(/\r\n/g, '\n');
   const ledger = doc.slice(doc.indexOf('## The ledger'), doc.indexOf('## Notifications'));
   const prompt = doc.slice(doc.indexOf('## The dispatch routine')).match(/```text\n([\s\S]*?)```/)[1];
   assert.match(ledger, /upstream-watch-ledger/);

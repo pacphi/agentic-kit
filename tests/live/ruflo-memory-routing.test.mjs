@@ -51,7 +51,7 @@ test('the real Ruflo CLI and MCP interfaces route project memory as the kit clai
   assert.notEqual(observation.mcpToCli, 'unknown', 'CLI retrieve failed for a reason other than a miss');
   if (memoryRoutingObserved(version)) {
     assert.deepEqual([observation.cliToMcp, observation.mcpToCli], ['visible', 'not-visible'],
-      `ruflo ${version} on ${process.platform} no longer routes as OBSERVED_ROUTING claims; re-verify and update src/lib/ruflo-memory-contract.mjs, docs/TROUBLESHOOTING.md and the guidance`);
+      `ruflo ${version} on ${process.platform} no longer routes as OBSERVED_ROUTING claims; re-verify and update src/lib/ruflo-memory-contract.mjs, docs/troubleshooting.md and the guidance`);
     assert.equal(observation.mcpStore, 'agentdb-memory.db');
   }
 });

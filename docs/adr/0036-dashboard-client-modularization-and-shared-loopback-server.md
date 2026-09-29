@@ -189,4 +189,4 @@ full Playwright `dashboard-ui` suite (331 cases) pass unmodified.
 - `src/lib/dashboard/client.mjs` and `src/lib/dashboard/client/` (the collector and its 11 modules)
 - `src/lib/dashboard/styles.mjs` and `src/lib/dashboard/styles/` (the collector and its 4 modules)
 - `eslint.config.mjs` (the `dashboard/client/**` override)
-- [Dashboard user guide](../DASHBOARD.md)
+- [Dashboard user guide](../dashboard.md)

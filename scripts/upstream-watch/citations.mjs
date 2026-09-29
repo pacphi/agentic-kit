@@ -17,9 +17,9 @@ export const CITATION_DIRS = ['src', 'bin', 'claude', 'tests'];
 // subfolders and are history, never scanned; these top-level files are
 // history too, so they are exempt by name.
 export const USER_DOC_EXEMPT = new Map([
-  ['docs/MODEL-PRICING-AUDIT.md', 'dated audit'],
-  ['docs/METAHARNESS-COMPANION-PROPOSAL.md', 'proposal'],
-  ['docs/USAGE-SCORECARD-METRICS.md', 'research reference'],
+  ['docs/archive/2026-09-23-audit-model-pricing.md', 'dated audit'],
+  ['docs/proposals/metaharness-companion.md', 'proposal'],
+  ['docs/usage-scorecard-metrics.md', 'research reference'],
 ]);
 
 /** README.md plus every top-level docs/*.md guide, minus the named exemptions. */

@@ -4,7 +4,7 @@ name: devcontainers
 # devcontainer CLI — the same tool Codespaces/VS Code use — so a config
 # change is proven before merge (PR trigger) and upstream drift (base image
 # tags, the published npm package's install path) is caught even when
-# nothing in this repo changed (monthly schedule). See docs/DEVCONTAINERS.md.
+# nothing in this repo changed (monthly schedule). See docs/devcontainers.md.
 
 on:
   pull_request:
