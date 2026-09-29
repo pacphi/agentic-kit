@@ -51,7 +51,7 @@ function openCodeFixture(dir) {
   });
   db.close();
 }
-function run(dir, zone, extra = '', days = 240) {
+function run(dir, zone, extra = '', days = 240, runtimeSetup = '') {
   const script = `
     import fs from 'node:fs';
     import path from 'node:path';
@@ -66,6 +66,7 @@ function run(dir, zone, extra = '', days = 240) {
         classify: () => ({category:'Build', confidence:1, basis:'fixture'}), detectInsights: () => [] } };
     // Filesystem provenance uses Date.now independently of the query clock.
     Date.now = () => options.now;
+    ${runtimeSetup}
     const first = await readIndex(options);
     ${extra}
     const agg = ${extra ? 'await readIndex(options)' : 'first'};
@@ -130,11 +131,22 @@ test('in-process memo observes a child-only TZ change', (t) => {
   assert.deepEqual(changed.stable, run(dir, zones[1]).stable);
 });
 
-test('unknown runtime timezone declines persistent cache reuse', (t) => {
-  const dir = fixture(t);
-  run(dir, 'Invalid/Zone');
-  assert.equal(run(dir, 'Invalid/Zone').sourceHealth.codex.diagnostics.cachedFiles, 0);
-});
+for (const unavailable of ['return { timeZone: undefined };', 'throw new Error("zone unavailable");']) {
+  test(`unknown runtime timezone declines persistent cache reuse: ${unavailable}`, (t) => {
+    const dir = fixture(t);
+    const expected = run(dir, zones[0]);
+    // Invalid TZ strings can resolve to a fallback zone on Windows. Model the
+    // unavailable Intl boundary directly, inside this disposable child only.
+    const setup = `Intl.DateTimeFormat.prototype.resolvedOptions = function () { ${unavailable} };`;
+    for (let refresh = 0; refresh < 2; refresh++) {
+      const actual = run(dir, zones[0], '', 240, setup);
+      assert.deepEqual(actual.stable, expected.stable);
+      assert.equal(actual.sourceHealth.codex.diagnostics.cachedFiles, 0);
+      assert.ok(actual.entries.length > 0);
+      assert.ok(actual.entries.every((entry) => entry.localTimeContext === null));
+    }
+  });
+}
 
 test('degraded OpenCode retains old timezone evidence without contributing stale buckets', (t) => {
   const dir = fixture(t);
