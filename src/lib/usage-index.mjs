@@ -190,6 +190,12 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // A v26 Claude entry written before cost-state support lacks `claudeCostState`;
 // reparse that entry in place rather than bumping the unreleased schema again.
 export const SCHEMA_VERSION = 26; // v26 adds parse-time session surface fields; v25 records reparse.
+// OpenCode cost interpretation changed within schema 26. This entry-level
+// marker distinguishes a new parse from an older coalesced row, including
+// rows where every reported cost happened to be trusted.
+const OPENCODE_PARSE_SEMANTICS = 'cost-trust-v2';
+const compatibleOpencodeCache = (candidate, entry) => candidate.provider !== 'opencode'
+  || entry?.parseSemantics === OPENCODE_PARSE_SEMANTICS;
 
 const DAY_MS = 86_400_000;
 // Dashboard windows stop at 365 days. One displayed window plus its equal
@@ -818,8 +824,10 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
     && hit.upd === updated.upd
     && ledgerStillValid(hit, c.windowStat)
     && compatibleCostStateCache(c, hit)
+    && compatibleOpencodeCache(c, hit)
     && (c.provider !== 'codex' || hit.parseStats));
-  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null) };
+  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null),
+    ...(c.provider === 'opencode' ? { parseSemantics: OPENCODE_PARSE_SEMANTICS } : {}) };
   let session = cacheHit ? hit.session : null;
   let parseStats = cacheHit ? hit.parseStats : null;
   const failure = {};
@@ -860,6 +868,7 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
  *  still be visible to the NEXT entry's check and to the final report). */
 function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb, opencodeHealth, attemptedFiles }) {
   if (!cache?.entries) return opencodeHealth;
+  let legacyCacheEntriesExcluded = 0;
   for (const [file, e] of Object.entries(cache.entries)) {
     // A candidate that failed reparsing must not be revived just because its
     // path still stats (it may now be unreadable or no longer be a file).
@@ -875,9 +884,10 @@ function carryForwardCachedEntries(cache, entries, records, { now, cutoff, ocDb,
     if (!result) continue;
     entries[file] = result.entry;
     opencodeHealth = result.health;
+    if (!result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) legacyCacheEntriesExcluded++;
     if (result.pushRecord && (lastActivity == null || lastActivity >= cutoff)) records.push(e.session);
   }
-  return opencodeHealth;
+  return { ...opencodeHealth, legacyCacheEntriesExcluded };
 }
 
 /** The opencode half of carryForwardCachedEntries — split out to keep both
@@ -891,13 +901,14 @@ function carryForwardOpencodeEntry(file, e, opencodeHealth, ocDb) {
     ? null
     : (dbFile ? opencodeSessionExistsResult({ dbFile, id: file.slice('opencode://'.length) }) : null);
   if (opencodeHealth.status === 'degraded' || (exists?.ok && exists.value)) {
-    return { entry: { ...e, dbFile }, health: opencodeHealth, pushRecord: true };
+    return { entry: { ...e, dbFile }, health: opencodeHealth,
+      pushRecord: compatibleOpencodeCache({ provider: 'opencode' }, e) };
   }
   if (exists && !exists.ok && exists.error.kind !== 'absent') {
     return {
       entry: { ...e, dbFile },
       health: { status: 'degraded', reason: exists.error.kind },
-      pushRecord: true,
+      pushRecord: compatibleOpencodeCache({ provider: 'opencode' }, e),
     };
   }
   return null;

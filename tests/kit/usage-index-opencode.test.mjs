@@ -249,6 +249,96 @@ test('the incremental cache: a warm scan reuses unchanged sessions and picks up 
   rm(sb.dir);
 });
 
+test('unchanged schema 26 OpenCode rows without parse semantics are reparsed, including mixed untrusted zero cost', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_legacy26', directory: '/x', title: 'real title', timeCreated: at }],
+    messages: [
+      assistantMsg('a1', 'ses_legacy26', at + 1000, { cost: 0.4 }),
+      assistantMsg('a2', 'ses_legacy26', at + 2000, { cost: 0 }),
+    ],
+  });
+  try {
+    const cold = await buildIndex(opts(sb));
+    const file = `opencode://ses_legacy26`;
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.equal(cache.schemaVersion, 26);
+    assert.ok(cache.entries[file].parseSemantics, 'every new OpenCode entry identifies its parser semantics');
+    delete cache.entries[file].parseSemantics;
+    cache.entries[file].session.title = 'FORGED-LEGACY';
+    cache.entries[file].session.usage[0].costObserved = 0.4;
+    delete cache.entries[file].session.usage[0].costUntrustedMessages;
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const repaired = await buildIndex(opts(sb));
+    const session = repaired.sessions.find((s) => s.id === 'ses_legacy26');
+    assert.equal(session.title, 'real title');
+    assert.equal(session.responses, 2);
+    assert.equal(session.costEvidence.observedMessages, 1);
+    assert.equal(session.costEvidence.unpricedMessages, 1);
+    assert.equal(session.cost, cold.sessions[0].cost);
+    assert.equal(repaired.totals.cost, repaired.byHost.opencode.cost);
+    assert.equal(repaired.totals.cost, repaired.byProvider.opencode.cost);
+    assert.equal(repaired.totals.responses, repaired.byProvider.opencode.responses);
+    assert.equal(repaired.totals.tokens, repaired.byProvider.opencode.tokens);
+    assert.ok(JSON.parse(fs.readFileSync(sb.cachePath, 'utf8')).entries[file].parseSemantics);
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
+test('schema 26 OpenCode rows lacking a marker reparse even when every cost was trusted; marked rows reuse warm', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({ sessions: [{ id: 'ses_trusted26', directory: '/x', title: 'real', timeCreated: at }],
+    messages: [assistantMsg('a1', 'ses_trusted26', at + 1000, { cost: 0.2 })] });
+  try {
+    await buildIndex(opts(sb));
+    const file = 'opencode://ses_trusted26';
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    delete cache.entries[file].parseSemantics;
+    cache.entries[file].session.title = 'OLD';
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    await buildIndex(opts(sb));
+    const reparsed = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.equal(reparsed.entries[file].session.title, 'real');
+    reparsed.entries[file].session.title = 'WARM-MARKED';
+    fs.writeFileSync(sb.cachePath, JSON.stringify(reparsed));
+    _resetForTest();
+    const warm = await buildIndex(opts(sb));
+    assert.equal(warm.sessions[0].title, 'WARM-MARKED');
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
+test('degraded OpenCode store excludes legacy cache accounting but retains compatible cache accounting', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({ sessions: [
+    { id: 'ses_old', directory: '/x', title: 'old', timeCreated: at },
+    { id: 'ses_new', directory: '/x', title: 'new', timeCreated: at },
+  ], messages: [
+    assistantMsg('a1', 'ses_old', at + 1000, { cost: 0.3 }),
+    assistantMsg('a2', 'ses_new', at + 1000, { cost: 0.4 }),
+  ] });
+  try {
+    await buildIndex(opts(sb));
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    delete cache.entries['opencode://ses_old'].parseSemantics;
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    fs.rmSync(sb.dbFile);
+    fs.writeFileSync(sb.dbFile, 'not a sqlite database');
+    _resetForTest();
+    const degraded = await buildIndex(opts(sb));
+    assert.equal(degraded.sourceHealth.opencode.status, 'degraded');
+    assert.equal(degraded.sourceHealth.opencode.reason, 'corrupt');
+    assert.equal(degraded.sourceHealth.opencode.legacyCacheEntriesExcluded, 1);
+    assert.deepEqual(degraded.sessions.map((s) => s.id), ['ses_new']);
+    assert.equal(degraded.totals.cost, 0.4);
+    assert.equal(degraded.byProvider.opencode.cost, 0.4);
+    assert.equal(degraded.totals.responses, 1);
+    const retained = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.ok(retained.entries['opencode://ses_old']);
+    assert.equal(retained.entries['opencode://ses_old'].parseSemantics, undefined);
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
 test('a corrupt OpenCode store preserves last-good usage and surfaces degraded source health', async () => {
   const at = NOW - DAY;
   const sb = sandbox({
