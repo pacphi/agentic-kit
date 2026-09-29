@@ -10,14 +10,20 @@ import { writePrivateFileAtomic } from './file-write.mjs';
 const home = os.homedir();
 const isWindows = process.platform === 'win32';
 
+/** The XDG Base Directory spec ignores relative environment overrides. */
+export function xdgBase(name, fallback, { env = process.env, p = path } = {}) {
+  const value = env[name];
+  return value && p.isAbsolute(value) ? value : fallback;
+}
+
 /** Kit config dir: XDG on POSIX, %APPDATA% on Windows. */
 function configBase() {
   if (isWindows) return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-  return process.env.XDG_CONFIG_HOME || path.join(home, '.config');
+  return xdgBase('XDG_CONFIG_HOME', path.join(home, '.config'));
 }
-function stateBase() {
+export function stateBase() {
   if (isWindows) return process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-  return process.env.XDG_STATE_HOME || path.join(home, '.local', 'state');
+  return xdgBase('XDG_STATE_HOME', path.join(home, '.local', 'state'));
 }
 export const configDir = () => path.join(configBase(), 'agentic-kit');
 export const telemetryDir = () => path.join(configDir(), 'telemetry');
@@ -98,8 +104,10 @@ export function toolInternalDirs({ home: h = home, env = process.env, platform =
     p.join(h, '.claude'), env.CLAUDE_CONFIG_DIR,
     p.join(h, '.codex'), env.CODEX_HOME,
     p.join(h, '.claude-flow'), p.join(h, '.ruflo'),
-    p.join(h, '.config'), env.XDG_CONFIG_HOME, p.join(h, '.local'), env.XDG_DATA_HOME,
-    env.XDG_STATE_HOME, p.join(h, '.cache'), env.XDG_CACHE_HOME,
+    p.join(h, '.config'), xdgBase('XDG_CONFIG_HOME', null, { env, p }),
+    p.join(h, '.local'), xdgBase('XDG_DATA_HOME', null, { env, p }),
+    xdgBase('XDG_STATE_HOME', null, { env, p }), p.join(h, '.cache'),
+    xdgBase('XDG_CACHE_HOME', null, { env, p }),
   ];
   if (platform === 'win32') dirs.push(p.join(h, 'AppData'), env.APPDATA, env.LOCALAPPDATA);
   if (platform === 'darwin') dirs.push(p.join(h, 'Library', 'Application Support'), p.join(h, 'Library', 'Caches'));
@@ -349,8 +357,8 @@ export function hostHealthInputPaths(cwd, env = process.env) {
     path.join(codex, 'requirements.toml'), '/etc/codex/config.toml', '/etc/codex/requirements.toml',
     ...(process.platform === 'win32' ? [path.join(env.ProgramData || 'C:\\ProgramData', 'OpenAI', 'Codex', 'config.toml')] : []),
     path.join(opencode, 'config.json'), path.join(opencode, 'opencode.json'), path.join(opencode, 'opencode.jsonc'),
-    path.join(env.XDG_STATE_HOME || path.join(home, '.local', 'state'), 'opencode', 'model.json'),
-    path.join(env.XDG_DATA_HOME || path.join(home, '.local', 'share'), 'opencode', 'auth.json'),
+    path.join(xdgBase('XDG_STATE_HOME', path.join(home, '.local', 'state'), { env }), 'opencode', 'model.json'),
+    path.join(xdgBase('XDG_DATA_HOME', path.join(home, '.local', 'share'), { env }), 'opencode', 'auth.json'),
     env.OPENCODE_CONFIG,
   ].filter(Boolean);
   let root = path.resolve(cwd);

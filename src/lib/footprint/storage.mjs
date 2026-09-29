@@ -52,7 +52,7 @@
 // `detectWorktrees` is false.
 import fs from 'node:fs';
 import path from 'node:path';
-import { home, claudeDir, codexDir, configDir } from '../paths.mjs';
+import { home, claudeDir, codexDir, configDir, xdgBase } from '../paths.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
 import { decodeClaudeProjectDir, transcriptMetadata } from './project-sources.mjs';
 import { classifyWorkingContext } from './working-context.mjs';
@@ -119,7 +119,7 @@ const flatDir = () => true;
  * @returns {StorageRoot[]}
  */
 export function defaultStorageRoots({ env = process.env, projects = null } = {}) {
-  const stateRoot = env.XDG_STATE_HOME || path.join(home, '.local', 'state');
+  const stateRoot = xdgBase('XDG_STATE_HOME', path.join(home, '.local', 'state'), { env });
   const opencodeData = path.dirname(defaultOpencodeDbPath());
   const claude = (name) => path.join(claudeDir(), name);
   const codex = (name) => path.join(codexDir(), name);
