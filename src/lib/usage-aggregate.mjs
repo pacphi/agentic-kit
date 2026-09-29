@@ -1,5 +1,7 @@
-import { rowCostEvidence, sessionCostEvidence, acquisitionSummary } from './usage-cost.mjs';
+import { foldIncompleteOpencodeObservations, hasOpencodeObservations, opencodeObservationProjection } from './usage-opencode-observations.mjs';
+import { rowCostEvidence, sessionCostEvidence, acquisitionSummary, reconcileClaudeCostState } from './usage-cost.mjs';
 import { isLocalInferenceProvider } from './usage-local-provider.mjs';
+import { classifySessionSurface } from './session-surface.mjs';
 // usage-aggregate.mjs — pure arithmetic over ALREADY-PARSED session records:
 // interval math, secret masking, and the two shapes usage-index.mjs hands its
 // consumers (the batch Aggregate from `aggregate()`, and the single-session
@@ -337,7 +339,9 @@ function firstBilledDay(rec) {
  * already a managed artifact.
  */
 function v16Projection(rec) {
-  const fps = rec.promptFPs;
+  // Schema-26 caches can still contain fingerprints written before OpenCode
+  // child sessions were excluded. Treat those as measured zero on consumption.
+  const fps = rec.host === 'opencode' && isSubagentSession(rec) ? [] : rec.promptFPs;
   if (!Array.isArray(fps)) {
     return { typedPrompts: null, tapPrompts: null, _typedTokens: [], _questions: 0, _personas: 0 };
   }
@@ -428,6 +432,7 @@ function buildPromptBaselines(records, { days, now }) {
   const endDay = localDay(now - days * DAY_MS);
   const perHost = Object.create(null);
   for (const rec of records) {
+    if (rec?.host === 'opencode' && isSubagentSession(rec)) continue;
     if (!rec || !Array.isArray(rec.promptFPs)) continue;
     const day = firstBilledDay(rec);
     if (day === null || day < startDay || day >= endDay) continue;
@@ -520,6 +525,7 @@ function decoratePromptFP(fp, rec, day) {
 function windowFingerprints(records, cutoff) {
   const out = [];
   for (const rec of records) {
+    if (rec?.host === 'opencode' && isSubagentSession(rec)) continue;
     if (!rec?.responses || !Array.isArray(rec.promptFPs)) continue;
     if (rec.end == null || rec.end < cutoff) continue;
     const day = firstBilledDay(rec);
@@ -774,6 +780,7 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
   m.responses += row.responses; m.input += row.input; m.output += row.output;
   m.cacheRead += row.cacheRead; m.cacheWrite += row.cacheWrite;
   m.tokens += rowTokens; m.cost = round(m.cost + rowCost);
+  return rowCost;
 }
 
 /** Fold every usage row of one record; returns `{input, output, cacheRead,
@@ -783,13 +790,29 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
  *  usable: it can open at 23:58 and only bill after midnight). */
 function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
   const acc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSaved: 0 };
+  const providerUsage = rec.host === 'opencode' ? Object.create(null) : null;
   const activeDays = new Set();
   for (const row of rec.usage) {
     acc.cacheSaved += cacheSavedFor(row, rec, deps, rates);
-    foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
+    const rowCost = foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
+    if (providerUsage) {
+      // Only per-row accounting belongs here. A full bucket also has session
+      // minutes/confidence initialized to zero; spreading it over the session
+      // row below would erase those measured session fields.
+      const provider = row.provider ?? 'unknown';
+      const p = providerUsage[provider] ??= {
+        responses: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+        tokens: 0, cost: 0,
+      };
+      p.responses += row.responses;
+      p.input += row.input; p.output += row.output;
+      p.cacheRead += row.cacheRead; p.cacheWrite += row.cacheWrite;
+      p.tokens += row.input + row.output + row.cacheRead + row.cacheWrite;
+      p.cost += rowCost;
+    }
   }
   for (const day of activeDays) byDay[day].sessionsActive++;
-  return { ...acc, costEvidence: sessionCostEvidence(rec, deps), firstDay: firstBilledDay(rec) };
+  return { ...acc, providerUsage, costEvidence: sessionCostEvidence(rec, deps), firstDay: firstBilledDay(rec) };
 }
 
 /**
@@ -831,28 +854,77 @@ function v11Projection(rec) {
   };
 }
 
+const CODEX_EFFORT_VALUES = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+
+/** Normalize cached v26 records that predate these optional Codex details. */
+function codexObservationProjection(rec) {
+  if (rec.host !== 'codex') return { codexEffort: null, firstTokenMs: null, compactions: 0,
+    compactionEvidence: { lowerBound: 0, upperBound: 0 } };
+  const rawEffort = rec.codexEffort;
+  const counts = Object.fromEntries(Object.entries(rawEffort?.counts ?? {})
+    .filter(([key, value]) => CODEX_EFFORT_VALUES.has(key) && Number.isSafeInteger(value) && value > 0));
+  const codexEffort = CODEX_EFFORT_VALUES.has(rawEffort?.last) && Object.keys(counts).length
+    ? { last: rawEffort.last, counts } : null;
+  const rawTiming = rec.firstTokenMs;
+  const firstTokenMs = rawTiming?.provenance === 'host-observed'
+    && Number.isSafeInteger(rawTiming.count) && rawTiming.count > 0
+    && Number.isFinite(rawTiming.total) && rawTiming.total >= 0
+    && Number.isFinite(rawTiming.min) && rawTiming.min >= 0
+    && Number.isFinite(rawTiming.max) && rawTiming.max >= rawTiming.min
+    ? { count: rawTiming.count, total: rawTiming.total, min: rawTiming.min,
+      max: rawTiming.max, provenance: 'host-observed' } : null;
+  const compactions = Number.isSafeInteger(rec.compactions) && rec.compactions > 0 ? rec.compactions : 0;
+  const rawCompaction = rec.compactionEvidence;
+  const validBounds = Number.isSafeInteger(rawCompaction?.lowerBound)
+    && rawCompaction.lowerBound === compactions
+    && Number.isSafeInteger(rawCompaction.upperBound)
+    && rawCompaction.upperBound >= compactions;
+  const compactionEvidence = validBounds
+    ? { lowerBound: compactions, upperBound: rawCompaction.upperBound }
+    : { lowerBound: compactions, upperBound: compactions ? null : 0 };
+  return { codexEffort, firstTokenMs, compactions, compactionEvidence };
+}
+
 /** One aggregate session row from a parsed record, its folded usage sums,
  *  and its classifier verdict. */
+function sessionProviderIdentity(rec) {
+  // Cached v26 OpenCode records can still carry the old last-wins session
+  // field. Derive it from the row identities so no additional schema bump is
+  // needed for this unreleased format.
+  if (rec.host !== 'opencode') return {
+    provider: rec.inferenceProvider ?? null,
+    providerProvenance: rec.providerProvenance ?? 'unknown',
+  };
+  const providers = new Set((rec.usage ?? []).map((row) => row.provider ?? null));
+  const provider = providers.size === 1 ? [...providers][0] : null;
+  return { provider, providerProvenance: provider ? 'observed' : 'unknown' };
+}
+
 function buildSessionRow(rec, usage, verdict) {
   const { input, output, cacheRead, cacheWrite, cost, cacheSaved, firstDay } = usage;
   return {
     id: rec.id, host: rec.host ?? rec.provider,
-    provider: rec.inferenceProvider ?? null,
+    ...sessionProviderIdentity(rec),
     transcriptProvider: rec.provider,
-    providerProvenance: rec.providerProvenance ?? 'unknown',
     title: rec.title, project: rec.project,
     projectEvidence: rec.projectEvidence ? { ...rec.projectEvidence } : null,
     sessionOrigin: rec.sessionOrigin ? { ...rec.sessionOrigin } : null,
+    ...(rec.importEvidence ? { importEvidence: { ...rec.importEvidence } } : {}),
     worktree: rec.worktree ?? null,
     start: new Date(rec.start ?? rec.end).toISOString(),
     minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
     prompts: rec.prompts, responses: rec.responses, exceptions: rec.exceptions,
-    sidechain: rec.sidechain, threadSource: rec.threadSource,
+    // Transcript response count stays per session; shared copies have a
+    // separate count for the global accounting folds.
+    ...(rec.accountedResponses === undefined ? {} : { accountedResponses: rec.accountedResponses }),
+    _accountedResponses: rec.accountedResponses ?? rec.responses,
+    sidechain: rec.sidechain, threadSource: rec.threadSource, parentSessionId: rec.parentSessionId ?? null,
     models: rec.models.slice(),
     input, output, cacheRead, cacheWrite,
     tokens: input + output + cacheRead + cacheWrite,
     cost: round(cost),
     costEvidence: usage.costEvidence,
+    claudeCostState: reconcileClaudeCostState(rec.originalUsage ? { ...rec, usage: rec.originalUsage } : rec),
     acquisitionCoverage: rec.acquisitionCoverage ?? null,
     // What the cache avoided for THIS session, so the window total is
     // auditable a row at a time rather than only in aggregate.
@@ -866,6 +938,7 @@ function buildSessionRow(rec, usage, verdict) {
     // records (the schema bump re-derives those).
     reasoningOutput: rec.reasoningOutput ?? 0,
     rateLimits: rec.rateLimits ?? null,
+    ...(rec.host === 'opencode' ? opencodeObservationProjection(rec) : codexObservationProjection(rec)),
     ...v11Projection(rec),
     // v16: what this session's operator actually typed. The underscore-prefixed
     // members are working material for the window fold (per-host lengths and
@@ -884,6 +957,7 @@ function buildSessionRow(rec, usage, verdict) {
     _active: Array.isArray(rec.active) && rec.active.length ? rec.active : [[rec.start ?? rec.end, rec.end]],
     _punchcard: rec.punchcard,
     _day: firstDay,
+    _providerUsage: usage.providerUsage,
   };
 }
 
@@ -896,7 +970,10 @@ function buildSessionRow(rec, usage, verdict) {
 function buildSessionRows(records, { cutoff, endMs = null, deps, byDay, byModel, rates }) {
   const sessions = [];
   for (const rec of records) {
-    if (!rec || !rec.responses) continue;                 // no assistant turn → not a session
+    // Codex can spend measured tokens in an aborted/tool-only turn. A positive
+    // component row is enough evidence to include it even without a message.
+    if (!rec || (!rec.responses && !hasOpencodeObservations(rec) && !(rec.host === 'codex' && rec.usage?.some((row) =>
+      row.input > 0 || row.output > 0 || row.cacheRead > 0 || row.cacheWrite > 0)))) continue;
     if (rec.end === null || rec.end < cutoff) continue;    // outside the window
     if (endMs != null && rec.end >= endMs) continue;       // ... or after the window asked for
     const usage = foldSessionUsageRows(rec, deps, byDay, byModel, rates);
@@ -934,7 +1011,7 @@ function foldSessionIntoTree(tree, s) {
 /** Subagent work is either Claude's sidechain flag or Codex's ledger-backed
  *  thread source; both mean "not a session a human was driving". */
 function sourceKey(s) {
-  return isSubagentSession(s) ? 'subagent' : 'main';
+  return isSubagentSession(s) || ['guardian_review', 'agent_created_thread'].includes(s.threadSource) ? 'subagent' : 'main';
 }
 
 /** Second pass over the (now sorted) session rows: totals, the by-host/
@@ -946,6 +1023,7 @@ function foldSessionTotals(sessions, byDay, byModel) {
   const totals = {
     sessions: sessions.length, prompts: 0, humanPrompts: 0, responses: 0,
     exceptions: 0, aborts: 0,
+    compactions: 0, compactionEvidence: { lowerBound: 0, upperBound: 0 }, firstTokenMs: null,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
     // v16. `humanPrompts` above is main-thread PROMPT COUNTS; these two are the
@@ -969,12 +1047,25 @@ function foldSessionTotals(sessions, byDay, byModel) {
 
   for (const s of sessions) {
     const source = sourceKey(s);
-    totals.prompts += s.prompts; totals.responses += s.responses;
+    totals.prompts += s.prompts; totals.responses += s._accountedResponses;
     // Only a MAIN-thread prompt is a human typing. A subagent's prompts are
     // written by the harness, so counting them would inflate every
     // per-prompt denominator with work nobody asked for by hand.
     if (source === 'main') totals.humanPrompts += s.prompts;
     totals.exceptions += s.exceptions; totals.aborts += Number(s.aborts) || 0;
+    totals.compactions += s.compactions;
+    totals.compactionEvidence.lowerBound += s.compactionEvidence.lowerBound;
+    totals.compactionEvidence.upperBound = totals.compactionEvidence.upperBound === null
+      || s.compactionEvidence.upperBound === null ? null
+      : totals.compactionEvidence.upperBound + s.compactionEvidence.upperBound;
+    if (s.firstTokenMs) {
+      totals.firstTokenMs ??= { count: 0, total: 0, min: s.firstTokenMs.min,
+        max: s.firstTokenMs.max, provenance: 'host-observed' };
+      totals.firstTokenMs.count += s.firstTokenMs.count;
+      totals.firstTokenMs.total += s.firstTokenMs.total;
+      totals.firstTokenMs.min = Math.min(totals.firstTokenMs.min, s.firstTokenMs.min);
+      totals.firstTokenMs.max = Math.max(totals.firstTokenMs.max, s.firstTokenMs.max);
+    }
     totals.input += s.input; totals.output += s.output;
     totals.cacheRead += s.cacheRead; totals.cacheWrite += s.cacheWrite;
     totals.tokens += s.tokens; totals.cost += s.cost;
@@ -983,18 +1074,28 @@ function foldSessionTotals(sessions, byDay, byModel) {
     spanMs += s._span[1] - s._span[0];
 
     const hostBucket = bucket(byHost, s.host ?? 'unknown');
-    addTo(hostBucket, s);
+    const accounted = { ...s, responses: s._accountedResponses };
+    addTo(hostBucket, accounted);
     // Aborts are host-capability evidence (codex and opencode record a user
     // stop; claude does not), so they are kept per host — a reader dividing
     // by "responses that could have recorded one" needs them apart.
     hostBucket.aborts = (hostBucket.aborts ?? 0) + (Number(s.aborts) || 0);
-    addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
+    if (s._providerUsage && Object.keys(s._providerUsage).length) {
+      // OpenCode's provider is observed on each assistant row. A session may
+      // count under several providers, but each response/token/dollar lands
+      // exactly once under the row's own provider (or unknown).
+      for (const [provider, usage] of Object.entries(s._providerUsage)) {
+        addTo(bucket(byProvider, provider), { ...s, ...usage });
+      }
+    } else {
+      addTo(bucket(byProvider, s.provider ?? 'unknown'), accounted);
+    }
     // 'not-recorded' is a first-class key, not a display fallback: a transcript
     // that carried no mode evidence must not be folded into a real posture.
-    addTo(bucket(byMode, s.mode ?? 'not-recorded'), s);
-    addTo(bucket(bySource, source), s);
-    addTo(bucket(byProject, s.project), s);
-    addTo(bucket(byCategory, s.category), s);
+    addTo(bucket(byMode, s.mode ?? 'not-recorded'), accounted);
+    addTo(bucket(bySource, source), accounted);
+    addTo(bucket(byProject, s.project), accounted);
+    addTo(bucket(byCategory, s.category), accounted);
     foldSessionByModel(byModel, s);
     // Exceptions ride the SAME first-billed-day attribution as the session
     // count, so the reliability trend and the session trend are drawn from one
@@ -1178,6 +1279,7 @@ function previousWindow(records, { days, now, deps, rates }) {
     cutoff: windowStart - days * DAY_MS, endMs: windowStart, deps, byDay, byModel, rates,
   });
   const folded = foldSessionTotals(sessions, byDay, byModel);
+  foldIncompleteOpencodeObservations(records, folded.totals, windowStart - days * DAY_MS, windowStart);
   finishTotals(folded.totals, sessions, folded);
   return { totals: folded.totals, rhythm: buildRhythm(sessions) };
 }
@@ -1234,6 +1336,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
   sessions.sort((a, b) => b.cost - a.cost || Date.parse(b.start) - Date.parse(a.start));
 
   const folded = foldSessionTotals(sessions, byDay, byModel);
+  foldIncompleteOpencodeObservations(records, folded.totals, cutoff);
   const { totals, byHost, byProvider, byMode, bySource, byTool,
     byProject, byCategory, punchcard, promptsByHost, promptStatsByDay, tree } = folded;
 
@@ -1247,8 +1350,8 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
 
   const projectTree = buildProjectTree(tree);
   for (const s of sessions) {
-    delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced;
-    delete s._typedTokens; delete s._questions; delete s._personas;
+    delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced; delete s._providerUsage;
+    delete s._typedTokens; delete s._questions; delete s._personas; delete s._accountedResponses;
   }
   const codexRateLimits = buildCodexRateLimits(sessions);
 
@@ -1300,20 +1403,64 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
  *     stays visible/auditable.
  * Exported for test.
  */
+function ledgerParent(rec, ledger, byId) {
+  const parentId = rec.parentSessionId ?? (ledger.parents instanceof Map ? ledger.parents.get(rec.id) : null);
+  if (typeof parentId !== 'string' || parentId === rec.id) return null;
+  const parent = byId.get(parentId);
+  // A chain or cycle supplies no reliable top-level surface. Walk only IDs
+  // already present in this bounded record set; never infer a missing link.
+  if (!parent || ['subagent', 'guardian_review', 'agent_created_thread'].includes(
+    parent.threadSource ?? ledger.threads.get(parentId)?.threadSource)) return null;
+  const seen = new Set([rec.id]);
+  let cursor = parentId;
+  while (cursor) {
+    if (seen.has(cursor)) return null;
+    seen.add(cursor);
+    const node = byId.get(cursor);
+    if (!node) return null;
+    cursor = node.parentSessionId ?? (ledger.parents instanceof Map ? ledger.parents.get(cursor) : null);
+  }
+  return { parentId, parent };
+}
+
+function ledgerOrigin(rec, source, parent) {
+  let origin = rec.sessionOrigin;
+  // An imported transcript is a copy, regardless of what the optional ledger
+  // says about its thread. Preserve the parser's explicit override.
+  if (origin?.evidence === 'imported-copy' || origin?.initiator === 'imported-copy') return origin;
+  if (origin && source !== rec.threadSource) {
+    const raw = origin.rawEvidence ?? {};
+    origin = { ...origin, ...classifySessionSurface({ host: 'codex', originator: raw.originator,
+      source: raw.source, threadSource: source }) };
+  }
+  if (origin && parent?.sessionOrigin && ['subagent', 'guardian_review', 'agent_created_thread'].includes(source)) {
+    origin = { ...origin, surface: parent.sessionOrigin.surface, label: parent.sessionOrigin.label,
+      attributes: [...(origin.attributes ?? []), source === 'guardian_review' ? 'Auto-review' : 'Subagents'] };
+  }
+  return origin;
+}
+
 export function applyCodexLedger(records, ledger) {
-  if (!ledger || !(ledger.threads instanceof Map)) return records;
-  return records.map((rec) => {
+  // The rollout's own source can carry a verified parent even when Codex's
+  // optional SQLite ledger is unavailable.
+  if (!ledger || !(ledger.threads instanceof Map)) ledger = { threads: new Map(), parents: new Map() };
+  const byId = new Map(records.filter((rec) => rec?.provider === 'codex').map((rec) => [rec.id, rec]));
+  const overlaid = records.map((rec) => {
     if (!rec || rec.provider !== 'codex') return rec;
     const t = ledger.threads.get(rec.id);
     const fromEdges = ledger.parents instanceof Map && ledger.parents.has(rec.id) ? 'subagent' : null;
     const source = rec.threadSource ?? t?.threadSource ?? fromEdges;
+    const parentLink = ledgerParent(rec, ledger, byId);
     // A rollout that classified ITSELF (any source, subagent included) already
     // carries the right usage: a subagent's is its own, replay subtracted.
-    if (source === rec.threadSource) return rec;
-    const out = { ...rec, threadSource: source };
-    if (source === 'subagent') { out.usage = []; out.reasoningOutput = 0; }
+    if (source === rec.threadSource && !parentLink && !rec.parentSessionId) return rec;
+    const out = { ...rec, threadSource: source,
+      parentSessionId: parentLink?.parentId ?? null };
+    if (source !== rec.threadSource && source === 'subagent') { out.usage = []; out.reasoningOutput = 0; }
+    out.sessionOrigin = ledgerOrigin(rec, source, parentLink?.parent);
     return out;
   });
+  return overlaid.some((rec, index) => rec !== records[index]) ? overlaid : records;
 }
 
 /** The /api/session payload for any parsed record (claude, codex, opencode):
@@ -1331,6 +1478,7 @@ export function sessionPayload(rec, turns, deps) {
       transcriptProvider: rec.provider,
       providerProvenance: rec.providerProvenance ?? 'unknown',
       title: rec.title, project: rec.project,
+      ...(rec.importEvidence ? { importEvidence: { ...rec.importEvidence } } : {}),
       worktree: rec.worktree ?? null,
       start: rec.start === null ? null : new Date(rec.start).toISOString(),
       end: rec.end === null ? null : new Date(rec.end).toISOString(),
@@ -1345,6 +1493,7 @@ export function sessionPayload(rec, turns, deps) {
       // because fmtUsd(undefined) is the truthy string "$0.00".
       cost: sessionCost(rec, deps),
       costEvidence: sessionCostEvidence(rec, deps),
+      claudeCostState: reconcileClaudeCostState(rec),
       acquisitionCoverage: rec.acquisitionCoverage ?? null,
       ...usage, tokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
     },

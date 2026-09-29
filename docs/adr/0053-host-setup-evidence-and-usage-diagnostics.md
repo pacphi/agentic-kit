@@ -12,7 +12,10 @@
   15-minute-capped, consent-gated, untouched by this branch (its `host-health-evidence.mjs`
   input-fingerprint helper, used only to invalidate that in-memory cache, is also untouched). See
   [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) (remediation program, branch 6a tasks 5 and 7)
-- **Updated:** 2026-09-28 — `ak host check-connection <claude|codex|opencode>` is the CLI twin of
+- **Updated:** 2026-09-29 — the dashboard **Check again** local re-check is folded into
+  header Refresh; `POST /api/host-health/local` was removed. The separate consent-gated
+  connection check remains. See [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md).
+- **Earlier update:** 2026-09-28 — `ak host check-connection <claude|codex|opencode>` is the CLI twin of
   this connection check: it reuses `createHostReadinessReader`, so it refuses for exactly the same
   hosts and reasons the dashboard dialog would (managed-only, `canCheckConnection`), and applies
   the same consent rule (`--yes` or an interactive y/N; a non-TTY without `--yes` is refused;
@@ -112,8 +115,9 @@ the requesting client cancels the owned connected subprocess.
 
 ### HTTP and presentation boundaries
 
-`GET /api/host-health` reads local/cached evidence. The separate POST allowlist is
-`/api/host-health/local` and `/api/host-health/connection`. Both require the session
+`GET /api/host-health` reads local/cached evidence. The local re-check now runs within
+`POST /api/refresh`, while the separate consent-gated connection check uses
+`POST /api/host-health/connection`. Both require the session
 token header and exact same-origin fetch metadata; query tokens cannot authorize
 POST. Requests are size-bounded and accept fixed fields, never arbitrary commands,
 paths, prompts, environment or client-selected models. Connection checks additionally
@@ -168,8 +172,8 @@ from one module, `src/lib/host-management.mjs`.
 - **The hint is the complete host list.** `ak host pick --host` replaces the enabled
   set, so the hint names every currently enabled host (including admitted external
   hosts) plus the one to add, for example `ak host pick --host claude,codex`.
-- **The paid connection check stays managed-only.** The local re-check button reads
-  **Check again** and runs for every host.
+- **The paid connection check stays managed-only.** The local re-check is part of header
+  **Refresh** and runs for every host.
 
 **Consequences.** Automatic local checks now spawn at most the same bounded, read-only
 commands for up to three hosts per minute while the dashboard is open. The previous

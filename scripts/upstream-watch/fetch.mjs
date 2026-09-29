@@ -14,6 +14,10 @@ const VERSION = /^\d+\.\d+\.\d+(?:-[\w.]+)?$/;
 const NOT_FOUND = /HTTP 404|Not Found/i;
 const NO_MATCH = /No match found for version/;
 
+/** An invalid local argument or fixture cannot recover by waiting for the network. */
+export class PermanentFetchError extends Error {}
+const invalid = (message) => new PermanentFetchError(message);
+
 // What closed a thread: its closing pull requests, else the ClosedEvent's closer.
 export const FIXING_CHANGES_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){defaultBranchRef{name} issueOrPullRequest(number:$number){__typename ... on Issue{closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged mergedAt baseRefName mergeCommit{oid} repository{nameWithOwner}}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{closer{__typename ... on Commit{oid} ... on PullRequest{number merged mergedAt baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}}} ... on PullRequest{number merged mergedAt baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}`;
 
@@ -80,7 +84,7 @@ export function createFetcher({ exec = run } = {}) {
     },
     async thread(id) {
       const [, repo, number] = ID.exec(id) ?? [];
-      if (!repo) throw new Error(`not an owner/repo#number id: ${id}`);
+      if (!repo) throw invalid(`not an owner/repo#number id: ${id}`);
       const issue = await json('gh', ['api', `repos/${repo}/issues/${number}`]);
       return { issue, comments: await this.comments(repo, number) };
     },
@@ -89,7 +93,7 @@ export function createFetcher({ exec = run } = {}) {
      * per line; `--slurp` would need gh 2.48, newer than apt's gh on Ubuntu 24.04.
      */
     async comments(repo, number) {
-      if (!OWNER_REPO.test(repo ?? '') || !/^[1-9]\d*$/.test(String(number))) throw new Error(`not an issue: ${repo}#${number}`);
+      if (!OWNER_REPO.test(repo ?? '') || !/^[1-9]\d*$/.test(String(number))) throw invalid(`not an issue: ${repo}#${number}`);
       const args = ['api', '--paginate', '--jq', '.[]', `repos/${repo}/issues/${number}/comments?per_page=100`];
       const result = await exec('gh', args);
       if (result.status !== 0) throw new Error(`gh ${args.join(' ')} failed: ${(result.stderr || result.error?.message || 'no output').trim()}`);
@@ -98,7 +102,7 @@ export function createFetcher({ exec = run } = {}) {
     /** Merged pull requests (or the closing commit) that fixed a thread; empty when none qualifies. */
     async fixingChanges(id) {
       const [, repo, number] = ID.exec(id) ?? [];
-      if (!repo) throw new Error(`not an owner/repo#number id: ${id}`);
+      if (!repo) throw invalid(`not an owner/repo#number id: ${id}`);
       const [owner, name] = repo.split('/');
       const answer = await json('gh', ['api', 'graphql', '-f', `query=${FIXING_CHANGES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`]);
       return changesOf(repo, answer?.data?.repository);
@@ -109,10 +113,10 @@ export function createFetcher({ exec = run } = {}) {
      * a rate limit never reads as "not contained".
      */
     async contains(repo, refs, sha) {
-      if (!SHA.test(sha ?? '')) throw new Error(`not a commit: ${sha}`);
-      if (!OWNER_REPO.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
+      if (!SHA.test(sha ?? '')) throw invalid(`not a commit: ${sha}`);
+      if (!OWNER_REPO.test(repo ?? '')) throw invalid(`not an owner/repo: ${repo}`);
       for (const ref of refs) {
-        if (!REF.test(ref ?? '')) throw new Error(`not a tag name: ${ref}`);
+        if (!REF.test(ref ?? '')) throw invalid(`not a tag name: ${ref}`);
         const args = ['api', `repos/${repo}/compare/${ref}...${sha}`, '--jq', '{status:.status}'];
         const result = await exec('gh', args);
         if (result.status !== 0) {
@@ -120,7 +124,7 @@ export function createFetcher({ exec = run } = {}) {
           throw new Error(`gh ${args.join(' ')} failed: ${(result.stderr || result.error?.message || 'no output').trim()}`);
         }
         const { status } = JSON.parse(result.stdout);
-        if (!['behind', 'identical', 'ahead', 'diverged'].includes(status)) throw new Error(`gh ${args.join(' ')} returned status ${status}`);
+        if (!['behind', 'identical', 'ahead', 'diverged'].includes(status)) throw invalid(`gh ${args.join(' ')} returned status ${status}`);
         return { ref, contained: status === 'behind' || status === 'identical' };
       }
       return { ref: null, contained: null };
@@ -132,8 +136,8 @@ export function createFetcher({ exec = run } = {}) {
      * every range to its highest published match with npm.
      */
     async bundled(chain, name, at = null) {
-      for (const pkg of [...chain, name]) if (!PACKAGE_NAME.test(pkg ?? '')) throw new Error(`not a package name: ${pkg}`);
-      if (at !== null && !VERSION.test(at)) throw new Error(`not a version: ${at}`);
+      for (const pkg of [...chain, name]) if (!PACKAGE_NAME.test(pkg ?? '')) throw invalid(`not a package name: ${pkg}`);
+      if (at !== null && !VERSION.test(at)) throw invalid(`not a version: ${at}`);
       const carrierVersion = at ?? await json('npm', ['view', chain[0], 'version', '--json']);
       let [pkg, version] = [chain[0], carrierVersion];
       const trail = [`${pkg} ${version}`];
@@ -159,13 +163,13 @@ export function createFetcher({ exec = run } = {}) {
      * only scheduled runs show that the watch is alive.
      */
     async lastRun(repo) {
-      if (!OWNER_REPO.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
+      if (!OWNER_REPO.test(repo ?? '')) throw invalid(`not an owner/repo: ${repo}`);
       const answer = await json('gh', ['api', `repos/${repo}/actions/workflows/upstream-watch.yml/runs?status=success&event=schedule&per_page=1`]);
       const run = answer?.workflow_runs?.[0];
       return run ? { at: run.run_started_at, url: run.html_url } : null;
     },
     async release({ channel, name }) {
-      if (!PACKAGE_NAME.test(name)) throw new Error(`not a package or repository name: ${name}`);
+      if (!PACKAGE_NAME.test(name)) throw invalid(`not a package or repository name: ${name}`);
       if (channel === 'npm') return releaseFacts('npm', await json('npm', ['view', name, 'time', 'dist-tags', '--json']));
       return releaseFacts('github-release', await json('gh', ['api', `repos/${name}/releases?per_page=100`]));
     },
@@ -186,7 +190,7 @@ export function retrying(fetcher, { delays = [2000, 10_000], sleep = (ms) => new
         try {
           return await method.apply(fetcher, args);
         } catch (error) {
-          if (attempt >= delays.length) throw error;
+          if (error instanceof PermanentFetchError || attempt >= delays.length) throw error;
           await sleep(delays[attempt]);
         }
       }

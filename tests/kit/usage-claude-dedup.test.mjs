@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseClaude } from '../../src/lib/usage-parsers.mjs';
+import { reconcileClaudeMessages } from '../../src/lib/usage-claude-dedup.mjs';
 import { decodeClaudeRecord } from '../../src/lib/telemetry-records.mjs';
 import { buildIndex, SCHEMA_VERSION, _resetForTest } from '../../src/lib/usage-index.mjs';
 import { costOf, priceFor } from '../../src/lib/pricing.mjs';
@@ -16,6 +17,10 @@ import { tempDir } from './helpers/temp-dir.mjs';
 
 const T0 = Date.parse('2026-08-20T10:00:00.000Z');
 const at = (s) => new Date(T0 + s * 1000).toISOString();
+const dayAt = (s) => {
+  const d = new Date(at(s));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const line = (o) => JSON.stringify(o);
 
 const USAGE = { input_tokens: 10, output_tokens: 200, cache_read_input_tokens: 5000, cache_creation_input_tokens: 700 };
@@ -183,6 +188,355 @@ test('turn rows (reader path) are still emitted per transcript line', () => {
     asst({ id: 'msg_A', s: 6, block: text('two') }),
   ].join('\n'), { id: 'sess', dirName: 'd', withTurns: true });
   assert.equal(turns.filter((t) => t.role === 'assistant').length, 2);
+});
+
+test('cross-file copies charge one richest message while source sessions keep their response counts', () => {
+  const a = parse([prompt(), asst({ id: 'msg_shared', s: 5, block: text(), usage: { ...USAGE, output_tokens: 12 } })]);
+  const b = parse([prompt(), asst({ id: 'msg_shared', s: 6, block: text(), usage: { ...USAGE, output_tokens: 200 } })]);
+  a.id = 'a'; b.id = 'b';
+  const [aa, bb] = reconcileClaudeMessages([a, b]);
+  assert.equal(a.responses + b.responses, 2, 'cached transcript observations are untouched');
+  assert.equal(aa.responses + bb.responses, 2, 'session counts still describe each file');
+  assert.equal(aa.accountedResponses + bb.accountedResponses, 1);
+  assert.equal(aa.usage[0].output + bb.usage[0].output, 200);
+  assert.equal(aa.usage[0].cacheRead + bb.usage[0].cacheRead, 5000);
+  assert.equal(aa.usage[0].responses + bb.usage[0].responses, 1);
+  assert.deepEqual(reconcileClaudeMessages([b, a]).map((r) => [r.id, r.usage[0].output]),
+    [[bb.id, bb.usage[0].output], [aa.id, aa.usage[0].output]], 'file traversal cannot elect a different charge');
+});
+
+test('missing IDs and distinct same-count IDs never collapse across files', () => {
+  const a = parse([prompt(), asst({ s: 5, block: text() }), asst({ id: 'msg_one', s: 6, block: text() })]);
+  const b = parse([prompt(), asst({ s: 5, block: text() }), asst({ id: 'msg_two', s: 6, block: text() })]);
+  const rows = reconcileClaudeMessages([a, b]);
+  assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 4);
+  assert.equal(rows.reduce((n, r) => n + r.usage[0].output, 0), 800);
+});
+
+test('malformed repeated identifiers are not cross-file identity proof', () => {
+  const a = parse([asst({ id: 'not-an-api-message-id', s: 5, block: text() })]);
+  const b = parse([asst({ id: 'not-an-api-message-id', s: 5, block: text() })]);
+  const rows = reconcileClaudeMessages([a, b]);
+  assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 2);
+  assert.equal(rows.reduce((n, r) => n + r.usage[0].output, 0), 400);
+});
+
+test('message ID, request ID and serving-provider namespaces stay separate', () => {
+  const plain = parse([asst({ id: 'same', s: 5, block: text() })]);
+  const request = parse([asst({ requestId: 'same', s: 5, block: text() })]);
+  const bedrock = parse([asst({ id: 'same', s: 5, block: text(), model: 'us.anthropic.claude-sonnet-4-20250514-v1:0' })]);
+  const rows = reconcileClaudeMessages([plain, request, bedrock]);
+  assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 3);
+  assert.equal(rows.reduce((n, r) => n + r.usage[0].output, 0), 600);
+});
+
+test('partial copied snapshots reconcile component maxima once', () => {
+  const a = parse([asst({ id: 'msg_partial', s: 5, block: text(), usage: { ...USAGE, cache_read_input_tokens: 0 } })]);
+  const b = parse([asst({ id: 'msg_partial', s: 6, block: text(), usage: { ...USAGE, output_tokens: 20 } })]);
+  const rows = reconcileClaudeMessages([a, b]);
+  assert.equal(rows.reduce((n, r) => n + r.usage[0].output, 0), 200);
+  assert.equal(rows.reduce((n, r) => n + r.usage[0].cacheRead, 0), 5000);
+  assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 1);
+});
+
+test('copies entirely outside the fixed pool still have one historical charge', () => {
+  const a = parse([asst({ id: 'msg_old', s: 5, block: text(), usage: { ...USAGE, output_tokens: 12 } })]);
+  const b = parse([asst({ id: 'msg_old', s: 6, block: text(), usage: USAGE })]);
+  a.claudeIdentityEligible = false; b.claudeIdentityEligible = false;
+  const rows = reconcileClaudeMessages([a, b]);
+  assert.equal(rows.reduce((n, r) => n + r.accountedResponses, 0), 1);
+  assert.equal(rows.reduce((n, r) => n + r.usage[0].output, 0), 200);
+});
+
+test('equal claims have a stable accounting owner when sidechain and source differ', () => {
+  const main = parse([asst({ id: 'msg_tie', s: 5, block: text() })]);
+  const side = parse([asst({ id: 'msg_tie', s: 5, block: text() })]);
+  main.sidechain = false; side.sidechain = true;
+  main.claudeSourceKey = 'a'; side.claudeSourceKey = 'b';
+  const forward = reconcileClaudeMessages([main, side]);
+  const reverse = reconcileClaudeMessages([side, main]);
+  assert.equal(forward.find((r) => r.claudeSourceKey === 'a').accountedResponses, 1);
+  assert.equal(reverse.find((r) => r.claudeSourceKey === 'a').accountedResponses, 1);
+  assert.equal(forward.find((r) => r.claudeSourceKey === 'b').accountedResponses, 0);
+  assert.equal(reverse.find((r) => r.claudeSourceKey === 'b').accountedResponses, 0);
+  const x = parse([asst({ id: 'msg_same_metadata', s: 5, block: text() })]);
+  const y = parse([asst({ id: 'msg_same_metadata', s: 5, block: text() })]);
+  x.claudeSourceKey = 'x'; y.claudeSourceKey = 'y';
+  assert.equal(reconcileClaudeMessages([x, y]).find((r) => r.claudeSourceKey === 'x').accountedResponses, 1);
+  assert.equal(reconcileClaudeMessages([y, x]).find((r) => r.claudeSourceKey === 'x').accountedResponses, 1,
+    'source identity settles a tie even when every visible session field matches');
+});
+
+test('one identity is charged once across current, previous and combined windows regardless of lookback', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-cross-window');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const oldFile = path.join(proj, 'old.jsonl');
+  const newFile = path.join(proj, 'new.jsonl');
+  const write = (file, s, output) => {
+    fs.writeFileSync(file, [prompt(s), asst({ id: 'msg_shared', s: s + 5, block: text(),
+      usage: { ...USAGE, output_tokens: output } })].join('\n') + '\n');
+    fs.utimesSync(file, new Date(at(s)), new Date(at(s + 5)));
+  };
+  write(oldFile, 0, 200);
+  write(newFile, 86_400, 100);
+  const o = { days: 1, now: T0 + 2 * 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  const plain = await buildIndex(o);
+  assert.equal(plain.totals.output, 0, 'the richer older copy is the single accounting owner');
+  assert.equal(plain.totals.responses, 0);
+  assert.equal(plain.totals.cost, 0);
+  assert.deepEqual(plain.sourceHealth.claude.identityCoverage,
+    { horizonDays: 2, horizonCoversComparison: true, horizonCoversRequestedHistory: true,
+      outOfPoolRecords: 0, unknownEligibilityRecords: 0, outsideCurrentExcluded: 0,
+      basis: 'file-mtime-and-session-end' });
+  _resetForTest();
+  const widenedCurrent = await buildIndex({ ...o, lookbackDays: 2 });
+  assert.equal(widenedCurrent.totals.output, plain.totals.output);
+  assert.equal(widenedCurrent.totals.responses, plain.totals.responses);
+  _resetForTest();
+  const widened = await buildIndex({ ...o, lookbackDays: 2, previous: true });
+  assert.equal(widened.totals.output, plain.totals.output, 'comparison cannot change the displayed charge');
+  assert.equal(widened.totals.responses, plain.totals.responses);
+  assert.equal(widened.previous.totals.output, 200);
+  assert.equal(widened.previous.totals.responses, 1);
+  assert.equal(widened.previous.totals.cost, 2);
+  _resetForTest();
+  const combined = await buildIndex({ ...o, days: 2 });
+  assert.equal(combined.totals.output, 200);
+  assert.equal(combined.totals.responses, 1);
+  assert.equal(combined.totals.cost, 2);
+  assert.equal(widened.totals.output + widened.previous.totals.output, combined.totals.output);
+  assert.equal(widened.totals.responses + widened.previous.totals.responses, combined.totals.responses);
+  _resetForTest();
+  const warmPlain = await buildIndex(o);
+  assert.equal(warmPlain.totals.output, plain.totals.output);
+  const outsideFile = path.join(proj, 'outside.jsonl');
+  write(outsideFile, -86_400, 300);
+  _resetForTest();
+  const longLookback = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(longLookback.totals.output, plain.totals.output,
+    'a third copy outside the fixed accounting horizon cannot change current ownership');
+  assert.equal(longLookback.previous.totals.output, 200);
+  _resetForTest();
+  assert.equal((await buildIndex(o)).totals.output, plain.totals.output,
+    'cached older history cannot change the plain query');
+  _resetForTest();
+  const capped = await buildIndex({ ...o, days: 400 });
+  assert.deepEqual(capped.sourceHealth.claude.identityCoverage,
+    { horizonDays: 730, horizonCoversComparison: false, horizonCoversRequestedHistory: true,
+      outOfPoolRecords: 0, unknownEligibilityRecords: 0, outsideCurrentExcluded: 0,
+      basis: 'file-mtime-and-session-end' },
+    'a caller wider than the supported dashboard window sees the identity cap');
+});
+
+test('equal copied usage still yields one charge across adjacent windows', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-equal-cross-window');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  for (const [name, seconds] of [['old', 0], ['new', 86_400]]) {
+    const file = path.join(proj, `${name}.jsonl`);
+    fs.writeFileSync(file, asst({ id: 'msg_equal', s: seconds + 5, block: text() }) + '\n');
+    fs.utimesSync(file, new Date(at(seconds)), new Date(at(seconds + 5)));
+  }
+  const o = { days: 1, now: T0 + 2 * 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  const split = await buildIndex({ ...o, previous: true });
+  assert.equal(split.previous.totals.sessions, 1, 'comparison is acquired within the common identity horizon');
+  _resetForTest();
+  const combined = await buildIndex({ ...o, days: 2 });
+  assert.equal(split.totals.output + split.previous.totals.output, 200);
+  assert.equal(split.totals.responses + split.previous.totals.responses, 1);
+  assert.equal(combined.totals.output, 200);
+  assert.equal(combined.totals.responses, 1);
+  assert.equal(split.totals.cost + split.previous.totals.cost, combined.totals.cost);
+});
+
+test('deeper lookback cannot promote a copy whose file mtime is outside the fixed identity pool', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-identity-mtime');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const olderMtime = path.join(proj, 'older-mtime.jsonl');
+  const newerMtime = path.join(proj, 'newer-mtime.jsonl');
+  const write = (file, seconds, output, mtimeSeconds, id = 'msg_same') => {
+    fs.writeFileSync(file, asst({ id, s: seconds, block: text(),
+      usage: { ...USAGE, output_tokens: output } }) + '\n');
+    fs.utimesSync(file, new Date(at(mtimeSeconds)), new Date(at(mtimeSeconds)));
+  };
+  write(olderMtime, 5, 200, -86_400); // transcript Aug 20, file mtime Aug 19
+  write(newerMtime, 86_405, 100, 86_405); // transcript and mtime Aug 21
+  const o = { days: 1, now: T0 + 2 * 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  const plain = await buildIndex(o);
+  assert.equal(plain.totals.output, 100);
+  _resetForTest();
+  const wider = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(wider.totals.output, 100);
+  assert.equal(wider.totals.cost, 1);
+  assert.equal(wider.totals.responses, 1);
+  assert.equal(wider.previous.totals.output, 0, 'the observed duplicate still charges only once');
+  assert.equal(wider.sourceHealth.claude.identityCoverage.horizonCoversRequestedHistory, false);
+  assert.equal(wider.sourceHealth.claude.identityCoverage.outOfPoolRecords, 1);
+  _resetForTest();
+  assert.equal((await buildIndex(o)).totals.output, 100, 'cached older history cannot promote it');
+
+  const distinctHistory = path.join(proj, 'distinct-history.jsonl');
+  write(distinctHistory, 6, 50, -86_400, 'msg_distinct_history');
+  _resetForTest();
+  const historical = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(historical.totals.output, 100);
+  assert.equal(historical.previous.totals.output, 50,
+    'a distinct outside-pool historical message remains visible when requested');
+  assert.equal(historical.sourceHealth.claude.identityCoverage.outOfPoolRecords, 2);
+
+  // Inclusive boundary: a file at the fixed mtime cutoff belongs to the
+  // identity pool even when its transcript timestamp is earlier.
+  fs.utimesSync(olderMtime, new Date(at(0)), new Date(at(0)));
+  _resetForTest();
+  const boundary = await buildIndex(o);
+  assert.equal(boundary.totals.output, 0, 'the richer boundary copy is eligible');
+  _resetForTest();
+  const boundaryWide = await buildIndex({ ...o, lookbackDays: 5, previous: true });
+  assert.equal(boundaryWide.totals.output, 0);
+  assert.equal(boundaryWide.previous.totals.output, 250);
+});
+
+test('malformed cached Claude claim is reparsed instead of crashing or trusted', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-malformed-claims');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, 'one.jsonl');
+  fs.writeFileSync(file, asst({ id: 'msg_one', s: 5, block: text() }) + '\n');
+  const o = { days: 14, now: T0 + 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: () => 0, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  assert.equal((await buildIndex(o)).totals.output, 200);
+  const original = JSON.parse(fs.readFileSync(o.cachePath, 'utf8'));
+  const claim = original.entries[file].session.claudeMessages[0];
+  for (const malformed of [[null], [{ ...claim, usage: { ...claim.usage, output: 201 } }],
+    [claim, claim]]) {
+    const cache = structuredClone(original);
+    cache.entries[file].session.claudeMessages = malformed;
+    fs.writeFileSync(o.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    assert.equal((await buildIndex(o)).totals.output, 200);
+    const repaired = JSON.parse(fs.readFileSync(o.cachePath, 'utf8'));
+    assert.equal(repaired.entries[file].session.claudeMessages.length, 1);
+    assert.equal(typeof repaired.entries[file].session.claudeMessages[0].identity, 'string');
+  }
+});
+
+test('invalid cached claims do not mask a source that becomes unreadable before reparse', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-claim-fallback');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  fs.mkdirSync(proj, { recursive: true });
+  const file = path.join(proj, 'one.jsonl');
+  fs.writeFileSync(file, asst({ id: 'msg_one', s: 5, block: text() }) + '\n');
+  const o = { days: 14, now: T0 + 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: () => 0, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  await buildIndex(o);
+  const cache = JSON.parse(fs.readFileSync(o.cachePath, 'utf8'));
+  cache.entries[file].session.claudeMessages = [null];
+  fs.writeFileSync(o.cachePath, JSON.stringify(cache));
+  _resetForTest();
+  const result = await buildIndex({ ...o, onProgress: ({ phase, scanned }) => {
+    if (phase === 'scan' && scanned === 0) {
+      fs.unlinkSync(file);
+      fs.mkdirSync(file); // still stats, but is no longer a readable transcript
+    }
+  } });
+  assert.equal(result.totals.sessions, 0, 'an invalid cache is not a fallback observation');
+  assert.equal(result.sourceHealth.claude.status, 'degraded');
+  assert.equal(result.sourceHealth.claude.diagnostics.common.unitsSeen, 1);
+  assert.equal(result.sourceHealth.claude.diagnostics.common.unitsParsed, 0);
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(o.cachePath, 'utf8')).entries).length, 0);
+});
+
+test('index keeps cross-file accounting on cold, warm, add, change and removal scans', async () => {
+  _resetForTest();
+  const dir = tempDir('ak-cross-file');
+  const root = path.join(dir, 'claude');
+  const proj = path.join(root, '-Users-me-proj');
+  const other = path.join(root, '-Users-me-other');
+  fs.mkdirSync(proj, { recursive: true });
+  fs.mkdirSync(other, { recursive: true });
+  const a = path.join(proj, 'a.jsonl');
+  const b = path.join(other, 'b.jsonl');
+  const c = path.join(proj, 'c.jsonl');
+  const write = (file, messages) => fs.writeFileSync(file,
+    [prompt(), ...messages].join('\n') + '\n');
+  write(a, [asst({ id: 'msg_shared', s: 5, block: text(), usage: { ...USAGE, output_tokens: 12 } })]);
+  write(b, [asst({ id: 'msg_shared', s: 86_406, block: text(), usage: USAGE })]);
+  const o = { days: 14, now: T0 + 2 * 86_400_000,
+    roots: { claude: root, codex: path.join(dir, 'codex') },
+    cachePath: path.join(dir, 'usage-index.json'), codexState: null,
+    deps: { costOf: ({ output }) => output / 100, pricesAsOf: 'fixture',
+      classify: () => ({ category: 'Build', confidence: 1, basis: 'fixture' }), detectInsights: () => [] } };
+  const check = (result, count, output, responses, sharedProject) => {
+    assert.equal(result.totals.sessions, count);
+    assert.equal(result.totals.responses, responses);
+    assert.equal(result.totals.output, output);
+    assert.equal(result.totals.cost, output / 100);
+    assert.equal(result.totals.tokens, result.totals.input + result.totals.output
+      + result.totals.cacheRead + result.totals.cacheWrite);
+    assert.equal(Object.values(result.byDay).reduce((n, row) => n + row.tokens, 0), result.totals.tokens);
+    assert.ok(result.byDay[dayAt(sharedProject === 'other' ? 86_406 : 5)].tokens > 0,
+      'the elected copy owns its local billing day');
+    assert.equal(Object.values(result.byModel).reduce((n, row) => n + row.output, 0), output);
+    assert.equal(Object.values(result.byProvider).reduce((n, row) => n + row.output, 0), output);
+    assert.equal(Object.values(result.byProject).reduce((n, row) => n + row.output, 0), output);
+    assert.equal(result.byProject[sharedProject].output,
+      sharedProject === 'other' ? output - (count === 3 ? 200 : 0) : output);
+    assert.equal(Object.values(result.bySource).reduce((n, row) => n + row.responses, 0), responses);
+    assert.equal(Object.values(result.punchcard).reduce((n, value) => n + value, 0), responses);
+    assert.equal(result.projectTree.reduce((n, row) => n + row.tokens, 0), result.totals.tokens);
+    assert.equal(result.sessions.reduce((n, row) => n + row.output, 0), output);
+    assert.equal(result.sessions.reduce((n, row) => n + row.responses, 0), count,
+      'each session retains its own observed response count');
+    assert.equal(result.sessions.reduce((n, row) => n + row.accountedResponses, 0), responses);
+  };
+  check(await buildIndex(o), 2, 200, 1, 'other');
+  const legacy = JSON.parse(fs.readFileSync(o.cachePath, 'utf8'));
+  for (const entry of Object.values(legacy.entries)) delete entry.session.claudeMessages;
+  fs.writeFileSync(o.cachePath, JSON.stringify(legacy));
+  _resetForTest();
+  check(await buildIndex(o), 2, 200, 1, 'other'); // compatible schema-26 cache reparses old Claude entries
+  _resetForTest();
+  check(await buildIndex(o), 2, 200, 1, 'other'); // genuinely warm
+  write(c, [asst({ id: 'msg_distinct', s: 7, block: text(), usage: USAGE })]);
+  _resetForTest();
+  check(await buildIndex(o), 3, 400, 2, 'other');
+  write(b, [asst({ id: 'msg_shared', s: 86_408, block: text(), usage: { ...USAGE, output_tokens: 300 } })]);
+  fs.utimesSync(b, new Date(T0), new Date(T0 + 20_000));
+  _resetForTest();
+  check(await buildIndex(o), 3, 500, 2, 'other');
+  fs.unlinkSync(b);
+  _resetForTest();
+  check(await buildIndex(o), 2, 212, 2, 'proj');
 });
 
 // ── schema version ──────────────────────────────────────────────────────────

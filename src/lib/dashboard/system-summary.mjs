@@ -1,3 +1,4 @@
+import { mergeSessionSurfaces } from '../footprint/session-surfaces.mjs';
 // The System page's slim read model (#237 M4, decision 8). GET /api/system
 // serves the footprint collector's payload
 // verbatim, the same shape as `ak system --json`, and that stays the
@@ -204,7 +205,7 @@ function summaryInstall(install) {
 // A measured project row also carries `stack` (framework/manifest/dependency
 // detection — explicitly not rendered, per system-projects.mjs's langCell
 // comment), `nodeModulesRoots`, `treeBytes`/`gitBytes`/`nodeModulesBytes`,
-// `footprintMtime`, `sessionOrigins`, `source` and `treeExclusions`; the
+// `footprintMtime`, `source` and `treeExclusions`; the
 // Projects table (renderSysProjects) and repository grouping
 // (project-groups.mjs's repositoryTree) read only what is listed below.
 const SUMMARY_PROJECT_LANG_KEYS = Object.freeze(['id', 'name', 'lines']);
@@ -249,6 +250,12 @@ function summaryRemote(remote) {
   return out;
 }
 
+function summarySessionOrigins(entries) {
+  return Array.isArray(entries) ? entries.filter((row) => row && ['claude-desktop', 'codex-desktop', 'unknown'].includes(row.origin)
+    && Number.isInteger(row.sessions) && row.sessions >= 0).slice(0, 3).map((row) => ({ origin: row.origin, sessions: row.sessions,
+      ...(['declared-session-ids', 'transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations'].includes(row.countBasis) ? { countBasis: row.countBasis } : {}) })) : null;
+}
+
 const SUMMARY_PROJECT_ROW_KEYS = Object.freeze(['path', 'label', 'hosts', 'totalBytes', 'lastActivity']);
 
 function summaryProjectRow(row) {
@@ -258,12 +265,14 @@ function summaryProjectRow(row) {
   if ('loc' in row) out.loc = summaryProjectLoc(row.loc);
   if ('remote' in row) out.remote = summaryRemote(row.remote);
   if ('repository' in row) out.repository = summaryRepository(row.repository);
+  if ('sessionOrigins' in row) out.sessionOrigins = summarySessionOrigins(row.sessionOrigins);
+  if (Array.isArray(row.sessionSurfaces)) out.sessionSurfaces = mergeSessionSurfaces(row.sessionSurfaces);
   return out;
 }
 
 /** A discovery-only row (project-sources.mjs): `origins`, `exists`,
- *  `isGitRepo`, `lastSeenMs`, `sessions` and `sessionOrigins` never render —
- *  repositoryTree reads only path/label/hosts/repository off it. */
+ *  `isGitRepo`, `lastSeenMs` and total `sessions` never render.
+ * Surface and legacy origin evidence are retained for the local disclosure. */
 const SUMMARY_DISCOVERY_PROJECT_KEYS = Object.freeze(['path', 'label', 'hosts']);
 
 function summaryDiscoveryProject(row) {
@@ -271,11 +280,13 @@ function summaryDiscoveryProject(row) {
   const out = {};
   for (const key of SUMMARY_DISCOVERY_PROJECT_KEYS) if (key in row) out[key] = row[key];
   if ('repository' in row) out.repository = summaryRepository(row.repository);
+  if ('sessionOrigins' in row) out.sessionOrigins = summarySessionOrigins(row.sessionOrigins);
+  if (Array.isArray(row.sessionSurfaces)) out.sessionSurfaces = mergeSessionSurfaces(row.sessionSurfaces);
   return out;
 }
 
 const SUMMARY_PROJECTS_KEYS = Object.freeze([
-  'everSeen', 'onDisk', 'count', 'gitRepos', 'unresolved', 'importedExcluded', 'method', 'truncated',
+  'everSeen', 'onDisk', 'count', 'gitRepos', 'unresolved', 'importedExcluded', 'importedMixed', 'importedUnresolved', 'method', 'truncated',
 ]);
 
 /** `sources`, `locMeasured`, `registryVersion`, `unrecognized`, `population`,

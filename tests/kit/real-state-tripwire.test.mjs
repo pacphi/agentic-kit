@@ -144,6 +144,43 @@ test('developer mode moves live-session writers to "concurrent"; strict mode fai
   assert.match(formatReport(dev), /concurrent writers \(not failing\)/);
 });
 
+test('Ruflo-created .claude-flow root and proven-config files are concurrent only in developer mode', (t) => {
+  const home = tmp(t, 'ak-trip-ruflo');
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+  const roots = realStateRoots({ platform: process.platform, homedir: home, repoRoot: repo, env: {} });
+  const before = snapshotRoots(roots);
+  fs.mkdirSync(path.join(repo, '.claude-flow'));
+  fs.writeFileSync(path.join(repo, '.claude-flow', 'session.json'), '{}');
+  fs.writeFileSync(path.join(repo, '.claude', 'proven-config.json'), '{}');
+  fs.writeFileSync(path.join(repo, '.claude', '.proven-config-version'), 'v1');
+  fs.writeFileSync(path.join(repo, '.claude-flow', 'config.json'), '{}');
+  const after = snapshotRoots(roots);
+  const dev = compareSnapshots(before, after, { strict: false });
+  assert.deepEqual(dev.concurrent.map((c) => c.rel).sort(), [
+    '.claude-flow/', '.claude-flow/session.json', '.claude/.proven-config-version', '.claude/proven-config.json',
+  ].sort());
+  assert.deepEqual(dev.failing.map((c) => c.rel), ['.claude-flow/config.json']);
+  const strict = compareSnapshots(before, after, { strict: true });
+  assert.deepEqual(strict.concurrent, []);
+  assert.deepEqual(strict.failing.map((c) => c.rel).sort(), [
+    '.claude-flow/', '.claude-flow/config.json', '.claude-flow/session.json',
+    '.claude/.proven-config-version', '.claude/proven-config.json',
+  ].sort());
+});
+
+test('removing the .claude-flow root is concurrent only in developer mode', (t) => {
+  const home = tmp(t, 'ak-trip-ruflo-remove');
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(path.join(repo, '.claude-flow'), { recursive: true });
+  const roots = realStateRoots({ platform: process.platform, homedir: home, repoRoot: repo, env: {} });
+  const before = snapshotRoots(roots);
+  fs.rmSync(path.join(repo, '.claude-flow'), { recursive: true });
+  const after = snapshotRoots(roots);
+  assert.deepEqual(compareSnapshots(before, after, { strict: false }).concurrent.map((c) => c.rel), ['.claude-flow/']);
+  assert.deepEqual(compareSnapshots(before, after, { strict: true }).failing.map((c) => c.rel), ['.claude-flow/']);
+});
+
 test('CI and AK_TRIPWIRE_STRICT make the comparison strict', () => {
   assert.equal(isStrict({ CI: 'true' }), true);
   assert.equal(isStrict({ CI: '1' }), true);

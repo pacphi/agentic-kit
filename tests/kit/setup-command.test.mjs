@@ -774,7 +774,7 @@ test('ak setup --opencode with an ABSENT CLI never fabricates the config home', 
 
 test.after(() => rmrf(HOME));
 
-// Branch 3, Task 2.2: setup no longer turns Ruflo's start-on-use off, and it
+// setup no longer turns Ruflo's start-on-use off, and it
 // writes the managed daemon settings BEFORE `ruflo daemon start`, because the
 // daemon reads .claude-flow/config.json once, in its constructor
 // (worker-daemon.js:139-144, 3.46.1).

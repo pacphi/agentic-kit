@@ -14,6 +14,7 @@
 // shim's node process).
 import { spawn } from 'node:child_process';
 import { resolveShim, killProcessTree } from './exec.mjs';
+import { mergeWindowsEnv } from './windows-npm-shim.mjs';
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 /** How long the killed server may take to exit before the call reports
@@ -44,7 +45,7 @@ export async function callMcpTools({
 }) {
   validate({ command, args, calls, timeoutMs, exitGraceMs });
   return new Promise((resolve) => {
-    const merged = { ...process.env, ...env };
+    const merged = process.platform === 'win32' ? mergeWindowsEnv(process.env, env) : { ...process.env, ...env };
     const invocation = resolveShim(command, args, { env: merged });
     const child = spawn(invocation.command, invocation.args, {
       cwd, env: merged, shell: false, detached: process.platform !== 'win32',

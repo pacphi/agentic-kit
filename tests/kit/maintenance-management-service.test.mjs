@@ -696,6 +696,35 @@ test('scan lifecycle: pauseScan and resumeScan accept a bare sourceId (symmetric
   }
 });
 
+test('paused collection root survives a service restart in Discovery and the Inventory partial banner', async (t) => {
+  const controlRoot = fixtureRoot(t);
+  const root = fixtureRoot(t);
+  fs.writeFileSync(path.join(root, 'root-file.txt'), 'x');
+  for (let i = 0; i < 5; i += 1) {
+    const child = path.join(root, `project-${i}`);
+    fs.mkdirSync(path.join(child, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(child, 'file.txt'), 'x');
+  }
+  const sourceId = opaqueId('src', { kind: 'collection-root', root }, INSTALLATION_KEY);
+  const discovery = { collectionRoots: [{ root, sourceId, maxDepth: null, includeNetwork: false }] };
+  const first = buildHarness(t, { controlRoot, discovery });
+  await first.service.startScan({ sourceId, maxSlices: 1 });
+  const paused = first.service.pauseScan({ sourceId });
+  const pausedRow = paused.coverage.find((entry) => entry.sourceId === sourceId);
+  assert.equal(pausedRow.state, 'paused');
+  assert.ok(pausedRow.visited > 0);
+
+  const restarted = buildHarness(t, { controlRoot, discovery });
+  const row = restarted.service.discovery().coverage.find((entry) => entry.sourceId === sourceId);
+  assert.equal(row.state, 'paused');
+  assert.equal(row.visited, pausedRow.visited);
+  assert.equal(row.label, 'Collection root');
+  await restarted.service.refreshInventory();
+  const page = restarted.service.inventory({});
+  assert.equal(page.partialSources.total, 5, 'the paused root joins four unscanned automatic roots');
+  assert.ok(page.partialSources.entries.some((entry) => entry.sourceId === sourceId && entry.state === 'paused'));
+});
+
 test('DSC: setAutomaticSource, addExclusion, and removeExclusion round-trip through kit.json', async (t) => {
   const h = buildHarness(t);
   await h.service.setAutomaticSource({ sourceId: 'ollama', enabled: false });

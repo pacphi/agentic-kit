@@ -1,6 +1,8 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { censusDisclosure } from '../../census-presentation.mjs';
+import { projectSurfacesHtml, surfaceNames } from './session-presentation.mjs';
 import { renderHostReadiness } from './host-readiness.mjs';
 import { renderAbout } from './about.mjs';
 import { DASH_TOKEN, activeTab, esc, overviewView, positionThumb } from './bootstrap.mjs';
@@ -54,20 +56,18 @@ import { fmtNum, kpi } from './usage.mjs';
       html+='<p class="mw-census-caveat">At least one transcript could not be read, '
         +"so every figure above is a lower bound.</p>";
     }
+    html+='<p class="mw-census-line">'+esc(censusDisclosure(c))+'</p>';
     body.innerHTML=html;
     box.hidden=false;
   }
 
-  var INTEL_SCOPE_GROUPS=[['repository','Git repositories'],['worktree','Git worktrees'],['user','User-level learning'],['unknown','Other / unclassified']];
-  var machineWideDesignationFilter='all';
+  var INTEL_SCOPE_GROUPS=[['repository','Git repositories'],['worktree','Git worktrees'],['user','User-level learning'],['unknown','Unknown']];
+  var machineWideDesignationFilter='all',machineWideSurfaceFilter='all';
   function machineWideDesignation(p){
     if(p.learningScope==='repository')return 'Git repository';
     if(p.learningScope==='worktree')return 'Git worktree';
-    var origins=Array.isArray(p.learningOrigins)?p.learningOrigins:[];
-    if(origins.includes('codex-desktop'))return 'ChatGPT Desktop';
-    if(origins.includes('claude-desktop'))return 'Claude Desktop';
-    if(Array.isArray(p.hosts)&&p.hosts.includes('opencode'))return 'OpenCode';
-    return 'Directory';
+    if(p.learningScope==='user')return 'User-level learning';
+    return 'Unknown';
   }
   function intelScopeRows(rows,scope){
     return rows.filter(function(p){
@@ -86,7 +86,7 @@ import { fmtNum, kpi } from './usage.mjs';
     var label=p.label||'(unlabeled)';
     return '<div class="mw-row mw-data-row" role="row">'
       +'<span class="mw-name" role="cell" title="'+esc(label)+'">'+esc(label)+storeHtml+'</span>'
-      +'<span class="mw-designation" role="cell">'+esc(machineWideDesignation(p))+'</span>'
+      +'<span class="mw-designation" role="cell"><span class="mw-scope-value">'+esc(machineWideDesignation(p))+'</span>'+projectSurfacesHtml(p)+'</span>'
       +'<span class="mw-val mono" role="cell">'+esc(fmtNum(p.patternsLearned))+'</span>'
       +'<span class="mw-val mono" role="cell">'+esc(fmtNum(p.patternStoreCount))+'</span>'
       +'<span class="mw-val mono" role="cell" title="'+esc(lastTxt)+'">'+esc(lastTxt)+'</span></div>';
@@ -110,12 +110,15 @@ import { fmtNum, kpi } from './usage.mjs';
       +kpi("most active project",totals.mostActiveProject||"—","by most recent learning adaptation","accent");
     var table=document.getElementById("mw-table");
     if(!table)return;
-    if(!perProject.length){table.innerHTML='<div class="empty">no projects discovered on this machine.</div>';return;}
+    if(!perProject.length){machineWideSurfaceFilter='all';table.innerHTML='<div class="empty">no projects discovered on this machine.</div>';return;}
     var designations=['all'].concat(Array.from(new Set(perProject.map(machineWideDesignation))).sort());
-    var visible=(machineWideDesignationFilter==='all'?perProject:perProject.filter(function(row){return machineWideDesignation(row)===machineWideDesignationFilter;})).sort(function(a,b){return String(a.label||'').localeCompare(String(b.label||''),undefined,{sensitivity:'base',numeric:true})||String(a.key||a.path||'').localeCompare(String(b.key||b.path||''));});
+    var surfaceChoices=Array.from(new Set(perProject.flatMap(surfaceNames))).sort();
+    if(machineWideSurfaceFilter!=='all'&&!surfaceChoices.includes(machineWideSurfaceFilter))machineWideSurfaceFilter='all';
+    var visible=(machineWideDesignationFilter==='all'?perProject:perProject.filter(function(row){return machineWideDesignation(row)===machineWideDesignationFilter;})).filter(function(row){return machineWideSurfaceFilter==='all'||surfaceNames(row).includes(machineWideSurfaceFilter);}).sort(function(a,b){return String(a.label||'').localeCompare(String(b.label||''),undefined,{sensitivity:'base',numeric:true})||String(a.key||a.path||'').localeCompare(String(b.key||b.path||''));});
     table.innerHTML='<div class="mw-filter-pills" role="group" aria-label="Filter learning locations by designation">'
       +designations.map(function(designation){var label=designation==='all'?'All':designation;return '<button type="button" class="mw-filter-pill" data-designation="'+esc(designation)+'" aria-pressed="'+(designation===machineWideDesignationFilter)+'">'+esc(label)+'</button>';}).join('')
-      +'</div>'+machineWideTable(visible);
+      +'</div><label>Session surface <select id="mw-surface-filter"><option value="all">All</option>'+surfaceChoices.map(function(label){return '<option'+(label===machineWideSurfaceFilter?' selected':'')+'>'+esc(label)+'</option>';}).join('')+'</select></label>'+machineWideTable(visible);
+    var surfaceSelect=document.getElementById('mw-surface-filter');if(surfaceSelect)surfaceSelect.onchange=function(){machineWideSurfaceFilter=surfaceSelect.value;renderMachineWide(mw);};
     if(table.querySelectorAll)Array.from(table.querySelectorAll('.mw-filter-pill')).forEach(function(button){button.addEventListener('click',function(){machineWideDesignationFilter=button.getAttribute('data-designation')||'all';renderMachineWide(mw);});});
   }
 

@@ -40,6 +40,15 @@ test('models status is a cache-only read', async () => {
   assert.equal(JSON.parse(result.output).inventory.snapshotId, 'models:test');
 });
 
+test('models rejects an unknown verb with a populated snapshot store', async () => {
+  const result = await capture(() => run({
+    flags: { json: true }, positionals: ['bogus'],
+    deps: { loadConfig: () => cfg, readStore: () => store },
+  }));
+  assert.equal(result.code, 2);
+  assert.match(result.output, /usage: ak models status\|refresh\|diff\|explain\|plan/);
+});
+
 test('models status host filter rejects unknown owners and narrows evidence', async () => {
   const invalid = await capture(() => run({
     flags: { json: true, host: 'unknown' }, positionals: ['status'],

@@ -26,6 +26,24 @@ Claude Code `2.1.222`, Codex CLI `0.146.0`, and OpenCode `1.18.x`. Host and
 upstream behavior changes quickly; open issues below are a risk snapshot, not a
 promise that an issue remains open forever.
 
+**2026-09-29 support-window addendum.** Registry metadata at 13:42 UTC listed
+Ruflo 3.48.0, Agentic QE 3.14.5, and Codex CLI 0.159.0. In a network-denied,
+disposable scan, the installed Ruflo 3.48.0 `security secrets --action scan
+--path <target>` reported one synthetic file scanned and exited 0 without
+changing the target. The npm-integrity-verified native Codex 0.159.0 binary
+accepted `-s read-only -a never app-server`; an `initialize` request answered
+successfully without a provider turn. These are narrow command checks, not
+end-to-end host conformance.
+
+Released AQE 3.14.4 passed disposable live-owner lock checks on macOS and Linux:
+the status command and shipped adapter reported `LockHeld` without
+`FsyncFailed`, while the holder and storage bytes remained intact. The same
+check passed on AQE 3.14.5 on macOS and Linux. Native Windows AQE was not run.
+Ruflo 3.48.0 showed CLI-to-MCP and MCP-to-CLI memory visibility on native
+Windows with one `memory.db`; the reported backend was sql.js + HNSW with its
+native bridge disabled. The earlier Linux result was asymmetric, so these
+observations do not establish one cross-platform native-backend guarantee.
+
 The stock OpenCode gateway acceptance test currently covers the stable compatibility
 window **`>=1.18.18 <1.19.0`**. This is a tested release-line window, not a claim
 that every future OpenCode release is compatible and not a target for `ak sync` to
@@ -118,16 +136,21 @@ Official extension references: [Claude hooks](https://code.claude.com/docs/en/ho
 | Upgrade convergence | `ak sync` heals managed assets | `ak sync` heals Ruflo/AQE access and retires owned legacy MCP | `ak sync` regenerates the embedded catalogue and repairs exact-receipted plugins/config |
 | Teardown | Managed blocks and registrations | Receipt-based managed teardown | Value- and hash-receipt teardown; user-owned values survive |
 
-Ruflo MCP access and Ruflo-backed inference are different contracts. In
-particular, Ruflo's [`agent_execute` provider-key behavior](https://github.com/ruvnet/ruflo/issues/2356)
-can still require a separate provider credential even when invoked from Codex.
+Ruflo MCP access and Ruflo-backed inference are different contracts.
+In Ruflo 3.48.0's shipped `agent_execute` path, execution uses a separately
+configured inference provider; its no-provider branch still returns an error
+instead of delegating to the MCP host
+([ruflo #2356](https://github.com/ruvnet/ruflo/issues/2356)). This is a source
+check, not a credentialed runtime probe from Codex.
 `ak run` avoids that conflation by executing the selected host directly and using
 Ruflo for tools, memory, routing context, and orchestration assets.
 
 The dated upstream risk inventory includes:
 
-- force initialization can overwrite unrelated `.mcp.json` content
-  ([ruflo #420](https://github.com/ruvnet/ruflo/issues/420));
+- force initialization still writes a generated `.mcp.json` over the existing
+  file in Ruflo 3.48.0's shipped source, without merging unrelated servers
+  ([ruflo #420](https://github.com/ruvnet/ruflo/issues/420)); this was not
+  exercised on a real project;
 - generated Claude and Codex instructions can diverge
   ([#2638](https://github.com/ruvnet/ruflo/issues/2638));
 - init and plugin installation can duplicate assets or hooks
@@ -138,6 +161,12 @@ The dated upstream risk inventory includes:
   ([#2854](https://github.com/ruvnet/ruflo/issues/2854)); and
 - hierarchical AgentDB writes can report success without durable persistence
   ([#2887](https://github.com/ruvnet/ruflo/issues/2887)).
+
+The additional Codex hook-environment fix line remains conditional. At the
+2026-09-29 check, [Ruflo #3419](https://github.com/ruvnet/ruflo/issues/3419)
+was open with only agentic-kit's Codex source-analysis comment, not a
+maintainer-supported answer or a live hook observation. Version tags alone do
+not close that evidence gap.
 
 ## Agentic QE support
 
@@ -171,12 +200,30 @@ Current AQE includes a subscription-backed `codex` provider. Agentic-kit accepts
 `ak host pick --aqe-provider codex`, admits Codex fallback rungs, enables Codex
 providers referenced by `agentOverrides`, and projects Codex activity routes.
 
-The dated AQE risk inventory includes its
-[MCP entrypoint double-spawn](https://github.com/proffesor-for-testing/agentic-qe/issues/528),
-[multi-platform initialization behavior](https://github.com/proffesor-for-testing/agentic-qe/issues/532),
-[MCP tool correctness gaps](https://github.com/proffesor-for-testing/agentic-qe/issues/535),
+AQE 3.14.4 adopted fixes for the
+[MCP entrypoint double-spawn](https://github.com/proffesor-for-testing/agentic-qe/issues/528)
+and [exclusive platform initialization](https://github.com/proffesor-for-testing/agentic-qe/issues/532)
+(`aqe init --no-claude`). Both upstream issues remain open; versions below
+3.14.4 retain those gaps. The remaining dated AQE risk inventory includes
+[GOAP `maxSteps` and world-state, test-generation quality, and coherence recommendation-text gaps](https://github.com/proffesor-for-testing/agentic-qe/issues/535)
+(the 3.14.4 recheck did not exercise `goap_execute`),
 [RVF recovery loop](https://github.com/proffesor-for-testing/agentic-qe/issues/574),
 and [local-embedding audit findings](https://github.com/proffesor-for-testing/agentic-qe/issues/615).
+A 2026-09-29 disposable probe of an npm-integrity-verified AQE 3.14.5 tarball found that
+[#655](https://github.com/proffesor-for-testing/agentic-qe/issues/655)'s selected compact
+guidance path emits a 315-byte owned sentinel and preserves a foreign `AGENTS.md`
+prefix/suffix across two repeated calls. Full/none and complete receipt/platform
+conformance remain unverified.
+[#753](https://github.com/proffesor-for-testing/agentic-qe/issues/753)'s fresh native
+macOS witness append produced valid 4001-row chains in one sequential and three
+synchronized two-process rounds; only one concurrent round demonstrably interleaved. That
+does not justify removing the kit's stray-store live-holder refusal or claim old-fork
+repair, signature validation, import safety, or Windows/Linux behavior.
+[#778](https://github.com/proffesor-for-testing/agentic-qe/issues/778) still reproduces
+settings churn on 3.14.5 across three same-option init runs; its source fix merged after
+this release was published. A later released-artifact retest is pending. See the [dated artifact
+receipt](archive/2026-09-29-aqe-released-artifact-receipt.md) for source binding and
+limits.
 
 The Codex QE-Court investigation in
 [agentic-kit #108](https://github.com/pacphi/agentic-kit/issues/108) is a

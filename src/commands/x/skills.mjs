@@ -3,7 +3,7 @@ import path from 'node:path';
 import { collectCatalog } from '../../lib/footprint/catalog.mjs';
 import { buildSkillMaintenancePlan } from '../../lib/skill-maintenance-plan.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
-import { heading, info, warn, dim } from '../../lib/output.mjs';
+import { heading, info, warn, dim, reportFailure } from '../../lib/output.mjs';
 
 export const options = {
   project: { type: 'string' },
@@ -27,7 +27,8 @@ Examples:
 
 export async function run({ flags, positionals }) {
   if ((positionals[0] ?? 'plan') !== 'plan' || positionals.length > 1) {
-    warn('usage: ak x skills plan [--project PATH] [--json]');
+    const error = 'usage: ak x skills plan [--project PATH] [--json]';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(error) });
     return 2;
   }
   const project = path.resolve(flags.project ?? process.cwd());

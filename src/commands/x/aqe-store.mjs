@@ -3,7 +3,7 @@
 // while any AQE writer is open. The work is in src/lib/aqe-store-merge.mjs.
 import { mergeAqeStores, restoreSteps } from '../../lib/aqe-store-merge.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
-import { ok, warn, fail, info } from '../../lib/output.mjs';
+import { ok, warn, fail, info, reportFailure } from '../../lib/output.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -139,7 +139,8 @@ function printInterrupted(result) {
 export async function run({ flags = {}, positionals = [], cwd = process.cwd(), merge = mergeAqeStores }) {
   const action = positionals[0] ?? 'status';
   if (!['status', 'merge'].includes(action) || positionals.length > 1) {
-    fail('usage: ak x aqe-store [status|merge] [--yes] [--dry-run] [--json]');
+    const error = 'usage: ak x aqe-store [status|merge] [--yes] [--dry-run] [--json]';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
     return 2;
   }
   const root = repoRoot(cwd);

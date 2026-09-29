@@ -118,11 +118,18 @@ function toCoverageRecord(record) {
   };
 }
 
-function toSummary(record, now) {
+function toSummary(record, now, state = record.scanState) {
+  const recordedAt = new Date(now()).toISOString();
   return {
     scanId: record.scanId, sourceId: record.sourceId, environmentId: record.environmentId,
-    state: record.scanState, startedAt: record.createdAt, completedAt: new Date(now()).toISOString(),
+    state, startedAt: record.createdAt,
+    completedAt: state === 'paused' ? null : recordedAt,
+    ...(state === 'paused' ? { recordedAt } : {}),
     visited: record.visited, limitingReason: record.limitingReason, ceiling: record.ceiling ?? null,
+    ...(state === 'paused' ? {
+      completedPartitions: record.completedPartitions.length,
+      pendingPartitions: record.pendingPartitions.length,
+    } : {}),
   };
 }
 
@@ -180,7 +187,8 @@ function remainingEntryBudget(ceilingEntries, visited) {
  *   remove: (scanId: string) => void, list: () => string[] }} CheckpointStore
  * @typedef {{ recordSummary: (summary: object) => any,
  *   list: (options?: {environmentId?: string}) => Array<{sourceId: string, environmentId: string,
- *     state: string, completedAt: string, visited?: number, limitingReason?: string|null,
+ *     state: string, completedAt: string|null, recordedAt?: string, visited?: number,
+ *     completedPartitions?: number, pendingPartitions?: number, limitingReason?: string|null,
  *     ceiling?: string|null}> }} HistoryStore
  * @typedef {{ write: (entry: object) => boolean,
  *   current: () => Array<{sourceId: string, environmentId: string}> }} LastGoodStore
@@ -446,6 +454,11 @@ export function createScanOrchestrator({
       error.code = 'SOURCE_NOT_PAUSABLE';
       throw error;
     }
+    if (!historyStore) throw new Error('scan history unavailable; cannot persist pause');
+    // Commit the continuation before claiming that pause is durable. If
+    // either store rejects the write, leave the live state unchanged.
+    persistCheckpoint(record);
+    historyStore.recordSummary(toSummary(record, now, 'paused'));
     transition(record, 'paused');
     return coverageFor(toCoverageRecord(record));
   }
@@ -486,8 +499,8 @@ export function createScanOrchestrator({
 
   /** A configured source with no live record — never started, paused, or
    *  stopped in this process (e.g. right after a restart, when `records` is
-   *  empty again) — first restores its latest terminal history summary when
-   *  that summary is itself a failure, or a stop at a limit other than the
+   *  empty again) — first restores its latest history summary when
+   *  that summary is a pause, a failure, or a stop at a limit other than the
    *  user's own request (audit finding M1b): a real failure must read the
    *  same on the Discovery panel and the Inventory banner both before and
    *  after a restart, since both read this same `coverage()`. A user stop is
@@ -501,11 +514,13 @@ export function createScanOrchestrator({
     const record = records.get(source.sourceId);
     if (record) return coverageFor(toCoverageRecord(record));
     const summary = summaryBySource?.get(`${source.environmentId}:${source.sourceId}`);
-    if (summary && (summary.state === 'failed' || (summary.state === 'stopped' && summary.limitingReason !== 'stopped-by-user'))) {
+    if (summary && (summary.state === 'paused' || summary.state === 'failed' || (summary.state === 'stopped' && summary.limitingReason !== 'stopped-by-user'))) {
       return coverageFor({
         ...toCoverageRecord(initRecord(source)),
         scanState: summary.state,
         visited: summary.visited ?? 0,
+        completedPartitions: summary.completedPartitions ?? 0,
+        pendingPartitions: summary.pendingPartitions ?? 0,
         limitingReason: summary.limitingReason ?? null,
         ceiling: summary.ceiling ?? null,
       });
@@ -516,10 +531,10 @@ export function createScanOrchestrator({
     return coverageFor(toCoverageRecord(initRecord(source)));
   }
 
-  /** Index the newest terminal summary per `(environmentId, sourceId)` from
+  /** Index the newest summary per `(environmentId, sourceId)` from
    *  the history store, read once per `coverage()` call rather than once per
    *  source (M1b). `historyStore.list()` is already ascending by
-   *  `completedAt` with ties in recording order, so `>=` (not `>`) keeps the
+   *  record timestamp with ties in recording order, so `>=` (not `>`) keeps the
    *  most-recently-recorded summary on a same-millisecond tie — a later
    *  successful scan must win over an earlier failure even when both
    *  complete within the same clock tick. */
@@ -528,7 +543,7 @@ export function createScanOrchestrator({
     for (const summary of historyStore?.list() ?? []) {
       const key = `${summary.environmentId}:${summary.sourceId}`;
       const existing = bySource.get(key);
-      if (!existing || Date.parse(summary.completedAt) >= Date.parse(existing.completedAt)) bySource.set(key, summary);
+      if (!existing || Date.parse(summary.recordedAt ?? summary.completedAt) >= Date.parse(existing.recordedAt ?? existing.completedAt)) bySource.set(key, summary);
     }
     return bySource;
   }

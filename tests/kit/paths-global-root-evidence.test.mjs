@@ -1,4 +1,4 @@
-// Branch 6a Task 7: globalRoot() (src/lib/paths.mjs) stops spawning
+// globalRoot() (src/lib/paths.mjs) stops spawning
 // `npm root -g` on every plain `ak status` call — it reuses fresh evidence
 // instead (kind 'npm-global-root', id 'machine', 24h TTL). Unlike every other
 // evidence-gated check in this branch, BOTH `refresh` and `record` DEFAULT TO
@@ -16,7 +16,7 @@
 // byte-compatible, not just paths.mjs talking to itself.
 //
 // globalRoot() has no injectable runner (it calls execFileSync directly), so
-// — mirroring tests/kit/host-setup-evidence.test.mjs's Task 5 precedent —
+// — mirroring tests/kit/host-setup-evidence.test.mjs's state-isolation precedent —
 // these tests break PATH so a real `npm root -g` ENOENTs deterministically,
 // then seed cached evidence with a marker path no real probe/fallback could
 // ever produce. Getting the marker back proves the cache was used.

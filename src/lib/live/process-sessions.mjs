@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { inspectGitWorkspace } from './git-workspace.mjs';
+import { stateBase } from '../paths.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +31,7 @@ const WIN32_SURVEY_SCRIPT = fileURLToPath(
 function runtimeDebug(stage, fields = {}) {
   if (!process?.env || process.env.AK_RUNTIME_DEBUG !== '1') return;
   try {
-    const root = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
+    const root = stateBase();
     const file = process.env.AK_RUNTIME_DEBUG_FILE || path.join(root, 'agentic-kit', 'runtime-debug.log');
     const safeStage = String(stage || 'unknown').replace(/[^a-z0-9._-]/gi, '_').slice(0, 64);
     const kv = Object.entries(fields)
@@ -52,8 +52,35 @@ const HOST_NAMES = new Map([
   ['opencode', 'opencode'],
 ]);
 
-const tokens = (command) => String(command ?? '').trim().split(/\s+/)
-  .map((token) => token.replace(/^['"]|['"]$/g, ''));
+function tokens(command) {
+  const args = [];
+  let word = '';
+  let quote = null;
+  const input = String(command ?? '').trim();
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index];
+    if (quote && char === '\\' && input[index + 1] === quote) {
+      word += char + input[++index];
+    } else if (char === quote) {
+      quote = null;
+      word += char;
+    } else if (!quote && (char === '"' || char === "'")) {
+      quote = char;
+      word += char;
+    } else if (!quote && /\s/.test(char)) {
+      if (word) args.push(word);
+      word = '';
+    } else {
+      word += char;
+    }
+  }
+  // An unmatched quote in flattened `ps args=` cannot establish argument
+  // boundaries, so no token can prove a service or MCP subcommand.
+  if (quote) return [];
+  if (word) args.push(word);
+  return args.map((arg) => ((arg.startsWith('"') && arg.endsWith('"'))
+    || (arg.startsWith("'") && arg.endsWith("'"))) ? arg.slice(1, -1) : arg);
+}
 // win32.basename deliberately, on every platform: it splits on BOTH separators,
 // so `C:\opt\bin\codex` and `/usr/local/bin/codex` both reduce to `codex`. The
 // POSIX result is unchanged (a POSIX path has no backslash to split on), and
@@ -67,8 +94,9 @@ const executableName = (value) => path.win32.basename(String(value ?? '')).toLow
  * full executable path (macOS `comm=`) and argv as one space-joined string, so
  * `/Users/me/Library/Application Support/x/codex mcp-server` would otherwise
  * split inside the path and shift every argument by one. The prefix must end
- * at whitespace or the end of the string. Spaces inside later arguments stay
- * ambiguous, which is inherent to the args= format.
+ * at whitespace or the end of the string. Later balanced quotes preserve a
+ * value boundary where `ps args=` includes them; flattened unquoted values
+ * remain ambiguous.
  */
 function argvOf(command, executable) {
   const text = String(command ?? '').trim();
@@ -78,6 +106,57 @@ function argvOf(command, executable) {
     return [prefix, ...tokens(text.slice(prefix.length)).filter(Boolean)];
   }
   return tokens(text);
+}
+
+// Codex's root CLI accepts options before a subcommand. Consume only options
+// with known arity; an unknown option, missing value, prompt, or `--` leaves
+// the role unproven. In particular, a value equal to "app-server" is a value,
+// not a subcommand. `ps args=` has no reliable quoting for spaced values, so
+// ambiguous command lines degrade to an ordinary controller.
+const CODEX_VALUE_OPTIONS = new Set([
+  '-c', '--config', '-s', '--sandbox', '-a', '--ask-for-approval',
+  '-m', '--model', '-p', '--profile', '-C', '--cd',
+  '--enable', '--disable', '--local-provider', '--add-dir',
+  '--remote', '--remote-auth-token-env',
+]);
+const CODEX_SWITCH_OPTIONS = new Set([
+  '--strict-config', '--oss', '--approve-for-me',
+  '--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust',
+  '--worktree', '--search', '--no-alt-screen', '--no-daemon',
+]);
+function validConfigOverride(value) {
+  const match = /^([a-zA-Z0-9_.-]+)=(.+)$/.exec(value);
+  if (!match) return false;
+  const literal = match[2];
+  // Codex accepts raw-string fallback values. Once `ps` flattens an unquoted
+  // raw string, the following word could be part of that value. Only a
+  // self-delimiting TOML scalar can establish where a subcommand begins.
+  return /^"(?:\\.|[^"\\])*"$/.test(literal)
+    || /^'[^']*'$/.test(literal)
+    || /^(?:true|false|-?\d+(?:\.\d+)?)$/.test(literal);
+}
+function codexSubcommand(argv, offset) {
+  for (let index = offset; index < argv.length && index < offset + 32; index++) {
+    const token = argv[index];
+    if (token === 'app-server' || token === 'mcp-server') return token;
+    if (token === '--') return null;
+    if (CODEX_SWITCH_OPTIONS.has(token)) continue;
+    if (CODEX_VALUE_OPTIONS.has(token)) {
+      if (index + 1 >= argv.length || argv[index + 1].startsWith('-')) return null;
+      if ((token === '-c' || token === '--config')
+        && !validConfigOverride(argv[index + 1])) return null;
+      index++;
+      continue;
+    }
+    const option = token?.split('=', 1)[0];
+    if (CODEX_VALUE_OPTIONS.has(option) && token.length > option.length + 1) {
+      if ((option === '-c' || option === '--config')
+        && !validConfigOverride(token.slice(option.length + 1))) return null;
+      continue;
+    }
+    return null;
+  }
+  return null;
 }
 
 /** Identify only a controller executable or its supported Node launcher. */
@@ -91,23 +170,48 @@ export function hostFromCommand(command, executable = null) {
     host = HOST_NAMES.get(executableName(argv[wrapperIndex])) ?? null;
     argumentOffset = wrapperIndex + 1;
   }
-  if (host === 'codex' && argv[argumentOffset] === 'mcp-server') return null;
+  if (host === 'codex' && codexSubcommand(argv, argumentOffset) === 'mcp-server') return null;
   return host;
 }
 
 const DESKTOP_HOSTED_CLAUDE_CLI = /\/claude-code\/[^/]+\/claude\.app\/Contents\/MacOS\/claude$/i;
+// Match the native executable inside the application bundle. A folder name in
+// argv, cwd, or an unrelated executable never establishes an application.
+const DESKTOP_APPLICATIONS = [
+  { executable: /\/Claude\.app\/Contents\/MacOS\/Claude$/, name: 'Claude Desktop' },
+  { executable: /\/ChatGPT\.app\/Contents\/MacOS\/ChatGPT$/, name: 'ChatGPT desktop app' },
+];
+const desktopApplication = (executable) => DESKTOP_APPLICATIONS
+  .find((app) => app.executable.test(String(executable ?? '').replaceAll('\\', '/')))?.name ?? null;
+// The installed ChatGPT bundle carries a native CodexCLI.app executable.
+// Resources/codex-cli/bin/codex is a shell wrapper, not a process image.
+const DESKTOP_HOSTED_CODEX_CLI = /\/ChatGPT\.app\/Contents\/Resources\/codex-cli\/CodexCLI\.app\/Contents\/MacOS\/codex$/;
+const APP_BUNDLE_PATH = /\/[^/]+\.app\/Contents\//i;
+const KNOWN_APP_BUNDLE_PATH = /\/(?:Claude|ChatGPT)\.app\/Contents\//;
+const supportedExecutable = (executable) => {
+  const nativePath = String(executable ?? '').replaceAll('\\', '/');
+  return !APP_BUNDLE_PATH.test(nativePath) || KNOWN_APP_BUNDLE_PATH.test(nativePath)
+    || DESKTOP_HOSTED_CLAUDE_CLI.test(nativePath);
+};
 
 /** Reduce process argv to a non-sensitive controller role, then discard argv. */
 function controllerKind(row) {
+  if (desktopApplication(row.executable)) return 'desktop-app';
   const argv = argvOf(row.command, row.executable);
-  if (argv.includes('app-server')) return 'host-service';
+  const program = executableName(row.executable ?? argv[0]);
+  const argumentOffset = ['node', 'nodejs'].includes(program) ? 2 : 1;
+  const codex = program === 'codex'
+    || (['node', 'nodejs'].includes(program) && executableName(argv[1]) === 'codex');
+  if (codex ? codexSubcommand(argv, argumentOffset) === 'app-server'
+    : argv[argumentOffset] === 'app-server') return 'host-service';
   const executable = String(row.executable ?? argv[0] ?? '').replaceAll('\\', '/');
   // The Claude desktop app runs its own Claude Code CLI from a versioned
   // bundle (`…/Claude/claude-code/<version>/claude.app/Contents/MacOS/claude`).
   // It is a user's project session, not the desktop app, even though its path
   // has the `.app/Contents/` shape.
-  if (DESKTOP_HOSTED_CLAUDE_CLI.test(executable)) return 'project-session';
-  if (/\/[^/]+\.app\/Contents\//i.test(executable)) return 'desktop-app';
+  if (DESKTOP_HOSTED_CLAUDE_CLI.test(executable)
+    || DESKTOP_HOSTED_CODEX_CLI.test(executable)) return 'project-session';
+  if (APP_BUNDLE_PATH.test(executable)) return 'desktop-app';
   return 'project-session';
 }
 
@@ -157,7 +261,8 @@ function parseArgsByPid(output) {
 
 const isHostCandidate = (row) => {
   const name = executableName(row.executable);
-  return HOST_NAMES.has(name) || name === 'node' || name === 'nodejs';
+  return supportedExecutable(row.executable) && (!!desktopApplication(row.executable)
+    || HOST_NAMES.has(name) || name === 'node' || name === 'nodejs');
 };
 
 /**
@@ -244,8 +349,10 @@ function rootControllers(rows) {
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   const candidates = new Map();
   for (const row of rows) {
-    const host = hostFromCommand(row.command, row.executable);
-    if (host) candidates.set(row.pid, { ...row, host });
+    const application = desktopApplication(row.executable);
+    const host = application || !supportedExecutable(row.executable)
+      ? null : hostFromCommand(row.command, row.executable);
+    if (application || host) candidates.set(row.pid, { ...row, host, application });
     else if (row.command) runtimeDebug('classify', { pid: row.pid, exe: row.executable, host: 'none' });
   }
   const roots = [...candidates.values()].filter((candidate) => {
@@ -487,7 +594,7 @@ export async function listActiveHostSessions({
 } = {}) {
   const rows = processRows
     ?? await collectRows({ platform, execFileImpl, uid, scriptPath, env });
-  const controllers = rootControllers(rows);
+  const controllers = rootControllers(rows).filter((row) => controllerKind(row) === 'project-session');
   const pids = controllers.map((row) => row.pid);
   let cwds = cwdByPid;
   if (!cwds) {
@@ -628,6 +735,7 @@ export async function surveyHostProcesses({
     const attributable = typeof cwd === 'string' && isAbsoluteFor(cwd);
     return {
       host: row.host,
+      application: row.application ?? null,
       controllerKind: controllerKind(row),
       pid: row.pid,
       ppid: row.ppid,

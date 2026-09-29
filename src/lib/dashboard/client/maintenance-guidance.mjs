@@ -205,7 +205,7 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
     var el=document.getElementById('mnt-guidance-coverage');if(!el)return;
     var coverage=MNT.guidance&&MNT.guidance.coverage||[];
     el.innerHTML='<p class="mnt-filter-note">Guidance shows evidence-backed issues, updates, and recovery work. Optional management actions are available in <a href="#system/maintenance/inventory" data-mnt-open-inventory>Inventory</a>.</p>'
-      +(coverage.length?'<details class="mnt-q"><summary>Host coverage</summary><p>Counts reflect saved evidence, not a health assessment. Action checks cover the listed resource types in host-specific adapters. Refresh evidence to update these checks.</p><ul>'+coverage.map(function(row){
+      +(coverage.length?'<details class="mnt-q"><summary>Host coverage</summary><p>Counts reflect saved evidence, not a health assessment. Action checks cover the listed resource types in host-specific adapters. Refresh to update these checks.</p><ul>'+coverage.map(function(row){
         return '<li><b>'+esc(row.label)+'</b> · '+esc(row.placements)+' installations · '+esc(row.recommendations)+' guidance items · '+esc(row.optionalActions)+' optional actions<br>'+esc(row.actionStatusLabel)
           +((row.actionKinds||[]).length?' ('+esc(row.actionKinds.map(mntKindLabel).join(', '))+')':'')+'</li>';
       }).join('')+'</ul></details>':'');
@@ -282,7 +282,7 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
       el.querySelector("#mnt-procedure-close").focus();
     }).catch(function(){
       if(seq!==mntProcedureSeq||!el.open)return;
-      el.innerHTML='<button type="button" class="mt-action" id="mnt-procedure-close" autofocus>Close procedure</button><p role="alert">This procedure could not be loaded. Refresh evidence and try again.</p>';
+      el.innerHTML='<button type="button" class="mt-action" id="mnt-procedure-close" autofocus>Close procedure</button><p role="alert">This procedure could not be loaded. Refresh and try again.</p>';
       el.querySelector("#mnt-procedure-close").focus();
     });
   }

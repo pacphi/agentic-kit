@@ -189,7 +189,7 @@ for (const decidedBy of ['package-default', 'project-config', 'user-config']) {
 }
 
 // Controller ruling 1: the shared, read-only projection every surface (status,
-// Task 10's dashboard) builds a snapshot from.
+// the dashboard) builds a snapshot from.
 test('rufloComponentsPayload has all 8 components, writes nothing, and reports unwritten typesafe as not applied', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-payload-'));
   try {

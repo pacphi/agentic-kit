@@ -323,7 +323,7 @@ test('the kit-managed browser env child is folded into the placeholder and Codex
   assert.equal(fs.readFileSync(file, 'utf8'), source, 'a converged placeholder is left alone');
 });
 
-// F4 (Branch 3 fix round 2): Codex's Claude import copies Claude Code's
+// F4: Codex's Claude import copies Claude Code's
 // claude-flow entry by name. Since B3-D1 that entry is ak's launcher in
 // Claude mode, so a machine without the placeholder gains a second Ruflo
 // transport in Codex. ak recognizes its own launcher form under that name

@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
@@ -22,13 +23,15 @@ const HOME = sandboxHome('ak-live-checks');
 const paths = await import('../../src/lib/paths.mjs');
 const live = await import('../../src/lib/live-checks.mjs');
 const evidence = await import('../../src/lib/live-check-evidence.mjs');
+const projectMemorySection = (await import('../../src/commands/status/sections/project-memory.mjs')).default;
 const { refreshRequestFromFlags, cliRefreshStages } = await import('../../src/lib/refresh.mjs');
 const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
 
 const PROJECT = sandboxProject('ak-live-checks');
-paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9' }));
+const GLOBAL_ROOT = fakeGlobalRoot(HOME, { ruflo: '9.9.9' });
+paths._setGlobalRootForTest(GLOBAL_ROOT);
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const seedHome = (cfg = offlineKitConfig()) => {
@@ -93,7 +96,7 @@ test('each check carries its timeout and the evidence id its result is remembere
   assert.equal(entry('learning').evidenceId, null);
   assert.equal(entry('harvest').evidenceId, null);
   assert.equal(entry('aqe').evidenceId, null, 'the aqe proof remembers only its embedding request, itself');
-  assert.equal(entry('memory-routes').evidenceId, 'memory');
+  assert.equal(entry('memory-routes').evidenceId, 'memory-routes');
 });
 
 test('without --only the quick checks that apply run; mcp runs whenever Codex is enabled', async () => {
@@ -219,9 +222,11 @@ test('a named check that does not apply says on its line that its result is not 
   assert.match(out, /^⚠ {2}mcp failed \(20 ms\) — effective Codex MCP inventory unavailable; not remembered: this check does not apply to your setup$/m);
   assert.match(out, /^✓ security passed \(30 ms\)$/m, 'a check that applies says nothing more');
   const skipped = await runStatus({ refresh: 'live', only: ['deja-vu'] }, [
-    { id: 'deja-vu', status: 'passed', reason: null, elapsedMs: 2, entries: [], applies: false },
+    { id: 'deja-vu', status: 'skipped', reason: 'disabled and unowned', elapsedMs: 2, entries: [], applies: false },
   ]);
-  assert.match(skipped.out, /^✓ deja-vu passed \(2 ms\) — not remembered: this check does not apply to your setup$/m);
+  assert.equal(skipped.code, 1, 'a named skipped proof did not pass');
+  assert.match(skipped.out, /Running live checks \(\d+ ms\): 1 skipped/);
+  assert.match(skipped.out, /^⚠ {2}deja-vu skipped \(2 ms\) — disabled and unowned; not remembered: this check does not apply to your setup$/m);
 });
 
 test('one line per check; with --only each check\'s own lines are indented under it', async () => {
@@ -585,23 +590,201 @@ test('a failed check is remembered for status with its first failure as the reas
   assert.equal(got.reason, '@claude-flow/security missing');
 });
 
-test('the memory-routes proof is remembered as the memory check; learning and harvest are not remembered', async () => {
+test('the memory-routes proof is remembered separately; learning and harvest are not remembered', async () => {
   seedHome();
   rmrf(evidence.liveCheckDir());
   await runOnly(['memory-routes', 'learning', 'harvest']);
-  const got = evidence.readLiveCheck('memory', {});
+  const got = evidence.readLiveCheck('memory-routes', {});
   assert.equal(got.status, 'failed');
   assert.equal(got.source, 'status-refresh-live');
-  assert.deepEqual(fs.readdirSync(evidence.liveCheckDir()), ['memory.json']);
+  assert.equal(evidence.readLiveCheck('memory', {}).status, 'failed');
+  assert.deepEqual(fs.readdirSync(evidence.liveCheckDir()), ['memory-routes.json', 'memory.json']);
+});
+
+test('a failed or timed-out routing run replaces a previous pass; a later generic memory pass cannot revive it', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const cfg = offlineKitConfig();
+  const route = (run, timeoutMs = 50) => ({ id: 'memory-routes', evidenceId: 'memory-routes',
+    timeoutMs, applies: () => true, run });
+  const generic = { id: 'memory', evidenceId: 'memory', timeoutMs: 50, applies: () => true,
+    run: async () => true };
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [route(async () => ({ status: 'passed' }))] });
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'passed');
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [route(async () => false)] });
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'failed');
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [route(() => new Promise(() => {}), 10)], graceMs: 1 });
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
+  await live.runLiveChecks({ cfg, cwd: PROJECT, checks: [generic] });
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed');
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
+});
+
+test('a route timeout after the CLI proof keeps the generic memory pass', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const check = { id: 'memory-routes', evidenceId: 'memory-routes', timeoutMs: 10, applies: () => true,
+    run: ({ onCliOutcome }) => {
+      onCliOutcome({ status: 'passed', reason: null });
+      return new Promise(() => {});
+    } };
+  const [result] = await live.runLiveChecks({ cfg: offlineKitConfig(), cwd: PROJECT, checks: [check], graceMs: 1 });
+  assert.equal(result.status, 'inconclusive');
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed');
+  assert.equal(evidence.readLiveCheck('memory-routes').status, 'inconclusive');
+});
+
+test('a CLI upgrade during the route check cannot attribute the old observation to the new version', async (t) => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const root = fs.mkdtempSync(path.join(HOME, 'routing-upgrade-'));
+  const cli = path.join(root, 'ruflo', 'node_modules', '@claude-flow', 'cli');
+  fs.mkdirSync(cli, { recursive: true });
+  const setVersion = (version) => fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ version }));
+  t.after(() => { paths._setGlobalRootForTest(GLOBAL_ROOT); rmrf(root); });
+  paths._setGlobalRootForTest(root);
+  setVersion('3.45.0');
+  const oldKey = evidence.liveCheckInputsKey('memory-routes');
+  const check = { id: 'memory-routes', evidenceId: 'memory-routes', timeoutMs: 50, applies: () => true,
+    run: async ({ onCliOutcome }) => {
+      onCliOutcome({ status: 'passed', reason: null });
+      setVersion('3.45.1');
+      return { status: 'passed', reason: null };
+    } };
+  const [result] = await live.runLiveChecks({ cfg: offlineKitConfig(), cwd: PROJECT, checks: [check] });
+  const currentKey = evidence.liveCheckInputsKey('memory-routes');
+  assert.notEqual(currentKey, oldKey);
+  assert.equal(result.status, 'inconclusive');
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: oldKey }).status, 'inconclusive');
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: oldKey }).invalidated, false);
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: currentKey }).invalidated, true);
+  assert.equal(evidence.readLiveCheck('memory').status, 'passed');
+
+  const project = sandboxProject('ak-route-upgrade-row');
+  t.after(() => rmrf(project));
+  const swarm = path.join(project, '.swarm');
+  fs.mkdirSync(swarm);
+  for (const name of ['memory.db', 'agentdb-memory.db']) {
+    const db = new DatabaseSync(path.join(swarm, name));
+    db.exec('CREATE TABLE memory_entries (status TEXT); INSERT INTO memory_entries VALUES (NULL)');
+    db.close();
+  }
+  const row = async (version) => (await projectMemorySection.collect({ cwd: project,
+    rufloVersion: version })).find((item) => /two project memory stores/.test(item.message));
+  assert.equal((await row('3.45.0')).level, 'warn');
+  assert.equal((await row('3.45.1')).level, 'warn');
 });
 
 test('a skipped deja-vu proof is not remembered as a pass', async () => {
   seedHome();
   rmrf(evidence.liveCheckDir());
   const [r] = await runOnly(['deja-vu']);
-  assert.equal(r.status, 'passed');
+  assert.equal(r.status, 'skipped');
+  assert.equal(r.reason, 'disabled and unowned');
   assert.match(texts(r), /deja-vu disabled and unowned — skipped/);
   assert.equal(evidence.readLiveCheck('deja-vu', {}), null);
+});
+
+test('a skipped applicable check never writes conformance evidence', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const [result] = await live.runLiveChecks({ cfg: offlineKitConfig(), cwd: PROJECT,
+    checks: [{ id: 'deja-vu', evidenceId: 'deja-vu', applies: () => true,
+      run: async () => ({ status: 'skipped', reason: 'not installed' }) }] });
+  assert.equal(result.status, 'skipped');
+  assert.equal(evidence.readLiveCheck('deja-vu', {}), null);
+});
+
+test('learning removes only its call-owned folder after success, missing artifacts, thrown runner, and abort', async (t) => {
+  const tmpRoot = privateRoot(t);
+  const unrelated = path.join(tmpRoot, 'unrelated');
+  fs.mkdirSync(unrelated);
+  const cases = [
+    async (_cmd, _args, { cwd }) => {
+      const neural = path.join(cwd, '.claude-flow', 'neural');
+      fs.mkdirSync(neural, { recursive: true });
+      fs.writeFileSync(path.join(neural, 'stats.json'), '{"patternsLearned":1}');
+      fs.writeFileSync(path.join(neural, 'patterns.json'), '[{"id":"one"}]');
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    async () => ({ code: 0, stdout: '', stderr: '' }),
+    async () => { throw new Error('runner failed'); },
+    async () => { throw new DOMException('aborted', 'AbortError'); },
+  ];
+  for (const [i, runner] of cases.entries()) {
+    const { result } = await captureLog(() => live.verifyLearning({ tmpRoot, runner }));
+    assert.equal(result, i === 0, `case ${i}`);
+    assert.deepEqual(fs.readdirSync(tmpRoot), ['unrelated'], `case ${i} left a call-owned folder`);
+  }
+});
+
+test('memory removes its call-owned folder even when final purge throws', async (t) => {
+  const tmpRoot = privateRoot(t);
+  fs.mkdirSync(path.join(tmpRoot, 'unrelated'));
+  const runner = async (_cmd, args) => {
+    if (args[1] === 'init') return { code: 0, stdout: '', stderr: '' };
+    if (args[1] === 'store') return { code: 1, stdout: '', stderr: 'store failed' };
+    throw new Error('purge failed');
+  };
+  await assert.rejects(captureLog(() => live.verifyMemory({ tmpRoot, runner, haveCmd: async () => true })), /purge failed/);
+  assert.deepEqual(fs.readdirSync(tmpRoot), ['unrelated']);
+});
+
+test('memory removes only its call-owned folder when init throws or is aborted', async (t) => {
+  const tmpRoot = privateRoot(t);
+  fs.mkdirSync(path.join(tmpRoot, 'unrelated'));
+  for (const error of [new Error('runner failed'), new DOMException('aborted', 'AbortError')]) {
+    const { result } = await captureLog(() => live.verifyMemory({ tmpRoot,
+      runner: async () => { throw error; }, haveCmd: async () => true }));
+    assert.equal(result, false);
+    assert.deepEqual(fs.readdirSync(tmpRoot), ['unrelated']);
+  }
+});
+
+test('memory removes its call-owned folder after a successful mocked CLI round trip', async (t) => {
+  const tmpRoot = privateRoot(t);
+  fs.mkdirSync(path.join(tmpRoot, 'unrelated'));
+  let db;
+  let storedValue;
+  const runner = async (_cmd, args, { cwd }) => {
+    if (args[1] === 'init') {
+      fs.mkdirSync(path.join(cwd, '.swarm'));
+      db = new DatabaseSync(path.join(cwd, '.swarm', 'memory.db'));
+      db.exec('CREATE TABLE memory_entries (namespace TEXT, key TEXT)');
+    } else if (args[1] === 'store') {
+      db.prepare('INSERT INTO memory_entries VALUES (?, ?)').run(args[args.indexOf('-n') + 1], args[args.indexOf('-k') + 1]);
+      storedValue = args[args.indexOf('--value') + 1];
+    } else if (args[1] === 'retrieve') {
+      return { code: 0, stdout: storedValue, stderr: '' };
+    } else if (args[1] === 'purge') {
+      db.exec('DELETE FROM memory_entries');
+      db.close();
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  const { result } = await captureLog(() => live.verifyMemory({
+    tmpRoot, runner, haveCmd: async () => true, observeRoutes: false,
+  }));
+  assert.equal(result, true);
+  assert.deepEqual(fs.readdirSync(tmpRoot), ['unrelated']);
+});
+
+test('harvest removes only its call-owned folder on success, nonzero result, thrown runner, and abort', async (t) => {
+  const tmpRoot = privateRoot(t);
+  fs.mkdirSync(path.join(tmpRoot, 'unrelated'));
+  for (const mode of ['success', 'nonzero', 'throw', 'abort']) {
+    const dirs = [];
+    const runner = async (_cmd, _args, { cwd }) => {
+      dirs.push(cwd);
+      if (mode === 'throw') throw new Error('runner failed');
+      if (mode === 'abort') throw new DOMException('aborted', 'AbortError');
+      return { code: mode === 'nonzero' ? 1 : 0, stdout: '', stderr: '' };
+    };
+    const { result } = await captureLog(() => live.verifyHarvest({ tmpRoot, runner, haveCmd: async () => true }));
+    assert.equal(result, mode === 'success', mode);
+    assert.ok(dirs.length >= 1 && dirs.every((dir) => path.dirname(dir) === tmpRoot), mode);
+    assert.deepEqual(fs.readdirSync(tmpRoot), ['unrelated'], mode);
+  }
 });
 
 test('an aqe proof stopped before the embedding request remembers no embedding result', async () => {

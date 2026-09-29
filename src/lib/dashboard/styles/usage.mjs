@@ -173,6 +173,7 @@ export const USAGE_CSS = `
   width:32px; height:32px; display:grid; place-items:center;
   border-radius:50%; background:var(--bg); border:1px solid var(--line);
 }
+.tabbar .source-pill .live-host[data-host=codex]{color:var(--ink)}
 .tabbar .source-pill .live-host-icon{width:20px; height:20px; stroke-width:1.8}
 .source-pill .sp-status{
   display:flex; align-items:center; padding:5px 14px 5px 10px; font-size:13px;

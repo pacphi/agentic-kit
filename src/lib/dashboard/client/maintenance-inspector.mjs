@@ -134,7 +134,7 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
     if(MNT.inspector&&MNT.inspector.scanRequired){
       el.hidden=false;
       el.innerHTML=mntInspectorCloseButton()+'<p>No inventory has been built yet. '
-        +"Use Refresh evidence, above, to build it.</p>";
+        +"Use Refresh, above, to build it.</p>";
       return;
     }
     if(mntInspectorError||!MNT.inspector){
@@ -194,7 +194,7 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
       mntRevealed=result;mntRevealError=null;renderMntInspector();
     }).catch(function(){
       if(seq!==mntInspectorSeq||placementId!==MNT.plc)return;
-      mntRevealError="The exact path could not be revealed. Refresh evidence and try again.";renderMntInspector();
+      mntRevealError="The exact path could not be revealed. Refresh and try again.";renderMntInspector();
     });
   }
 

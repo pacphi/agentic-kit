@@ -27,7 +27,7 @@
 //   3 backup    VACUUM INTO <run>/backup/root-memory.db.
 //   4 rehearse  on a copy of that backup: per stray copy, delete its
 //               witness_chain rows (appended unlinked they break the root's
-//               audit chain; Branch 5 Task 0.2, agentic-qe#759) and the starter patterns the
+//               audit chain; agentic-qe#759) and the starter patterns the
 //               root does not hold, with the rows that must reference them (a
 //               *pattern_id column that is NOT NULL or a foreign key to
 //               qe_patterns: embeddings, usage, null results, lineage,
@@ -39,7 +39,7 @@
 //               must equal the preview's union by (name, qe_domain,
 //               pattern_type) and experience id; integrity and foreign keys
 //               clean. AQE 3.14.4 skips shared patterns as conflicts without
-//               pruning (Task 0.2), so no agentic-qe#736 prune step runs.
+//               pruning, so no agentic-qe#736 prune step runs.
 //               The archived strays keep their starter patterns.
 //   5 apply     writers again, and every store must look as it did when the
 //               preview copied it (fingerprint: size and mtime of each file; the

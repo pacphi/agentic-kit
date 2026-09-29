@@ -284,7 +284,7 @@ test('collect() writes nothing to HOME or the project, beyond its own probe-resu
   const beforeHome = snapshot(HOME);
   const beforeProject = snapshot(PROJECT);
   await collect();
-  // Branch 6a Task 5: a plain status collect() call (refresh:false, the
+  // a plain status collect() call (refresh:false, the
   // default) still probes for real on a cache miss/stale/first run (Ruling
   // A) and records the result — so a LATER plain status call can reuse it.
   // That write lands only under the shared evidence store, never anywhere
@@ -329,7 +329,7 @@ test('ruflo provider intent never claims registration alone is routed execution'
   assert.doesNotMatch(intent.message, /routable|executed successfully/);
 });
 
-// Branch 6a Task 9: dashboard-server.mjs now calls collect() in process, and
+// dashboard-server.mjs now calls collect() in process, and
 // a live dashboard server can be asked (via its per-request `cwd`) for a
 // project other than its own launch cwd. Every cwd-sensitive section must
 // resolve against the PASSED cwd, never a silent process.cwd() fallback.
@@ -658,6 +658,7 @@ test('Codex MCP topology fails recursive self-registration and reports missing A
     'args = ["x", "ruflo-mcp"]',
   ].join('\n'));
   try {
+    const codexConfigBefore = fs.readFileSync(path.join(PROJECT, '.codex', 'config.toml'), 'utf8');
     const rows = rowsFor(await collect(), 'codex-mcp');
     assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.level, 'fail');
     assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.level, 'warn');
@@ -666,7 +667,12 @@ test('Codex MCP topology fails recursive self-registration and reports missing A
     // can prove (codexMcpRepairPlan); Agentic-QE owns its own Codex registration.
     assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.repair, 'sync');
     assert.equal(rows.find((r) => /duplicate Ruflo/.test(r.message))?.repair, 'sync');
-    assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.repair, 'manual');
+    const aqe = rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message));
+    assert.equal(aqe?.repair, 'manual');
+    assert.match(aqe.fix, /aqe init --auto --with-codex --codex-guidance compact/);
+    assert.doesNotMatch(aqe.fix, /platform setup|codex mcp-server/);
+    assert.equal(fs.readFileSync(path.join(PROJECT, '.codex', 'config.toml'), 'utf8'), codexConfigBefore,
+      'status only reports the AQE-owned initialization flow');
   } finally {
     rmrf(path.join(PROJECT, '.codex'));
   }
@@ -716,7 +722,7 @@ test('a user-owned deprecated codex mcp-server entry is a manual removal', async
 });
 
 test('Codex MCP topology does not ask an aqe:false machine to register agentic-qe in Codex', async () => {
-  // #237 N1: with AQE opted out, `aqe platform setup codex` is advice for a
+  // #237 N1: with AQE opted out, Codex initialization advice is for a
   // tool the user declined; the topology rows must honor kit.json like the
   // aqe section does.
   seedHome(offlineKitConfig({
@@ -970,7 +976,7 @@ test('--refresh prints one line per finished stage, then the status table', asyn
   assert.match(r.out, /ak status\n.*versions +fake versions row/);
 });
 
-test('plain status runs no refresh stage', async () => {
+test('plain status rejects a stray positional before any refresh stage', async () => {
   seedHome();
   let calls = 0;
   const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
@@ -981,7 +987,8 @@ test('plain status runs no refresh stage', async () => {
     r = await captureLog(() => status.run({ flags: {}, positionals: ['extra'], pkgRoot: PKG_ROOT, deps: { refreshStages } }));
   } finally { process.chdir(cwd); }
   assert.equal(calls, 0);
-  assert.notEqual(r.result, 2, 'plain status still ignores a positional, as it always has');
+  assert.equal(r.result, 2);
+  assert.match(r.out, /unexpected argument 'extra'/);
 });
 
 test('a refresh with a stray argument is a usage error that names the one-token spelling', async () => {

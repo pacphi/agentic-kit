@@ -1,3 +1,4 @@
+import * as vocabulary from '../../src/lib/session-surface.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,8 +24,9 @@ test('machine-wide inventory alphabetizes every retained row and preserves KPI t
   const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/intelligence.mjs', import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/\bexport /g, '');
   const esc = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-  const context = vm.createContext({ document: { getElementById: (id) => elements[id] }, esc,
+  const context = vm.createContext({ ...vocabulary, document: { getElementById: (id) => elements[id] }, esc,
     fmtNum: (value) => String(value ?? 0), kpi: (label, value) => `${label}:${value};` });
+  vm.runInContext(fs.readFileSync(new URL('../../src/lib/dashboard/client/session-presentation.mjs', import.meta.url), 'utf8').replace(/^import .*;$/gm, '').replace(/\bexport /g, ''), context);
   vm.runInContext(`${source}\nglobalThis.renderTable=renderMachineWide;`, context);
   const perProject = Array.from({ length: 8 }, (_, i) => ({ key: `key-${i}`, label: `Repository ${8 - i}`,
     learningScope: 'repository', patternsLearned: i, patternStoreCount: 1 }));
@@ -46,8 +48,9 @@ test('machine-wide inventory renders one designation column and filter pills for
   const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/intelligence.mjs', import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/\bexport /g, '');
   const esc = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-  const context = vm.createContext({ document: { getElementById: (id) => elements[id] }, esc,
+  const context = vm.createContext({ ...vocabulary, document: { getElementById: (id) => elements[id] }, esc,
     fmtNum: (value) => String(value ?? 0), kpi: (label, value) => `${label}:${value};` });
+  vm.runInContext(fs.readFileSync(new URL('../../src/lib/dashboard/client/session-presentation.mjs', import.meta.url), 'utf8').replace(/^import .*;$/gm, '').replace(/\bexport /g, ''), context);
   vm.runInContext(`${source}\nglobalThis.renderTable=renderMachineWide;`, context);
   context.renderTable({ totals: { patternsLearnedLifetime: 2, projectCount: 2, mostActiveProject: 'Repository' }, perProject: [
     { key: 'repo', label: 'Repository', learningScope: 'repository', patternsLearned: 1, patternStoreCount: 1 },
@@ -56,6 +59,7 @@ test('machine-wide inventory renders one designation column and filter pills for
   const html = elements['mw-table'].innerHTML;
   assert.match(html, /Designation/);
   assert.match(html, /Git repository/);
-  assert.match(html, /ChatGPT Desktop/);
+  assert.match(html, /Unknown/);
+  assert.doesNotMatch(html, /ChatGPT Desktop/);
   assert.match(html, /mw-filter-pill/);
 });

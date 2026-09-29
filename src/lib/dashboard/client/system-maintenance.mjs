@@ -16,7 +16,7 @@ import { wireMntDiscovery } from './maintenance-discovery.mjs';
 import { wireMntActivity } from './maintenance-activity.mjs';
 import { wireMaintActions } from './system-maintenance-actions.mjs';
 
-  // poll.mjs's refreshAll() single-flight-guards its background maintenance
+  // poll.mjs's reloadView() single-flight-guards its background maintenance
   // refresh with `!maintenanceBusy` before ever calling loadMaintenance(true)
   // — the same shape the pre-ADR-0048 single-list workbench used. Keep the
   // export alive across the ADR-0048 rewrite: true for the duration of this

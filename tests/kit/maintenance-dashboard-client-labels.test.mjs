@@ -100,17 +100,9 @@ test('MNT-EVD-006: extractor is not vacuous (finds real, allowed literals)', () 
   assert.ok(literals.includes('Clear all'));
 });
 
-// The Refresh-evidence rename introduced two labels the extractor structurally
-// cannot see: "Refresh evidence"/"Refreshing evidence…" are assigned via a
-// plain JS ternary (`button.textContent=busy?...:...`), not a `label:`
-// property or a static HTML text node, and "Re-measure machine" lives only in
-// page.mjs's server-rendered markup, which this file does not scan at all.
-// Assert them directly so a future rename cannot silently reintroduce a
-// prohibited word here without any test noticing.
-test('MNT-EVD-006: the Refresh evidence / Re-measure machine controls carry no prohibited label', () => {
-  for (const label of ['Refresh evidence', 'Refreshing evidence…', 'Re-measure machine']) {
-    assert.equal(isProhibitedLabel(label), false, label);
-  }
+test('the retired Maintenance refresh controls are absent from the page', () => {
+  const page = fs.readFileSync(new URL('../../src/lib/dashboard/page.mjs', import.meta.url), 'utf8');
+  for (const id of ['mnt-check-providers', 'mnt-remeasure']) assert.doesNotMatch(page, new RegExp('id="' + id + '"'));
 });
 
 // (b) The copied label maps in maintenance-workspace.mjs must equal

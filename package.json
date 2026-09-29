@@ -54,6 +54,7 @@
   "scripts": {
     "test": "node scripts/run-tests.mjs unit",
     "test:ui": "node scripts/run-tests.mjs ui",
+    "test:quality": "node scripts/run-tests.mjs focus tests/quality/comment-label-guard.test.mjs",
     "test:surface": "node --test tests/kit/dispatch-surface.test.mjs",
     "test:aqe-external-provider-live": "node --test tests/live/aqe-external-provider-transport.test.mjs",
     "test:aqe-stop-hook-live": "AK_AQE_CONFORMANCE=1 node --test tests/live/aqe-stop-hook-conformance.test.mjs",

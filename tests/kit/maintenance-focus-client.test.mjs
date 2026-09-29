@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import * as vocabulary from '../../src/lib/session-surface.mjs';
 import { mntLanguageLogo } from '../../src/lib/dashboard/client/maintenance-language-logos.mjs';
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 function load(name,deps,exports){
  const source=fs.readFileSync(new URL('../../src/lib/dashboard/client/'+name+'.mjs',import.meta.url),'utf8').replace(/^import\s[\s\S]*?from ['"][^'"]+['"];\s*$/gm,'').replace(/\bexport (?=(?:function|var)\b)/g,'');
  return new Function(...Object.keys(deps),source+'\nreturn {'+exports.join(',')+'};')(...Object.values(deps));
 }
-function focus(state){return load('maintenance-focus',{MNT:state,esc,mntLanguageLogo,MNT_SCOPE_LABELS:{user:'User',across:'All scopes',project:'Projects'},mntKindLabel:s=>s,mntFacetValueLabel:(_,v)=>v,mntIcon:()=>'',mntProjectKindBadge:kind=>esc(kind),mntAvailableTo:()=>''},['mntFocusChoose','mntFocusBack','mntFocusCrumbs','renderMntFocusResults']);}
+const { projectSurfacesHtml } = load('session-presentation', { ...vocabulary, esc }, ['projectSurfacesHtml']);
+function focus(state){return load('maintenance-focus',{MNT:state,esc,projectSurfacesHtml,mntLanguageLogo,MNT_SCOPE_LABELS:{user:'User',across:'All scopes',project:'Projects'},mntKindLabel:s=>s,mntFacetValueLabel:(_,v)=>v,mntIcon:()=>'',mntProjectKindBadge:kind=>esc(kind),mntAvailableTo:()=>''},['mntFocusChoose','mntFocusBack','mntFocusCrumbs','renderMntFocusResults']);}
 test('navigation turns User and resource type into explicit filters while retaining host refinements',()=>{
  const state={scope:'across',facets:{consumer:['claude']}};const api=focus(state);
  api.mntFocusChoose('scope','user');api.mntFocusChoose('kind','mcp-registration');api.mntFocusChoose('resource','res_1');

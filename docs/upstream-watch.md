@@ -101,18 +101,23 @@ Every command also takes `--concurrency <1-16>` (default 4) and `--registry <fil
   read succeeded.
 - `record` is what the scheduled workflow runs (see [The ledger](#the-ledger)). It builds a
   ledger commit locally and never pushes. `--dry-run` fires nothing and builds nothing; it makes
-  the same read-only branch and pull request checks and lists each thread that would fire the
-  dispatch routine in `wouldFire` (`[]` when none, and on every run that is not a dry run).
+  the same read-only branch and pull request checks. It lists the first three eligible fixes in
+  `wouldFire` and the remaining eligible fixes in `deferred`, without sleeping. `wouldFire` is
+  `[]` when none qualify and on runs that are not dry runs. A preview assumes successful trigger
+  calls; a real trigger failure can stop the run earlier.
 - `ledger` prints the recorded lines that match every filter given, or the records as JSON.
   `--since` selects by the event's date; `--recorded-since` by when a run recorded it
   (`recordedAt`).
 
-`report`, `check` and `ledger` exit 0 unless the command line is wrong (2) or, for `ledger`, the
-ledger branch cannot be read (3). `record` exits 3 when blind: `gh` cannot reach GitHub, the
+`report` and `check` exit 0 unless the command line is wrong (2). `ledger` exits 3 when the
+registry is invalid or the ledger branch cannot be read. `record` exits 3 when blind: `gh` cannot reach GitHub, the
 registry is invalid, the ledger branch cannot be read or holds a malformed line, or not one
 upstream thread could be read (our own tracking issues do not count). It also exits 3 when the
 ledger commit could not be built; the routine sessions it already fired are then listed in
-`fired` and on stderr, and the next run fires them again. A `--since` in the future is a
+`fired` and on stderr. Its JSON also preserves dispatch errors and the actual `deferred` list.
+Missing ledger evidence can allow a later run to fire again. Blind results consistently include
+empty arrays for unavailable records, errors, previews, deferred fixes and observed sessions.
+An invalid registry takes precedence over a future `--since`; otherwise a future `--since` is a
 command-line error.
 
 The Ruflo support window (the newest six minors, never fewer than those released in the last
@@ -180,6 +185,8 @@ trailer, else seven days ago. A failed read is tried twice more (after 2 and 10 
 counts as an error. Replies, acknowledgements, closures and merges count only after that start;
 the other events repeat while their condition holds, dated by the upstream fact, so the same fact
 always gives the same line, and a line already in `events.ndjson` is never recorded again.
+Release state is checked before ledger deduplication, independently of the start of the window.
+Advancing `Checked-At` therefore does not hide a deferred release that remains eligible.
 
 A run with new records makes one commit: the previous records plus the new ones, a message with
 one plain sentence per new record, and the trailer `Checked-At:` with the run's start time, or the
@@ -259,9 +266,10 @@ never posts, pushes or merges without explicit confirmation.
 at 14:17 UTC (`17 14 * * *`) and on demand (`workflow_dispatch`, with `record` off for a dry run in
 the job summary and an optional `since`). GitHub may start a scheduled run late or, under heavy
 load, drop it; the next run's window covers the gap. No model runs in it: the script decides the
-records, the firings and the notice text. Every job summary says how many dispatch routine
-sessions the run would start (`wouldFire`) and lists them, so a dry run shows what a real run
-would fire.
+records, the firings and the notice text. Both preview and record summaries list `wouldFire`
+and `deferred`, count dispatch errors, and report blind failures. A dry run previews at most
+three fixes; a real run leaves `wouldFire` empty. If the ledger build fails after firing, the
+summary also preserves the observed session links.
 
 The `watch` job has `contents: write` (to push the ledger branch and comment on its commit),
 `actions: read` and `pull-requests: read`. Its steps, in order:
@@ -285,12 +293,31 @@ reads neither upstream repositories nor the ledger (a cloud session reaches only
 attached to it). It has no schedule: the watch fires its API trigger
 ([Add an API trigger](https://code.claude.com/docs/en/routines#add-an-api-trigger)) once for each
 `released` line with `branch=` whose branch does not exist yet, sends the line's id, version and
-branch as the payload, and records a `fired` line with the session link. If the branch has not
-appeared three days later it fires once more; after that the job fails and names both sessions.
+branch as the payload, and records a `fired` line after HTTP 200 with a string session URL.
+A run attempts at most three eligible fixes, with 15 seconds between fixes. It stops attempting
+fixes after the first trigger error and lists later eligible fixes in `deferred`. These remain
+eligible for later checks; their execution is not guaranteed, and repeated errors on an earlier
+fix can starve the backlog. PR observation still runs after the cap or a trigger error.
+If the branch has not appeared three days after a recorded firing, the fix becomes eligible
+for one more firing; after two recorded firings the job fails and names both sessions.
 To clear that, create the branch or move the entry's status off `watching` and
 `fixed-unreleased`. Deleting a dispatch branch (for example after closing its pull request) lets
 the watch fire again, within the two firings per thread. A day with nothing to dispatch costs
 nothing in claude.ai.
+
+The [routine API reference](https://platform.claude.com/docs/en/api/claude-code/routines-fire)
+documents retries for HTTP 500 and 503. The watcher allows three attempts per fix, waiting
+2 and then 4 seconds. It does not retry other statuses, thrown network errors or timeouts,
+HTTP 200 without a session URL, or any response already containing a string session URL.
+An error is an observed response, not proof that the server created no session. The API has no
+idempotency key, so retries cannot guarantee exactly one session. Error body messages and
+request IDs redact the configured token before truncation, remove control characters and are
+limited to 200 characters each.
+
+The historical [scheduled run 36583034986](https://github.com/pacphi/agentic-kit/actions/runs/36583034986)
+at revision `94890a00` reported seven HTTP 503 dispatch errors without a parsed string session
+URL. Those logs do not establish that no server-side sessions existed or that this was the
+first dispatching run; the reconciliation tests use injected responses, not real dispatches.
 
 The trigger token is the repository secret `UPSTREAM_DISPATCH_TOKEN`, created in claude.ai; the
 routine id is in the workflow. The routine acts as the maintainer's GitHub user and its session
@@ -298,8 +325,11 @@ has GitHub write tools, so the limits below are instructions in its prompt, not 
 platform checks each push to a branch not prefixed `claude/` and refuses it when the branch is
 protected, someone else has an open pull request from it, or it carries someone else's commits
 ([Repositories and branch permissions](https://code.claude.com/docs/en/routines#repositories-and-branch-permissions)).
-GitHub does not notify you of your own pull request by default, so the watch's next run records
-`dispatch-pr` and its notice says the draft is ready.
+GitHub does not notify you of your own pull request by default, so the watch checks for an open
+draft pull request while the entry is `watching` or `fixed-unreleased`, for strictly less than seven days after
+its latest firing, and stops after recording `dispatch-pr`. When found, it records `dispatch-pr` and its notice says the draft is ready.
+After that window, a late pull request needs manual reconciliation; the `fired` evidence remains
+in the ledger.
 
 - **Trigger:** API only.
 - **Prompt:**

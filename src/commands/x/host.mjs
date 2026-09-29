@@ -32,7 +32,7 @@ import {
   hostManagement, hostEnableCommand, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
 } from '../../lib/host-management.mjs';
 import {
-  ok, warn, fail, info, dim, bold, yellow, humanOutputToStderr,
+  ok, warn, fail, info, dim, bold, yellow, humanOutputToStderr, reportFailure,
 } from '../../lib/output.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { writeJsonWithBackup } from '../../lib/settings.mjs';
@@ -181,13 +181,19 @@ export const parseFallback = (str) => str.split(';').map((s) => s.trim()).filter
   return { provider: provider.trim().toLowerCase(), models: models.split(',').map((m) => m.trim()).filter(Boolean) };
 });
 
-export async function run({ flags, positionals, pkgRoot }) {
+export async function run({ flags, positionals, pkgRoot, deps = { hostLifecycle: undefined } }) {
   const sub = positionals[0] ?? 'status';
   const cwd = process.cwd();
 
+  if (['status', 'off', 'pick', 'reset-routes', 'align'].includes(sub) && positionals.length > 1) {
+    const error = `unexpected argument '${positionals[1]}'`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
+    return 2;
+  }
+
   if (sub === 'status') return status({ flags, cwd });
   if (sub === 'off') return off({ cwd, pkgRoot, flags });
-  if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
+  if (sub === 'pick') return pick({ flags, cwd, pkgRoot, deps });
   if (sub === 'reset-routes') return resetRoutes({ flags, cwd });
   if (sub === 'align') return (await import('./host-align.mjs')).run({ flags });
   if (sub === 'adapters') {
@@ -196,12 +202,17 @@ export async function run({ flags, positionals, pkgRoot }) {
     // read-only preview to give --dry-run, so it is refused outright
     // instead of silently behaving like a real run: a flag we declare is a
     // flag we honor, or refuse.
-    if (flags['dry-run']) { fail('ak host adapters has no preview; run it without --dry-run'); return 2; }
+    if (flags['dry-run']) {
+      const error = 'ak host adapters has no preview; run it without --dry-run';
+      reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
+      return 2;
+    }
     return (await import('./host-adapters.mjs')).run({ flags, positionals: positionals.slice(1) });
   }
   if (sub === 'check-connection') return (await import('./host-connection.mjs')).run({ flags, positionals: positionals.slice(1) });
 
-  fail(`unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|adapters|align)`);
+  const error = `unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|adapters|align)`;
+  reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
   return 2;
 }
 
@@ -322,7 +333,7 @@ const STATUS_SECTIONS = [
 
 async function status({ flags, cwd }) {
   const cfg = loadKitConfig();
-  const facts = await collectIntegrationFacts({ cwd, cfg });
+  const facts = await collectIntegrationFacts({ cwd, cfg, record: !flags['dry-run'] });
   const hosts = facts.hosts;
   const providers = facts.providers;
   const { scope } = settingsTarget(cwd);
@@ -378,27 +389,38 @@ async function resetRoutes({ flags, cwd }) {
   const cfg = loadKitConfig();
   const policy = cfg.routing?.routes ?? {};
   const diverged = divergedRoutes(policy);
-  if (!diverged.length) { ok('no seeded routes diverge from the current defaults'); return 0; }
+  const jsonDryRun = flags['dry-run'] && flags.json;
+  const previewJson = (activities) => console.log(JSON.stringify({ dryRun: true, activities }, null, 2));
+  if (!diverged.length) {
+    if (jsonDryRun) previewJson([]);
+    else ok('no seeded routes diverge from the current defaults');
+    return 0;
+  }
 
-  console.log(bold('seeded routes that diverge from current defaults'));
-  for (const d of diverged) {
-    const head = d.modelDiverged ? `${d.model} → ${d.defaultModel}` : d.model;
-    console.log(`  ${d.activity.padEnd(18)} ${d.host.padEnd(7)} ${head}`);
-    for (const e of d.escalation) console.log(`    ${dim('escalation:')} ${e.model} → ${e.defaultModel}`);
-    // The trade, not just the ids: choosing on a price axis while paying on a
-    // turns axis is the misreading this whole surface exists to prevent.
-    if (d.modelDiverged && d.currentNote) console.log(dim(`    now:     ${d.model} — ${d.currentNote}`));
-    if (d.modelDiverged && d.defaultNote) console.log(dim(`    default: ${d.defaultModel} — ${d.defaultNote}`));
-    for (const e of d.escalation) {
-      const note = modelNote(e.defaultModel);
-      if (note) console.log(dim(`    default: ${e.defaultModel} — ${note}`));
+  if (!jsonDryRun) {
+    console.log(bold('seeded routes that diverge from current defaults'));
+    for (const d of diverged) {
+      const head = d.modelDiverged ? `${d.model} → ${d.defaultModel}` : d.model;
+      console.log(`  ${d.activity.padEnd(18)} ${d.host.padEnd(7)} ${head}`);
+      for (const e of d.escalation) console.log(`    ${dim('escalation:')} ${e.model} → ${e.defaultModel}`);
+      // The trade, not just the ids: choosing on a price axis while paying on a
+      // turns axis is the misreading this whole surface exists to prevent.
+      if (d.modelDiverged && d.currentNote) console.log(dim(`    now:     ${d.model} — ${d.currentNote}`));
+      if (d.modelDiverged && d.defaultNote) console.log(dim(`    default: ${d.defaultModel} — ${d.defaultNote}`));
+      for (const e of d.escalation) {
+        const note = modelNote(e.defaultModel);
+        if (note) console.log(dim(`    default: ${e.defaultModel} — ${note}`));
+      }
     }
   }
 
   let picked;
   if (flags.activity !== undefined) {
     const want = flags.activity.split(',').map((s) => s.trim()).filter(Boolean);
-    for (const a of want.filter((a) => !ACTIVITIES.includes(a))) warn(`unknown activity '${a}' — ignored`);
+    for (const a of want.filter((a) => !ACTIVITIES.includes(a))) {
+      if (jsonDryRun) await humanOutputToStderr(() => warn(`unknown activity '${a}' — ignored`));
+      else warn(`unknown activity '${a}' — ignored`);
+    }
     picked = want.filter((a) => diverged.some((d) => d.activity === a));
   } else if (flags.yes || flags['dry-run']) {
     // --dry-run never prompts: with nothing else naming a subset, preview the
@@ -413,11 +435,18 @@ async function resetRoutes({ flags, cwd }) {
       ? diverged.map((d) => d.activity)
       : ans.split(',').map((s) => s.trim()).filter((a) => diverged.some((d) => d.activity === a));
   }
-  if (!picked.length) { info('no routes reset — routes left as they are'); return 0; }
+  if (!picked.length) {
+    if (jsonDryRun) previewJson([]);
+    else info('no routes reset — routes left as they are');
+    return 0;
+  }
 
   if (flags['dry-run']) {
-    info(`would reset ${picked.length} route(s) to the current defaults: ${picked.join(', ')}`);
-    info('dry run — nothing changed');
+    if (jsonDryRun) previewJson(picked);
+    else {
+      info(`would reset ${picked.length} route(s) to the current defaults: ${picked.join(', ')}`);
+      info('dry run — nothing changed');
+    }
     return 0;
   }
 
@@ -457,11 +486,30 @@ function printOffDryRunSummary(cfg, opts) {
   if (codexOwned) console.log('  would remove ak-managed Codex MCP wiring');
 }
 
-async function off({ cwd, pkgRoot, flags = {} }) {
+async function off({ cwd, pkgRoot, flags = /** @type {{ json?: boolean, 'dry-run'?: boolean }} */ ({}) }) {
   const cfg = loadKitConfig();
   if (flags['dry-run']) {
-    printOffDryRunSummary(cfg, { pkgRoot });
-    info('dry run — nothing changed');
+    if (flags.json) {
+      await humanOutputToStderr(() => {
+        printOffDryRunSummary(cfg, { pkgRoot });
+        info('dry run — nothing changed');
+      });
+      console.log(JSON.stringify({
+        dryRun: true,
+        wouldDisable: HOSTS.filter((h) => cfg.integrations.hosts[h.id]).map((h) => h.id),
+        primaryHost: DEFAULT_PRIMARY_HOST,
+        wouldClear: ['aqe provider/fallback', 'ruflo providers', 'activity routing'],
+        wouldStripManagedProviderEnv: true,
+        wouldRestoreOrRemoveManagedAqeConfig: true,
+        wouldReconcileOpencodeGuidance: !!pkgRoot,
+        wouldTeardownOpencode: !!(cfg.integrations.hosts.opencode || cfg.integrations?.ownership?.opencode),
+        wouldRemoveManagedCodexMcp: cfg.integrations?.ownership?.codex?.mcp === 'ak'
+          || cfg.integrations?.ownership?.codex?.reverseMcp === 'ak',
+      }, null, 2));
+    } else {
+      printOffDryRunSummary(cfg, { pkgRoot });
+      info('dry run — nothing changed');
+    }
     return 0;
   }
   const codexMcpManaged = cfg.integrations?.ownership?.codex?.mcp === 'ak';
@@ -715,8 +763,9 @@ async function resolvePickDecision(cfg, {
   const known = new Set([...MANAGED_HOSTS, ...EFFECTIVE_ROUTING]);
   const unknown = enabled.filter((h) => !known.has(h));
   if (unknown.length) {
-    fail(`unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`);
-    return { code: 2 };
+    const error = `unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`;
+    fail(error);
+    return { code: 2, error };
   }
   // The routing set needs at least one primary-capable member; OpenCode remains
   // routable but cannot satisfy that primary-host invariant on its own.
@@ -869,25 +918,28 @@ async function retireCodexOnDisable(cfg, cwd, { codexMcpManaged, rufloCodexManag
 /** Install any enabled host that is entirely absent (external installs
  *  untouched). Unlike setup's install loop, pick never prompts first — the
  *  user already confirmed the trust manifest for this exact enable. */
-async function installPickAbsentHosts(cfg, cwd) {
+export async function installPickAbsentHosts(cfg, cwd, lifecycle = {}) {
+  const { installState, install, collectFacts } = {
+    installState: hostInstallState, install: installHost, collectFacts: collectIntegrationFacts, ...lifecycle,
+  };
   let installed = false;
   for (const h of HOSTS) {
     if (!cfg.integrations.hosts[h.id]) continue;
-    if ((await hostInstallState(h)).method !== 'absent') continue;
+    if ((await installState(h)).method !== 'absent') continue;
     info(`${h.id} not installed — installing ${h.pkg}…`);
-    const r = await installHost(h.id);
+    const r = await install(h.id);
     (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
     if (r.ok) {
       installed = true;
       // hostInstallState() above already recorded the pre-install 'absent'
       // evidence; re-probe now so a subsequent `ak status` doesn't read that
       // stale row back.
-      await hostInstallState(h, { refresh: true, record: true, source: 'host-pick' });
+      await installState(h, { refresh: true, record: true, source: 'host-pick' });
     }
   }
   // host-setup covers every host in one call; refresh it once after the
   // loop, not per host, once anything actually changed.
-  if (installed) await collectIntegrationFacts({ cwd, cfg, refresh: true, record: true, source: 'host-pick' });
+  if (installed) await collectFacts({ cwd, cfg, refresh: true, record: true, source: 'host-pick' });
 }
 
 /** opencode enable half: apply the same owner-module stack setup/sync use —
@@ -1058,7 +1110,7 @@ async function resolvePickIntentAndPreview({
     aqeProviderTypes,
     aqeChainProviderTypes,
   });
-  if (decision.code !== undefined) return { code: decision.code };
+  if (decision.code !== undefined) return decision;
   const {
     enabled, routing, primaryHost, aqeProvider, seed,
   } = decision;
@@ -1095,7 +1147,7 @@ async function resolvePickIntentAndPreview({
   };
 }
 
-export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetiredRoutesInConfig }) {
+export async function pick({ flags, cwd, pkgRoot, deps = { hostLifecycle: undefined }, migrateRoutes = migrateRetiredRoutesInConfig }) {
   const aqeProviderTypes = aqeSelectableProviderTypes();
   const aqeChainProviderTypes = aqeSelectableChainProviderTypes();
   const cfg = loadKitConfig();
@@ -1133,6 +1185,7 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   const outcome = jsonDryRun ? await humanOutputToStderr(resolve) : await resolve();
   if (outcome.code !== undefined) {
     if (outcome.json) console.log(JSON.stringify(outcome.json, null, 2));
+    else if (jsonDryRun) console.log(JSON.stringify({ error: outcome.error ?? 'host pick refused', exitCode: outcome.code }, null, 2));
     return outcome.code;
   }
   const {
@@ -1145,7 +1198,7 @@ export async function pick({ flags, cwd, pkgRoot, migrateRoutes = migrateRetired
   }
   saveKitConfig(cfg);
 
-  await installPickAbsentHosts(cfg, cwd);
+  await installPickAbsentHosts(cfg, cwd, deps.hostLifecycle);
   const { incompleteTeardown } = await applyPickOpencodeLifecycle(cfg, { pkgRoot, cwd, prevOpencode });
 
   const { router } = await applyPickProviderStack(cfg, cwd, {

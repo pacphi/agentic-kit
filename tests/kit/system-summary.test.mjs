@@ -1,3 +1,5 @@
+import * as sessionVocabulary from '../../src/lib/session-surface.mjs';
+import { censusDisclosure } from '../../src/lib/census-presentation.mjs';
 // GET /api/system/summary (#237 M4, decision 8). The System page drew from
 // GET /api/system, which ships the whole persisted catalog: every presence
 // fact repeated in item.presence, item.consumerBindings, item.artifacts and
@@ -366,7 +368,7 @@ test('the projects summary drops per-project stack detection and node_modules ro
   }
   const row = summary.projects.projects[0];
   assert.deepEqual(Object.keys(row).sort(),
-    ['path', 'label', 'hosts', 'totalBytes', 'lastActivity', 'loc', 'remote', 'repository'].sort());
+    ['path', 'label', 'hosts', 'totalBytes', 'lastActivity', 'loc', 'remote', 'repository', 'sessionOrigins'].sort());
   assert.equal('stack' in row, false, 'framework/manifest detection is not rendered (system-projects.mjs langCell)');
   assert.equal('nodeModulesRoots' in row, false);
   assert.deepEqual(Object.keys(row.loc).sort(), ['total', 'languages', 'byLanguage'].sort());
@@ -374,7 +376,7 @@ test('the projects summary drops per-project stack detection and node_modules ro
   assert.deepEqual(Object.keys(row.repository).sort(), ['repositoryId', 'kind', 'root'].sort());
   assert.deepEqual(Object.keys(row.remote).sort(), ['status', 'webUrl', 'raw'].sort());
   const discovery = summary.projects.discoveryProjects[0];
-  assert.deepEqual(Object.keys(discovery).sort(), ['path', 'label', 'hosts', 'repository'].sort());
+  assert.deepEqual(Object.keys(discovery).sort(), ['path', 'label', 'hosts', 'repository', 'sessionOrigins'].sort());
 });
 
 test('the projects summary keeps byLanguage for a pre-languages loc, so an old carried-forward snapshot still renders bars', () => {
@@ -510,13 +512,15 @@ function systemClient({ fetchImpl } = {}) {
     'storageHostTotals', 'renderSysSummary', 'renderSysConsumers', 'renderSysReclaim', 'CHART_EXCLUDED_CATEGORIES',
     'transcriptIdOf', 'renderSysKpis'];
   const readout = load('system-readout', { esc, fmtNum, fmtTok, document, window }, readoutExports);
+  const surfaceHelpers = load('session-presentation', { ...sessionVocabulary, esc }, ['projectSurfacesHtml']);
   const projects = load('system-projects', {
+    ...surfaceHelpers, censusDisclosure,
     ...readout, esc, authHeaders: () => ({}), formatLocalDateTime: () => null, formatLocalDateTimeLong: () => null,
     shortSessionId: (s) => s, ago: () => 'just now', fmtNum, fmtTok, limAge, pct,
     repositoryTree,
     SYSTEM: null, systemBusy: false, systemPollTimer: null, consMode: 'ranked', document, window,
     fetch: fetchImpl ?? (() => Promise.reject(new Error('no fetch in this test'))), setTimeout: () => 0, clearTimeout: () => {},
-  }, ['renderSysCatalog', 'loadSystem', 'renderSysStorage', 'renderSysProjects']);
+  }, ['renderSysCatalog', 'loadSystem', 'renderSysStorage', 'renderSysProjects', 'renderSysRuntime']);
   return { document, readout, projects };
 }
 
@@ -526,6 +530,29 @@ function catalogHtml(payload) {
   client.projects.renderSysCatalog(payload);
   return Object.fromEntries([...client.document.elements].map(([id, el]) => [id, { html: el.innerHTML, text: el.textContent }]));
 }
+
+test('Runtime process renderer names desktop applications separately from coding-agent hosts', () => {
+  const client = systemClient();
+  const row = (pid, host, application, source) => ({ pid, host, application, source,
+    uptimeMs: meas(2000), cpuPercent: meas(2), rssBytes: meas(1000) });
+  client.projects.renderSysRuntime({ runtime: { processes: meas([
+    row(1, null, 'Claude Desktop', meas({ kind: 'desktop-app', label: 'Claude Desktop' })),
+    row(2, 'claude', null, meas({ kind: 'repository', label: 'work' })),
+    row(3, null, 'ChatGPT desktop app', meas({ kind: 'desktop-app', label: 'ChatGPT desktop app' })),
+    row(4, 'codex', null, meas({ kind: 'host-service', label: 'Codex app service' })),
+    row(5, null, '<unknown>', { status: 'unknown', reason: 'not attributable — <denied>' }),
+  ]) } });
+  const html = client.document.getElementById('sys-procs').innerHTML;
+  assert.match(html, /Coding-agent host \/ desktop application/);
+  assert.match(html, /Claude Desktop/);
+  assert.match(html, /ChatGPT desktop app/);
+  assert.match(html, /Codex app service/);
+  assert.match(html, /work/);
+  assert.match(html, /not attributable/);
+  assert.match(html, /&lt;unknown&gt;/);
+  assert.match(html, /&lt;denied&gt;/);
+  assert.doesNotMatch(html, /<unknown>|<denied>/);
+});
 
 test('the KPI band and every catalog card render identically from the summary and the full payload', () => {
   const full = fullPayload(6);
@@ -592,13 +619,13 @@ test('the projects note says how many imported copies discovery set aside, and n
 
 // ── The page reads the slim endpoint ────────────────────────────────────────
 
-test('loadSystem fetches /api/system/summary, deep refresh parameters included', async () => {
+test('loadSystem only re-reads /api/system/summary', async () => {
   const urls = [];
   const fetchImpl = (url) => { urls.push(url); return Promise.resolve({ json: () => Promise.resolve(systemSummaryPayload(fullPayload(1))) }); };
   const { projects } = systemClient({ fetchImpl });
   await projects.loadSystem();
   await projects.loadSystem(true, false);
-  assert.deepEqual(urls, ['/api/system/summary', '/api/system/summary?refresh=deep&trees=0']);
+  assert.deepEqual(urls, ['/api/system/summary', '/api/system/summary']);
 });
 
 // ── The routes ──────────────────────────────────────────────────────────────
@@ -661,15 +688,14 @@ test('GET /api/system/summary serves the projection; GET /api/system stays compl
   assert.ok(complete.catalog.items[0].presence[0].itemPath);
 });
 
-test('GET /api/system/summary?refresh=deep starts the scan and answers with its running state', async (t) => {
+test('GET /api/system/summary rejects measurement queries before reading the collector', async (t) => {
   const collector = fakeCollector();
   const cwd = tempDir('ak-system-summary');
   const server = await startDashboard({ port: 0, cwd, system: collector, usage: {}, ...hermeticMaintenance() });
   t.after(() => server.close());
   const r = await request(server, '/api/system/summary?refresh=deep&trees=0');
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 400);
   const body = JSON.parse(r.body);
-  assert.deepEqual(collector.calls.refreshDeep, [{ includeProjectTrees: false }]);
-  assert.deepEqual(body.scan, { running: true, phase: 'catalog' });
-  assert.equal('artifacts' in body.catalog, false);
+  assert.deepEqual(body, { error: 'start a refresh with POST /api/refresh' });
+  assert.deepEqual(collector.calls.refreshDeep, []);
 });

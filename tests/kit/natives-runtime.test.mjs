@@ -16,7 +16,7 @@ import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { evidenceDir, readEvidence, writeEvidence, stableInputsKey } from '../../src/lib/evidence.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
-// Task 4: rufloRuntimeNatives now reads/writes evidence under the kit state dir
+// rufloRuntimeNatives now reads/writes evidence under the kit state dir
 // (evidenceDir()) when refresh:false. Redirect the state base for this whole
 // file so those reads/writes never touch this machine's real evidence store —
 // mirrors tests/kit/heal-natives.test.mjs's XDG_STATE_HOME/LOCALAPPDATA redirect.
@@ -386,7 +386,7 @@ test('rufloRuntimeNatives reports not-installed and never spawns when ruflo is a
   _setGlobalRootForTest(null); rm(g);
 });
 
-// ── Task 4: evidence-backed refresh (Ruling A/B) ────────────────────────────
+// ── evidence-backed refresh (Ruling A/B) ────────────────────────────
 
 /** Seed a fresh, matching evidence record for one context, as a real probe +
  *  writeEvidence would leave it. */

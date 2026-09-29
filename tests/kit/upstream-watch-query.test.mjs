@@ -60,6 +60,17 @@ test('--recorded-since belongs to ledger only', async () => {
   });
 });
 
+test('ledger fails visibly on an invalid registry without reading the ledger', async () => {
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { status: 'done' })], async (file) => {
+    let reads = 0;
+    const result = await query(file, [], { read: async () => { reads++; throw new Error('unexpected read'); } });
+    assert.equal(result.code, 3);
+    assert.equal(reads, 0);
+    assert.match(result.err, /upstream registry is invalid/);
+    assert.doesNotMatch(result.out, /No report/);
+  });
+});
+
 test('the fetcher reads the last successful scheduled watch run from the Actions API', async () => {
   const calls = [];
   const exec = async (command, args) => {

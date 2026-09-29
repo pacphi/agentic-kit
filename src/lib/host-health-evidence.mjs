@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHmac, randomBytes } from 'node:crypto';
 import { hostHealthInputPaths } from './paths.mjs';
+import { fileId, statMtimeMs } from './file-identity.mjs';
 
 export function createHostHealthSnapshot({ secret = randomBytes(32), env = process.env, inputPaths = hostHealthInputPaths } = {}) {
   return ({ cwd, cfg }) => {
@@ -35,9 +36,9 @@ export function createHostHealthSnapshot({ secret = randomBytes(32), env = proce
       for (const dir of (env.PATH ?? '').split(path.delimiter).slice(0, 256)) {
         const file = path.resolve(dir, host + (process.platform === 'win32' ? '.cmd' : ''));
         try {
-          const st = fs.statSync(file);
+          const st = fs.statSync(file, { bigint: true });
           if (!st.isFile()) continue;
-          hash.update(JSON.stringify([host, fs.realpathSync(file), st.size, st.mtimeMs, st.ino]));
+          hash.update(JSON.stringify([host, fs.realpathSync(file), Number(st.size), statMtimeMs(st), fileId(st.dev), fileId(st.ino)]));
           break;
         } catch { /* next PATH entry */ }
       }

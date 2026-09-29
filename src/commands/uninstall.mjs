@@ -101,9 +101,9 @@ function hasDejaVuOwnership(cfg) {
 
 function protectedDejaVuRoots(homeDir, env) {
   const absolute = (value) => typeof value === 'string' && path.isAbsolute(value);
-  const configBases = [path.join(homeDir, '.config'), env.XDG_CONFIG_HOME, env.APPDATA]
+  const configBases = [path.join(homeDir, '.config'), paths.xdgBase('XDG_CONFIG_HOME', null, { env }), env.APPDATA]
     .filter(absolute);
-  const dataBases = [path.join(homeDir, '.local', 'share'), env.XDG_DATA_HOME]
+  const dataBases = [path.join(homeDir, '.local', 'share'), paths.xdgBase('XDG_DATA_HOME', null, { env })]
     .filter(absolute);
   return {
     sourceRoots: [

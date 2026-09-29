@@ -1,3 +1,5 @@
+import { censusDisclosure } from '../census-presentation.mjs';
+import { SESSION_SURFACE_LABELS, SESSION_HOST_LABELS, SESSION_INITIATOR_LABELS, SESSION_PROVIDER_LABELS, sessionPresentation, sessionProviderPresentation } from '../session-surface.mjs';
 import { repositoryTree } from './project-groups.mjs';
 import { contextCard } from './context-card.mjs';
 import { contextHostCard } from './context-host-card.mjs';
@@ -92,8 +94,11 @@ aboutSrc = inject(aboutSrc, 'var ABOUT = []; // PLACEHOLDER:ABOUT_JS', `var ABOU
 
 const datetimeSrc = readSplit('datetime.mjs');
 const hostReadinessSrc = readSplit('host-readiness.mjs');
+const sessionPresentationSrc = readSplit('session-presentation.mjs');
+const sessionVocabularySrc = `const SESSION_SURFACE_LABELS=${JSON.stringify(SESSION_SURFACE_LABELS)},SESSION_HOST_LABELS=${JSON.stringify(SESSION_HOST_LABELS)},SESSION_INITIATOR_LABELS=${JSON.stringify(SESSION_INITIATOR_LABELS)},SESSION_PROVIDER_LABELS=${JSON.stringify(SESSION_PROVIDER_LABELS)};${sessionPresentation.toString()}${sessionProviderPresentation.toString()}`;
 const intelligenceSrc = readSplit('intelligence.mjs');
 const pollSrc = readSplit('poll.mjs');
+const refreshControlSrc = readSplit('refresh-control.mjs');
 // usage-rhythm.mjs declares its OWN `esc` on disk, and its comment says why:
 // the tests import it as real ESM, where bootstrap.mjs's `esc` is still the
 // build-time stub. In the concatenated bundle every file shares ONE scope, so
@@ -164,5 +169,5 @@ const bootSrc = readSplit('boot.mjs');
 export const JS = `
 (function(){
 ${bootstrapSrc}${contextCard.toString()}${contextHostCard.toString()}${repositoryTree.toString()}${overviewSrc}${datetimeSrc}${hostReadinessSrc}
-${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${rufloComponentsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${censusDisclosure.toString()}${sessionVocabularySrc}${sessionPresentationSrc}${intelligenceSrc}${pollSrc}${refreshControlSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${rufloComponentsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

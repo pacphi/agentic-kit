@@ -185,6 +185,51 @@ test('bounded native discovery rotates to a newer transcript created after start
   service.close();
 });
 
+test('a native transcript re-entering the bounded window resumes without replaying accepted records', () => {
+  const sb = sandbox();
+  const old = path.join(sb.claude, 'old.jsonl');
+  const recent = path.join(sb.claude, 'recent.jsonl');
+  fs.writeFileSync(old, line({
+    type: 'user', sessionId: 'old', cwd: '/work/old-project',
+    timestamp: '2026-07-27T11:00:00Z', message: { content: 'fixture only' },
+  }));
+  fs.utimesSync(old, new Date(1_000), new Date(1_000));
+  let tick;
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 1, readCodexState: () => null,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  try {
+    service.start();
+    const before = service.snapshot().health.claude.accepted;
+    assert.ok(before > 0);
+    fs.writeFileSync(recent, line({
+      type: 'user', sessionId: 'recent', cwd: '/work/recent-project',
+      timestamp: '2026-07-27T11:01:00Z', message: { content: 'fixture only' },
+    }));
+    fs.utimesSync(recent, new Date(2_000), new Date(2_000));
+    tick();
+    const rotated = service.snapshot();
+    const afterRotation = rotated.health.claude.accepted;
+    assert.ok(afterRotation > before);
+    service.close();
+    service.start();
+    fs.utimesSync(old, new Date(3_000), new Date(3_000));
+    tick();
+    const reentered = service.snapshot();
+    assert.equal(reentered.health.claude.accepted, afterRotation);
+    assert.equal(reentered.sessions.length, rotated.sessions.length);
+    assert.equal(reentered.projects.length, rotated.projects.length);
+    fs.appendFileSync(old, line({
+      type: 'assistant', sessionId: 'old', cwd: '/work/old-project',
+      timestamp: '2026-07-27T12:00:01Z', message: { content: 'fixture only' },
+    }));
+    tick();
+    assert.equal(service.snapshot().health.claude.accepted, afterRotation + 1);
+  } finally { service.close(); }
+});
+
 test('metadata bootstrap is adversarially privacy bounded', () => {
   const sb = sandbox();
   fs.writeFileSync(path.join(sb.codex, 'rollout-2026-07-27T12-00-00-x1.jsonl'), [

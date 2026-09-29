@@ -2540,3 +2540,20 @@ in a throwaway repository (run 36451224053) showed that the job token pushes the
 email). Each firing is recorded as a `fired` line, so a routine that fails is fired again at most
 once; the Actions API's last successful run replaces a daily heartbeat commit; #243 closes. Design:
 `docs/archive/2026-09-28-superpowers-spec-upstream-watch-ledger-branch-design.md`.
+
+### V3 dashboard refresh implementation status (2026-09-29)
+
+The V3 branch at `19953b6d` delivers Addendum 3 Item 4's dashboard half: one header
+Refresh control with Refresh, Refresh live, and Refresh machine choices; Reload only
+re-reads the active view. `POST /api/refresh` starts the ordered operation;
+`GET /api/refresh` reads the latest process-local state. GET system and Maintenance
+routes reject retired scan-starting query arguments. ADR-0063 records the operation
+identity and volatile single-flight boundary, and supersedes ADR-0048's two old
+controls, ADR-0025 §5's GET-started scan rationale, and ADR-0045's GET scan trigger.
+ADR-0044 and ADR-0053 now point to the explicit POST and header Refresh paths.
+
+D-15 keeps ADR-0048 Accepted with partial delivery: the human usability, screen-reader,
+and cross-platform evaluation gates move to v5. The V4 offline retry change is on a
+separate unmerged branch; this V3 source retains ADR-0063 Known limitations item 1.
+This entry records V3 task 6c-5's source-bound documentation integration, not final
+branch acceptance or completion of the separately dispatched live-view work.

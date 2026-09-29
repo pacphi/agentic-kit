@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { fileId } from './file-identity.mjs';
 import { writeFileWithBackup } from './file-write.mjs';
 import { inspectCodexTomlStructure, isTomlTableLine } from './codex-toml-safety.mjs';
 import { enabledPluginRefs } from './codex-plugins.mjs';
@@ -58,13 +59,13 @@ function uniqueJson(source) {
 }
 
 function readSource(file) {
-  const stat = fs.lstatSync(file);
+  const stat = fs.lstatSync(file, { bigint: true });
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 * 1024) throw new Error('configuration is not a bounded regular file');
   const bytes = fs.readFileSync(file);
   const source = bytes.toString('utf8');
   if (!bytes.equals(Buffer.from(source))) throw new Error('configuration is not UTF-8');
-  return { file, source, digest: hash(bytes), mode: stat.mode & 0o777,
-    identity: { real: fs.realpathSync(file), device: stat.dev, inode: stat.ino, mode: stat.mode } };
+  return { file, source, digest: hash(bytes), mode: Number(stat.mode & 0o777n),
+    identity: { real: fs.realpathSync(file), device: fileId(stat.dev), inode: fileId(stat.ino), mode: Number(stat.mode) } };
 }
 
 function safeJsonTransport(entry) {

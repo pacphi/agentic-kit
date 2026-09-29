@@ -86,6 +86,66 @@ function sandbox({ sessions = [], messages = [] } = {}) {
 
 const opts = (sb, extra = {}) => ({ days: 14, now: NOW, roots: sb.roots, cachePath: sb.cachePath, deps: deps(), ...extra });
 
+test('cached OpenCode child fingerprints cannot enter current or previous prompt projections', async () => {
+  const current = NOW - DAY;
+  const prior = NOW - 15 * DAY;
+  const sb = sandbox({
+    sessions: [
+      { id: 'parent', directory: '/x', title: 'parent', timeCreated: current },
+      { id: 'child', directory: '/x', title: 'child', parentId: 'parent', timeCreated: current },
+      { id: 'prior-child', directory: '/x', title: 'prior child', parentId: 'parent', timeCreated: prior },
+    ],
+    messages: [
+      userMsg('pu', 'parent', current), assistantMsg('pa', 'parent', current + 1000, { cost: 0.2 }),
+      userMsg('cu', 'child', current), assistantMsg('ca', 'child', current + 1000, { provider: 'alpha', cost: 0.3 }),
+      userMsg('ou', 'prior-child', prior), assistantMsg('oa', 'prior-child', prior + 1000, { cost: 0.4 }),
+    ],
+  });
+  try {
+    const db = new DatabaseSync(sb.dbFile);
+    const insert = db.prepare('INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const [id, messageId, sessionId, at] of [
+      ['p1', 'pu', 'parent', current], ['p2', 'cu', 'child', current], ['p3', 'ou', 'prior-child', prior],
+    ]) insert.run(id, messageId, sessionId, at, at, JSON.stringify({ type: 'text', text: 'Run the tests' }));
+    db.close();
+    const options = opts(sb, { lookbackDays: 28, previous: true, prompts: true });
+    const cold = await buildIndex(options);
+    assert.equal(cold.totals.typedPrompts, 1);
+    assert.equal(cold.totals.humanPrompts, 1);
+    assert.equal(cold.totals.cost, 0.5);
+    assert.equal(cold.sessions.find((s) => s.id === 'child').typedPrompts, 0);
+    assert.equal(cold.previous.totals.typedPrompts, 0);
+    assert.deepEqual(cold.promptPatterns.corpus, { fingerprints: 1, typed: 1 });
+    assert.deepEqual(Object.keys(cold.promptBaselines), [], 'a prior child alone does not define an operator baseline');
+    const selected = await readSession('child', { roots: sb.roots, deps: deps() });
+    assert.equal(selected.meta.sidechain, true);
+    assert.equal(selected.meta.cost, 0.3);
+    assert.equal(selected.turns[0].text, 'Run the tests');
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    const parentFP = cache.entries['opencode://parent'].session.promptFPs[0];
+    for (const id of ['child', 'prior-child']) {
+      cache.entries[`opencode://${id}`].session.promptFPs = [parentFP];
+    }
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const warm = await buildIndex(options);
+    assert.equal(warm.totals.typedPrompts, 1);
+    assert.equal(warm.sessions.find((s) => s.id === 'child').typedPrompts, 0);
+    assert.equal(warm.previous.totals.typedPrompts, 0);
+    assert.deepEqual(warm.promptPatterns.corpus, { fingerprints: 1, typed: 1 });
+    assert.deepEqual(warm.promptPatterns.exactRepeats, []);
+    assert.deepEqual(Object.keys(warm.promptBaselines), []);
+    assert.equal(warm.totals.cost, 0.5);
+    assert.equal(warm.byProvider.alpha.cost, 0.3);
+    assert.equal(warm.byProvider.alpha.tokens, 1320);
+    assert.equal(warm.byProvider.opencode.cost, 0.2);
+    assert.equal(warm.totals.tokens, 2640);
+    assert.equal(warm.sessions.find((s) => s.id === 'child').threadSource, 'subagent');
+    assert.equal(JSON.parse(fs.readFileSync(sb.cachePath, 'utf8')).entries['opencode://child'].session.promptFPs.length, 1,
+      'the warm scan reused the old cached record, so aggregation must defend itself');
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
 test('scan aggregates opencode sessions: host bucket, provider bucket, tokens, and OBSERVED cost preferred over the pricing stub', async () => {
   const at = NOW - DAY;
   const sb = sandbox({
@@ -113,9 +173,106 @@ test('scan aggregates opencode sessions: host bucket, provider bucket, tokens, a
   assert.ok(agg.byHost.opencode, 'byHost gains the opencode bucket');
   assert.equal(agg.byHost.opencode.cost, 0.5);
   assert.ok(agg.byProvider.opencode, 'byProvider gains the observed provider bucket');
+  assert.ok(s.minutes > 0, 'the fixture has measured duration');
+  assert.equal(agg.byProvider.opencode.minutes, s.minutes, 'single-provider duration follows the session');
+  assert.equal(agg.byProvider.opencode.confidence, 0.9, 'classifier confidence survives provider folding');
   assert.equal(agg.totals.cost, 0.5);
   assert.equal(agg.byModel['kimi-k3'].cost, 0.5);
   rm(sb.dir);
+});
+
+test('one OpenCode session partitions provider usage on cold and warm scans without changing global totals', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_switch', directory: '/x', title: 'switch', timeCreated: at }],
+    messages: [
+      assistantMsg('a1', 'ses_switch', at + 1000, { model: 'shared', provider: 'alpha', cost: 0.25,
+        tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 3, write: 1 } } }),
+      assistantMsg('a2', 'ses_switch', at + 2000, { model: 'shared', provider: 'beta',
+        tokens: { input: 20, output: 4, reasoning: 0, cache: { read: 5, write: 2 } } }),
+      assistantMsg('a3', 'ses_switch', at + 3000, { model: 'shared', provider: 'alpha', cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }),
+    ],
+  });
+  try {
+    const cold = await buildIndex(opts(sb));
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    for (const entry of Object.values(cache.entries)) {
+      if (entry.session.host === 'opencode') {
+        entry.session.inferenceProvider = 'alpha'; // pre-repair v26 last-wins cache
+        entry.session.providerProvenance = 'observed';
+      }
+    }
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const warm = await buildIndex(opts(sb));
+    const reused = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.equal(Object.values(reused.entries).find((entry) => entry.session.host === 'opencode')
+      .session.inferenceProvider, 'alpha', 'warm scan reused the old record');
+    for (const agg of [cold, warm]) {
+      assert.equal(agg.sessions.length, 1);
+      assert.equal(agg.sessions[0].provider, null, 'mixed providers have no unique session provider');
+      assert.equal(agg.sessions[0].providerProvenance, 'unknown');
+      assert.equal(agg.totals.sessions, 1);
+      assert.equal(agg.totals.responses, 3);
+      assert.equal(agg.totals.tokens, 47);
+      assert.equal(agg.totals.cost, 0.281);
+      assert.deepEqual(agg.sessions[0].costEvidence, {
+        observedUsd: 0.25, estimatedUsd: 0.031,
+        observedMessages: 2, estimatedMessages: 1, unpricedMessages: 0,
+      });
+      assert.equal(agg.byHost.opencode.sessions, 1);
+      assert.equal(agg.byHost.opencode.responses, 3);
+      assert.ok(agg.sessions[0].minutes > 0, 'the fixture has measured duration');
+      assert.deepEqual(Object.keys(agg.byProvider).sort(), ['alpha', 'beta']);
+      for (const provider of ['alpha', 'beta']) {
+        assert.equal(agg.byProvider[provider].minutes, agg.sessions[0].minutes,
+          'each provider session count carries the session duration');
+        assert.equal(agg.byProvider[provider].confidence, 0.9,
+          'each provider session count carries classifier confidence');
+      }
+      assert.deepEqual(
+        ['sessions', 'responses', 'input', 'output', 'cacheRead', 'cacheWrite', 'tokens', 'cost']
+          .map((key) => agg.byProvider.alpha[key]),
+        [1, 2, 10, 2, 3, 1, 16, 0.25],
+      );
+      assert.deepEqual(
+        ['sessions', 'responses', 'input', 'output', 'cacheRead', 'cacheWrite', 'tokens', 'cost']
+          .map((key) => agg.byProvider.beta[key]),
+        [1, 1, 20, 4, 5, 2, 31, 0.031],
+      );
+      assert.equal(agg.byModel.shared.responses, 3);
+      assert.equal(agg.byModel.shared.tokens, 47);
+    }
+  } finally { rm(sb.dir); }
+});
+
+test('an unreported zero-token completion belongs to its observed provider and an absent provider stays unknown', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_unknown', directory: '/x', title: 'unknown', timeCreated: at }],
+    messages: [
+      assistantMsg('a1', 'ses_unknown', at + 1000, { provider: 'alpha', cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }),
+      assistantMsg('a2', 'ses_unknown', at + 2000, { provider: null, cost: 0.1,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }),
+    ],
+  });
+  try {
+    const agg = await buildIndex(opts(sb));
+    assert.equal(agg.sessions[0].provider, null);
+    assert.equal(agg.totals.responses, 2);
+    assert.equal(agg.totals.tokens, 0);
+    assert.equal(agg.totals.cost, 0.1);
+    assert.equal(agg.byHost.opencode.responses, 2);
+    assert.deepEqual(Object.keys(agg.byProvider).sort(), ['alpha', 'unknown']);
+    assert.equal(agg.byProvider.alpha.sessions, 1);
+    assert.equal(agg.byProvider.alpha.responses, 1);
+    assert.equal(agg.byProvider.alpha.tokens, 0);
+    assert.equal(agg.byProvider.unknown.sessions, 1);
+    assert.equal(agg.byProvider.unknown.responses, 1);
+    assert.equal(agg.byProvider.unknown.cost, 0.1);
+  } finally { rm(sb.dir); }
 });
 
 test('sessions with NO observed cost fall back to the pricing table (never a fabricated $0)', async () => {
@@ -150,6 +307,96 @@ test('the incremental cache: a warm scan reuses unchanged sessions and picks up 
   assert.equal(s.cost, 0.5, 'new message re-parses that session (mtime+count key changed)');
   assert.equal(s.responses, 2);
   rm(sb.dir);
+});
+
+test('unchanged schema 26 OpenCode rows without parse semantics are reparsed, including mixed untrusted zero cost', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_legacy26', directory: '/x', title: 'real title', timeCreated: at }],
+    messages: [
+      assistantMsg('a1', 'ses_legacy26', at + 1000, { cost: 0.4 }),
+      assistantMsg('a2', 'ses_legacy26', at + 2000, { cost: 0 }),
+    ],
+  });
+  try {
+    const cold = await buildIndex(opts(sb));
+    const file = `opencode://ses_legacy26`;
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.equal(cache.schemaVersion, 26);
+    assert.ok(cache.entries[file].parseSemantics, 'every new OpenCode entry identifies its parser semantics');
+    delete cache.entries[file].parseSemantics;
+    cache.entries[file].session.title = 'FORGED-LEGACY';
+    cache.entries[file].session.usage[0].costObserved = 0.4;
+    delete cache.entries[file].session.usage[0].costUntrustedMessages;
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const repaired = await buildIndex(opts(sb));
+    const session = repaired.sessions.find((s) => s.id === 'ses_legacy26');
+    assert.equal(session.title, 'real title');
+    assert.equal(session.responses, 2);
+    assert.equal(session.costEvidence.observedMessages, 1);
+    assert.equal(session.costEvidence.unpricedMessages, 1);
+    assert.equal(session.cost, cold.sessions[0].cost);
+    assert.equal(repaired.totals.cost, repaired.byHost.opencode.cost);
+    assert.equal(repaired.totals.cost, repaired.byProvider.opencode.cost);
+    assert.equal(repaired.totals.responses, repaired.byProvider.opencode.responses);
+    assert.equal(repaired.totals.tokens, repaired.byProvider.opencode.tokens);
+    assert.ok(JSON.parse(fs.readFileSync(sb.cachePath, 'utf8')).entries[file].parseSemantics);
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
+test('schema 26 OpenCode rows lacking a marker reparse even when every cost was trusted; marked rows reuse warm', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({ sessions: [{ id: 'ses_trusted26', directory: '/x', title: 'real', timeCreated: at }],
+    messages: [assistantMsg('a1', 'ses_trusted26', at + 1000, { cost: 0.2 })] });
+  try {
+    await buildIndex(opts(sb));
+    const file = 'opencode://ses_trusted26';
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    delete cache.entries[file].parseSemantics;
+    cache.entries[file].session.title = 'OLD';
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    await buildIndex(opts(sb));
+    const reparsed = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.equal(reparsed.entries[file].session.title, 'real');
+    reparsed.entries[file].session.title = 'WARM-MARKED';
+    fs.writeFileSync(sb.cachePath, JSON.stringify(reparsed));
+    _resetForTest();
+    const warm = await buildIndex(opts(sb));
+    assert.equal(warm.sessions[0].title, 'WARM-MARKED');
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
+test('degraded OpenCode store excludes legacy cache accounting but retains compatible cache accounting', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({ sessions: [
+    { id: 'ses_old', directory: '/x', title: 'old', timeCreated: at },
+    { id: 'ses_new', directory: '/x', title: 'new', timeCreated: at },
+  ], messages: [
+    assistantMsg('a1', 'ses_old', at + 1000, { cost: 0.3 }),
+    assistantMsg('a2', 'ses_new', at + 1000, { cost: 0.4 }),
+  ] });
+  try {
+    await buildIndex(opts(sb));
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    delete cache.entries['opencode://ses_old'].parseSemantics;
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    fs.rmSync(sb.dbFile);
+    fs.writeFileSync(sb.dbFile, 'not a sqlite database');
+    _resetForTest();
+    const degraded = await buildIndex(opts(sb));
+    assert.equal(degraded.sourceHealth.opencode.status, 'degraded');
+    assert.equal(degraded.sourceHealth.opencode.reason, 'corrupt');
+    assert.equal(degraded.sourceHealth.opencode.legacyCacheEntriesExcluded, 1);
+    assert.deepEqual(degraded.sessions.map((s) => s.id), ['ses_new']);
+    assert.equal(degraded.totals.cost, 0.4);
+    assert.equal(degraded.byProvider.opencode.cost, 0.4);
+    assert.equal(degraded.totals.responses, 1);
+    const retained = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    assert.ok(retained.entries['opencode://ses_old']);
+    assert.equal(retained.entries['opencode://ses_old'].parseSemantics, undefined);
+  } finally { _resetForTest(); rm(sb.dir); }
 });
 
 test('a corrupt OpenCode store preserves last-good usage and surfaces degraded source health', async () => {

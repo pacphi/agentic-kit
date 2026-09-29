@@ -88,7 +88,7 @@ token estimates never become observed token evidence. An absent or incompatible 
 | Quick live checks | The bounded, no-cost subset of checks that a plain `ak status --refresh=live` runs in parallel: AQE embedding request, Codex MCP handshake, provider wiring, security packages, deja-vu structure, and the `memory` check's temp-dir CLI store/retrieve/purge round trip (no MCP tool calls; that is the separate `memory-routes` slow proof); a timeout is `inconclusive`. `--only CHECK[,CHECK...]` names exactly which checks to run, including a slow proof |
 | Slow proof | A live check that runs only when named with `--only`, up to six minutes each: `learning` (trains a temporary fixture, asserts patterns persist), `harvest` (records an outcome and distills through Ruflo in an isolated store), `aqe` (storage, embedding configuration/provenance, and the browser payload), `memory-routes` (the memory round trip plus whether CLI and MCP see each other's writes, remembered as the `memory` check). A named check runs even when it would not otherwise apply; `learning` and `harvest` are never remembered |
 | Connection check | `ak host check-connection <claude\|codex\|opencode> [--yes] [--json] [--dry-run]`: the consent-gated, paid probe of a managed host's live connection. It is never a strength of `--refresh` and runs only for a managed host whose local checks already pass, after printing the shared disclosure and asking `[y/N]` on a TTY (refused without `--yes` off a TTY) |
-| Machine measurement | The full re-measure `--refresh=machine` runs: walking install trees, storage, the cross-host catalog, and (with `--project-trees`) your projects' working trees, then persisting the result and rebuilding the inventory. The dashboard's Full scan and Re-measure machine controls run the same chain |
+| Machine measurement | The full re-measure `--refresh=machine` runs: walking install trees, storage, the cross-host catalog, and (with `--project-trees`) your projects' working trees, then persisting the result and rebuilding the inventory. Choosing **Refresh machine** in the dashboard and pressing **Refresh** runs the same chain; **Reload** only re-reads the active view |
 | Memory route observation | What `ak status --refresh=live --only memory-routes` reports after its CLI proof, in its throwaway project only: whether a key written through Ruflo's CLI is readable through MCP and the reverse, where each landed, and the MCP backend seen. A split is a warning and an unusable interface is "not observed"; it never fails the suite, is not part of the quick live checks, and says nothing about an existing corpus |
 | Observed routing pair | An exact `@claude-flow/cli` release and platform on which the memory route observation was recorded. Only for such a pair does status say which Ruflo interface reads which project-memory store; a neighbouring, prerelease or build-tagged version, or another platform, stays unverified |
 | Canonical memory store | `<root>/.swarm` for the root every ak memory launch contract pins (the repository root, else the folder, unless that is an unsuitable memory folder): `memory.db` and, with the native bridge, `agentdb-memory.db`. Status reports it from any subfolder, with each file's size, live WAL, largest namespace and how much of it is set to expire |
@@ -133,20 +133,21 @@ missing price.
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
-## Session surface language (mostly proposed)
+## Session surface language
 
-These terms are proposed by [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md).
-Only **Imported session copy** is implemented so far, and only in usage and project discovery. For
-the rest, the implemented contract is ADR-0050's **session origin** (`claude-desktop`,
-`codex-desktop` or `unknown`), which an imported copy never supplies.
+Updated 2026-09-29 to match accepted
+[ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md). Git scope, host, surface,
+initiator and provider are separate dimensions. Legacy origin keys remain compatibility evidence.
 
 | Term | Meaning |
 |------|---------|
 | Session surface | The product surface that started a session, read from the host's own declared field (Claude `entrypoint`; Codex `originator` with `source`) and shown by its official name, such as Claude Code CLI, Claude Desktop, ChatGPT desktop app · Codex, or Codex CLI |
-| Initiator | Who started a session: a person, automation (scripts, SDKs, non-interactive runs, CI), an agent (a subagent or reviewer spawned by another session), or an imported copy |
-| Imported session copy | A session one tool copied from another, such as a Claude Code transcript the ChatGPT desktop app imported as a Codex thread; excluded from usage, origin and project counts and reported as a count |
-| Raw surface value | The exact declared value a surface was derived from; always kept, and shown for any value the vocabulary does not recognize |
+| Initiator | Who started a session: a person, automation (scripts, SDKs, non-interactive runs, CI), an agent (a subagent or reviewer spawned by another session), an imported copy, or Unknown |
+| Imported session copy | A session one tool copied from another, such as a Claude Code transcript the ChatGPT desktop app imported as a Codex thread; whose copied turns are excluded from usage and project/origin sightings; proven native turns in mixed files remain eligible, with exclusion and incompleteness counts |
+| Raw surface value | A named declaration token retained only under the approved 80-character validation rule; unfamiliar valid tokens can appear in local detail without inferring a product or provider |
 | Tool workspace | A folder a tool creates for its own work outside the user's projects, such as `~/.codex/.chatgpt-projects/…` or `~/Documents/Codex/…`; an explanation attribute, never a surface |
+| Session count basis | The counted unit: declared session IDs, transcript files, database sessions, recovered sightings or mixed observations; zero-weight recovery is not a verified session |
+| Provider evidence basis | Recorded provider ID or provider-specific assistant model ID; observed metadata, not network attestation |
 | Desktop application | Claude Desktop or the ChatGPT desktop app; an application that can start sessions, not a host |
 
 Say **session surface** for where a session came from; the Live event `surface` field (native, ruflo,

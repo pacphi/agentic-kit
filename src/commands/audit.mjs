@@ -9,6 +9,7 @@ import { collectContextEvidence } from '../lib/context-audit-sources.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { projectCensus, projectsInScope } from '../lib/project-census.mjs';
 import { installedVersion } from '../lib/versions.mjs';
+import { reportFailure } from '../lib/output.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -152,8 +153,11 @@ export async function run({
   contextCollectorFn = collectContextAudit,
 }) {
   if (positionals.length !== 1 || !['hooks', 'context'].includes(positionals[0])) {
-    console.error('ak audit requires the hooks or context subcommand');
-    console.log(help);
+    const error = 'ak audit requires the hooks or context subcommand';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => {
+      console.error(error);
+      console.log(help);
+    } });
     return 2;
   }
   if (positionals[0] === 'context') {
@@ -161,7 +165,8 @@ export async function run({
     try {
       report = await contextCollectorFn({ flags, pkgRoot, loadConfigFn });
     } catch (error) {
-      console.error(`context audit failed: ${error.message}`);
+      const message = `context audit failed: ${error.message}`;
+      reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => console.error(message) });
       return 2;
     }
     if (flags.json) console.log(JSON.stringify(report, null, 2));
@@ -172,7 +177,8 @@ export async function run({
   try {
     report = collectHookAudit({ flags, detectVersionFn, loadConfigFn });
   } catch (error) {
-    console.error(`hook audit failed: ${error.message}`);
+    const message = `hook audit failed: ${error.message}`;
+    reportFailure({ json: flags.json, payload: { error: message, exitCode: 2 }, human: () => console.error(message) });
     return 2;
   }
   if (flags.json) {

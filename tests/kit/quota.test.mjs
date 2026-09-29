@@ -8,13 +8,18 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   windowLabel, normalizeClaudeLimits, normalizeCodexLimits, readClaudeLimits,
-  collectCodexLimits, CODEX_TTL_MS, unsupportedQuotaHosts, readLimits,
-  classifyClaudeTeeChannel, CLAUDE_TEE_CHANNELS,
+  collectCodexLimits, CODEX_TTL_MS, unsupportedQuotaHosts, readLimits as rawReadLimits,
+  classifyClaudeTeeChannel as rawClassifyClaudeTeeChannel, CLAUDE_TEE_CHANNELS,
   collectCodexLimitsDetailed, CODEX_UNAVAILABLE_REASONS,
 } from '../../src/lib/quota.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
+import { claudeManagedSettingsPath } from '../../src/lib/paths.mjs';
 
 const tmp = () => tempDir('ak-quota');
+const classifyClaudeTeeChannel = (options) => rawClassifyClaudeTeeChannel({
+  managedSettingsFile: null, ...options,
+});
+const readLimits = (options) => rawReadLimits({ claudeManagedSettingsFile: null, ...options });
 
 // ── windowLabel — duration-derived, never slot-derived ───────────────────────
 
@@ -103,6 +108,206 @@ function teeFixture({ statusLine, raw, scripts = {} } = {}) {
   return { home, settingsFile };
 }
 const cmd = (command) => ({ type: 'command', command });
+
+test('managed statusLine overrides a user footer with a custom command', () => {
+  const fx = teeFixture({ statusLine: cmd('node ~/.claude/helpers/statusline.cjs'),
+    scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const managedSettingsFile = path.join(fx.home, 'managed-settings.json');
+  fs.writeFileSync(managedSettingsFile, JSON.stringify({ statusLine: cmd('echo managed') }));
+  assert.equal(classifyClaudeTeeChannel({
+    settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
+  }), 'custom');
+});
+
+test('managed footer overrides a custom user statusLine', () => {
+  const fx = teeFixture({ statusLine: cmd('echo user'),
+    scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const managedSettingsFile = path.join(fx.home, 'managed-settings.json');
+  fs.writeFileSync(managedSettingsFile, JSON.stringify({
+    statusLine: cmd('node ~/.claude/helpers/statusline.cjs'),
+  }));
+  assert.equal(classifyClaudeTeeChannel({
+    settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
+  }), 'kit-footer');
+});
+
+test('missing managed file or unrelated managed keys preserve the user statusLine', () => {
+  const fx = teeFixture({ statusLine: cmd('echo user') });
+  const managedSettingsFile = path.join(fx.home, 'managed-settings.json');
+  assert.equal(classifyClaudeTeeChannel({
+    settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
+  }), 'custom');
+  fs.writeFileSync(managedSettingsFile, JSON.stringify({ model: 'synthetic' }));
+  assert.equal(classifyClaudeTeeChannel({
+    settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
+  }), 'custom');
+});
+
+test('invalid or unreadable managed file stays unknown instead of using the user footer', () => {
+  const fx = teeFixture({ statusLine: cmd('node ~/.claude/helpers/statusline.cjs'),
+    scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const managedSettingsFile = path.join(fx.home, 'managed-settings.json');
+  for (const body of ['{broken', '[]', JSON.stringify({ statusLine: {} }),
+    JSON.stringify({ statusLine: 'invalid' })]) {
+    fs.writeFileSync(managedSettingsFile, body);
+    assert.equal(classifyClaudeTeeChannel({
+      settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
+    }), 'unknown');
+  }
+  fs.rmSync(managedSettingsFile);
+  fs.mkdirSync(managedSettingsFile);
+  assert.equal(classifyClaudeTeeChannel({
+    settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
+  }), 'unknown');
+});
+
+test('managed null or false statusLine is unknown and cannot inherit the user footer', () => {
+  const fx = teeFixture({ statusLine: cmd('node ~/.claude/helpers/statusline.cjs'),
+    scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const managedSettingsFile = path.join(fx.home, 'managed-settings.json');
+  for (const statusLine of [null, false]) {
+    fs.writeFileSync(managedSettingsFile, JSON.stringify({ statusLine }));
+    assert.equal(classifyClaudeTeeChannel({
+      settingsFile: fx.settingsFile, managedSettingsFile, home: fx.home,
+    }), 'unknown');
+  }
+});
+
+test('managed default path selection is platform-specific and unsupported platforms skip it', () => {
+  const fx = teeFixture({ statusLine: cmd('echo user') });
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const expected = claudeManagedSettingsPath(platform);
+    const reads = [];
+    const fsImpl = { readFileSync(file, encoding) {
+      reads.push([file, encoding]);
+      if (file === expected) return JSON.stringify({ statusLine: cmd('echo managed') });
+      if (file === fx.settingsFile) return JSON.stringify({ statusLine: cmd('echo user') });
+      throw Object.assign(new Error('unexpected read'), { code: 'ENOENT' });
+    } };
+    assert.equal(rawClassifyClaudeTeeChannel({
+      settingsFile: fx.settingsFile, platform, fsImpl, home: fx.home,
+    }), 'custom');
+    assert.deepEqual(reads, [[expected, 'utf8']]);
+  }
+  const reads = [];
+  const fsImpl = { readFileSync(file) { reads.push(file); return JSON.stringify({ statusLine: cmd('echo user') }); } };
+  assert.equal(rawClassifyClaudeTeeChannel({
+    settingsFile: fx.settingsFile, platform: 'unsupported', fsImpl, home: fx.home,
+  }), 'custom');
+  assert.deepEqual(reads, [fx.settingsFile]);
+});
+
+test('a shell chain is custom without reading or running its footer script', () => {
+  const settingsFile = '/synthetic/user.json';
+  const managedSettingsFile = '/synthetic/managed.json';
+  const script = '/synthetic/footer.cjs';
+  const reads = [];
+  const fsImpl = {
+    readFileSync(file) {
+      reads.push(file);
+      if (file === managedSettingsFile) return JSON.stringify({
+        statusLine: cmd(`node ${script} && echo should-not-run`),
+      });
+      if (file === script) return FOOTER_SCRIPT;
+      throw new Error('unexpected read');
+    },
+    statSync(file) {
+      assert.equal(file, script);
+      return { isFile: () => true, size: FOOTER_SCRIPT.length };
+    },
+  };
+  assert.equal(rawClassifyClaudeTeeChannel({
+    settingsFile, managedSettingsFile, fsImpl, home: '/synthetic',
+  }), 'custom');
+  assert.deepEqual(reads, [managedSettingsFile]);
+});
+
+test('shell wrappers around a footer helper are custom', () => {
+  const fx = teeFixture({ scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, '.claude/helpers/statusline.cjs');
+  const wrapped = [
+    `sh -c 'node "${script}"'`,
+    `bash -c 'node "${script}"'`,
+    `zsh -c 'node "${script}"'`,
+    `cmd /c node "${script}"`,
+    `powershell -Command "node '${script}'"`,
+    'sh -c \'node "$D/.claude/helpers/statusline.cjs"\'',
+  ];
+  for (const command of wrapped) {
+    fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(command) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'custom', command);
+  }
+});
+
+test('a JavaScript path in an argument or inline program does not prove the footer runs', () => {
+  const fx = teeFixture({ scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, '.claude/helpers/statusline.cjs');
+  for (const command of [
+    `echo "${script}"`,
+    `node -e "console.log('${script}')"`,
+    `node -p "'${script}'"`,
+    `node -r "${script}" -e '0'`,
+  ]) {
+    fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(command) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'custom', command);
+  }
+});
+
+test('option-shaped targets and unquoted comments cannot identify the project helper', () => {
+  const settingsFile = '/synthetic/settings.json';
+  let command;
+  const reads = [];
+  const fsImpl = {
+    readFileSync(file) {
+      reads.push(file);
+      if (file === settingsFile) return JSON.stringify({ statusLine: cmd(command) });
+      throw new Error('unexpected script read');
+    },
+    statSync() { throw new Error('unexpected script stat'); },
+  };
+  for (command of [
+    'node --eval=./.claude/helpers/statusline.cjs',
+    'node --no-warnings=./.claude/helpers/statusline.cjs',
+    'node #/.claude/helpers/statusline.cjs',
+    'node "--eval=./.claude/helpers/statusline.cjs"',
+  ]) {
+    assert.equal(classifyClaudeTeeChannel({ settingsFile, fsImpl, home: '/synthetic' }), 'custom', command);
+  }
+  assert.deepEqual(reads, Array(4).fill(settingsFile));
+});
+
+test('a quoted footer path keeps literal shell punctuation', () => {
+  const fx = teeFixture({ scripts: { 'My & Tools/#statusline.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, 'My & Tools/#statusline.cjs');
+  fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(`node "${script}"`) }));
+  assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'kit-footer');
+});
+
+test('direct quoted helper invocation remains a footer with a Node option', () => {
+  const fx = teeFixture({ scripts: { 'My Tools/status line.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, 'My Tools/status line.cjs');
+  for (const command of [`node --no-warnings "${script}"`, `node '${script}'`]) {
+    fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(command) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'kit-footer', command);
+  }
+});
+
+test('direct Windows Node invocation can read a quoted footer path', () => {
+  const settingsFile = '/synthetic/settings.json';
+  const script = 'C:\\Users\\Example User\\statusline.cjs';
+  const fsImpl = {
+    readFileSync(file) {
+      if (file === settingsFile) return JSON.stringify({ statusLine: cmd(`node.exe "${script}"`) });
+      if (file === script) return FOOTER_SCRIPT;
+      throw new Error('unexpected read');
+    },
+    statSync(file) {
+      assert.equal(file, script);
+      return { isFile: () => true, size: FOOTER_SCRIPT.length };
+    },
+  };
+  assert.equal(classifyClaudeTeeChannel({ settingsFile, fsImpl, home: '/synthetic' }), 'kit-footer');
+});
 
 test('classifyClaudeTeeChannel: no settings file or no statusLine is "none"', () => {
   const { home, settingsFile } = teeFixture();
@@ -507,6 +712,19 @@ test('readLimits carries the Claude tee channel class beside an unchanged claude
   });
   assert.equal(out.claude, null, 'no tee file still reads as null — the claude contract is unchanged');
   assert.equal(out.claudeChannel, 'custom');
+});
+
+test('readLimits forwards a managed settings path to the Claude classifier', async () => {
+  const fx = teeFixture({ statusLine: cmd('echo user') });
+  const managedSettingsFile = path.join(fx.home, 'managed-settings.json');
+  fs.writeFileSync(managedSettingsFile, JSON.stringify({ statusLine: null }));
+  const out = await rawReadLimits({
+    now: 1000, claudeFile: path.join(fx.home, 'absent.json'),
+    codexCacheFile: path.join(fx.home, 'codex.json'), codexPresence: () => 'not-found',
+    claudeSettingsFile: fx.settingsFile, claudeManagedSettingsFile: managedSettingsFile,
+    home: fx.home,
+  });
+  assert.equal(out.claudeChannel, 'unknown');
 });
 
 test('readLimits carries why Codex limits are unavailable beside an unchanged codex field', async () => {

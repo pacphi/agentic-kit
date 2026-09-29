@@ -2,6 +2,8 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { censusDisclosure } from '../../census-presentation.mjs';
+import { projectSurfacesHtml } from './session-presentation.mjs';
 import { authHeaders, esc } from './bootstrap.mjs';
 import { formatLocalDateTime, formatLocalDateTimeLong, shortSessionId } from './datetime.mjs';
 import { ago } from './intelligence.mjs';
@@ -256,7 +258,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       if(!pm||pm.status==="unknown"||!Array.isArray(pm.value)){
         procs.innerHTML=sysEmpty((pm&&pm.reason)||"the process census is unavailable.");
       }else if(!pm.value.length){
-        procs.innerHTML=sysEmpty("no host process is running right now \u2014 a measured zero.");
+        procs.innerHTML=sysEmpty("no coding-agent or desktop-application process is running right now \u2014 a measured zero.");
       }else{
         var rows=pm.value,maxRss=0,body="";
         for(i=0;i<rows.length;i++){var rv=mval(rows[i].rssBytes);if(rv!=null&&rv>maxRss)maxRss=rv;}
@@ -271,7 +273,8 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
               +esc(source.value.label||source.value.path)+"</span>"
             : '<span class="sy-unk" title="'+esc((source&&source.reason)||"not attributable")+'">'
               +esc(String((source&&source.reason)||"not attributable").split("\u2014")[0].trim())+"</span>";
-          body+='<tr><td><span class="sy-dot" style="background:'+hostColor(p.host)+'"></span>'+esc(p.host)+"</td>"
+          body+='<tr><td><span class="sy-dot" style="background:'+hostColor(p.host)+'"></span>'
+            +esc(p.application||p.host||"Unknown process")+"</td>"
             +'<td class="num">'+esc(String(p.pid))+"</td>"
             +"<td>"+proj+"</td>"
             +'<td class="num">'+mhtml(p.uptimeMs,fmtDur)+"</td>"
@@ -282,7 +285,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         }
         // pid is right-aligned in the body, so its header is too — a numeric
         // column whose header hangs off the far side reads as a different column.
-        procs.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Host</th>'
+        procs.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Coding-agent host / desktop application</th>'
           +'<th style="text-align:right">pid</th>'
           +'<th>Working context</th><th style="text-align:right">Uptime</th><th style="text-align:right">CPU</th>'
           +"<th>RSS</th></tr></thead><tbody>"+body+"</tbody></table></div>";
@@ -783,7 +786,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var control=opts.expandable?'<button type="button" class="project-chevron" data-project-tree="'+esc(opts.treeKey)+'" aria-expanded="'+opts.expanded+'">'+(opts.expanded?'⌄':'›')+'</button>':'';
     var worktreeMark=opts.worktree?'<span class="project-worktree-mark" aria-hidden="true">↳</span>':'';
     var display=opts.worktree?'<span class="project-worktree-name">'+esc(pr.label||'worktree')+'</span>':name;
-    return '<tr class="'+(opts.worktree?'project-worktree':'project-repository')+'"'+(opts.hidden?' hidden':'')+'><td>'+worktreeMark+display+'<span class="project-path">'+esc(pr.path||'not measured yet')+'</span></td>'
+    return '<tr class="'+(opts.worktree?'project-worktree':'project-repository')+'"'+(opts.hidden?' hidden':'')+'><td>'+worktreeMark+display+'<span class="project-path">'+esc(pr.path||'not measured yet')+'</span>'+projectSurfacesHtml(pr)+'</td>'
       +'<td class="num">'+mhtml(pr.loc&&pr.loc.total,function(v){return "~"+fmtTok(v);})+"</td>"
       +"<td>"+langCell(pr.loc)+"</td>"
       +'<td class="num">'+mhtml(pr.totalBytes,fmtBytes)+"</td>"
@@ -801,7 +804,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +". This view shows "+esc(fmtNum(tree.repositories.length))+" verified repositor"+(tree.repositories.length===1?"y":"ies")
       +" with "+esc(fmtNum(worktrees))+" nested worktree"+(worktrees===1?"":"s")+"; "+esc(fmtNum(tree.excludedDirectories))+" non-repository directories are excluded."
       +" Line counts are approximate: extension-bucketed, with node_modules and vendored "
-      +"trees excluded. Disk is the whole project directory, .git and node_modules included.</div>";
+      +"trees excluded. Disk is the whole project directory, .git and node_modules included. "+esc(censusDisclosure(p))+"</div>";
   }
 
   export function renderSysProjects(d){
@@ -810,7 +813,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var p=d.projects;
     if(!p){el.innerHTML=sysEmpty(NOT_SCANNED);return;}
     var all=p.projects||[];
-    if(!all.length&&!(p.discoveryProjects||[]).length){el.innerHTML=sysEmpty("no repository was discovered on this machine.");return;}
+    if(!all.length&&!(p.discoveryProjects||[]).length){el.innerHTML=sysEmpty("no repository was discovered on this machine.")+'<div class="sy-liner">'+esc(censusDisclosure(p))+"</div>";return;}
     var tree=repositoryTree({projects:all,discoveryProjects:p.discoveryProjects});
     var byPath={};tree.repositories.forEach(function(group){byPath[group.repository.path]=group;});
     var repositories=sortProjects(tree.repositories.map(function(group){return group.repository;}),projSort.key,projSort.dir);
@@ -839,7 +842,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   }
 
   export function renderSystemFreshness(){
-    var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan"),
+    var el=document.getElementById("sys-asof"),
       freshness=document.getElementById("system-freshness");
     if(!el)return;
     var scan=(SYSTEM&&SYSTEM.scan)||null,snap=(SYSTEM&&SYSTEM.snapshot)||null;
@@ -852,22 +855,20 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       var started=Number(scan.startedAt),seconds=Number.isFinite(started)?Math.max(0,Math.floor((Date.now()-started)/1000)):null;
       var elapsed=seconds==null?"":seconds<60?seconds+"s":Math.floor(seconds/60)+"m "+seconds%60+"s";
       el.classList.add("sy-scan");
-      el.textContent="Full scan running \u00b7 "+phase+(scan.total?" "+fmtNum(scan.scanned)+" of "+fmtNum(scan.total):"");
+      el.textContent="Machine measurement running \u00b7 "+phase+(scan.total?" "+fmtNum(scan.scanned)+" of "+fmtNum(scan.total):"");
       if(elapsed){var clock=document.createElement("span");clock.setAttribute("aria-hidden","true");clock.textContent=" \u00b7 "+elapsed;el.appendChild(clock);}
       // The status line already says what is running, how far it has progressed,
       // and for how long. Repeating that sentence inside a disabled button made
       // the System rail wider than the viewport precisely when the scan was
       // active. There is no available action until it settles, so remove the
       // button from both the visual and accessibility layouts for that state.
-      if(btn){btn.disabled=true;btn.hidden=true;btn.title="the full scan is already running";}
       return;
     }
     if(freshness)freshness.removeAttribute("data-running");
     el.classList.remove("sy-scan");
-    if(btn){btn.hidden=false;btn.disabled=false;btn.textContent="\u21bb Full scan";btn.title="re-measure installs, storage, catalog, and projects";}
-    if(!SYSTEM){el.textContent="full scan \u2014 not loaded";return;}
+    if(!SYSTEM){el.textContent="machine measurement \u2014 not loaded";return;}
     if(!snap||!snap.measured||snap.asOf==null){
-      el.textContent="full scan \u2014 never run on this machine";
+      el.textContent="machine measurement \u2014 never run on this machine";
       el.title=(snap&&snap.reason)||"no snapshot has been written yet";
       el.setAttribute("data-stale","1");
       return;
@@ -878,10 +879,10 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // formatter keeps one vocabulary for "how old is this figure".
     var age=limAge(Date.now()-Math.max(0,Number(snap.ageMs)||0));
     var drift=snap.catalogDrift,changed=drift&&drift.status==="changed";
-    el.textContent="full scan \u00b7 "+age+(changed?" \u00b7 catalog changed, scan again":(snap.stale?" \u00b7 stale, scan again":""))
+    el.textContent="machine measurement \u00b7 "+age+(changed?" \u00b7 catalog changed, refresh machine":(snap.stale?" \u00b7 stale, refresh machine":""))
       +(scan&&scan.error?" \u00b7 last scan reported a problem":"");
     el.title=(scan&&scan.error?scan.error+" \u2014 ":"")
-      +"full-scan figures were measured "+age+"; browser refresh does not start a scan";
+      +"machine figures were measured "+age+"; Reload does not start a measurement";
     if(snap.stale||changed)el.setAttribute("data-stale","1");
   }
 
@@ -920,16 +921,14 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   // The trees flag is a SCAN parameter, not a view filter: project trees are
   // only walked when it is set, so changing it means re-measuring. Undefined
   // keeps whatever the running configuration already had.
-  export function loadSystem(deep,trees){
+  export function loadSystem(){
     if(systemBusy)return Promise.resolve();
     systemBusy=true;
-    if(deep&&SYSTEM&&SYSTEM.scan)SYSTEM.scan.running=true;
     renderSystemFreshness();
-    var q=deep?("?refresh=deep"+(trees==null?"":"&trees="+(trees?"1":"0"))):"";
     // The slim page read (#237 M4): the same payload with the catalog cut to
     // what these views draw. /api/system stays the complete `ak system --json`
     // shape for scripts; the page never needed its repeated presence copies.
-    return fetch("/api/system/summary"+q,{cache:"no-store",headers:authHeaders()})
+    return fetch("/api/system/summary",{cache:"no-store",headers:authHeaders()})
       .then(function(r){return r.json();})
       .then(function(d){SYSTEM=d;})
       .catch(function(){SYSTEM={error:"the system footprint could not be read",scan:null,snapshot:null};})
@@ -1032,11 +1031,6 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     document.addEventListener("keydown",function(e){
       if(e.key==="Escape"&&!sessionTooltip.hidden)hideSessionTooltip();
     });
-    var btn=document.getElementById("sys-rescan");
-    if(btn)btn.addEventListener("click",function(){
-      if(btn.disabled)return;
-      loadSystem(true);
-    });
     var ctl=document.getElementById("sys-cons-ctl");
     if(ctl)ctl.addEventListener("click",function(e){
       var m=e.target.closest?e.target.closest("[data-cons-mode]"):null;
@@ -1048,11 +1042,6 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         if(SYSTEM)renderSysConsumers(SYSTEM);
         return;
       }
-      var t=e.target.closest?e.target.closest("#sys-cons-trees"):null;
-      if(!t||t.disabled)return;
-      // Flipping the scope re-measures; the panel keeps showing the previous
-      // scan's figures, correctly labelled, until the new one lands.
-      loadSystem(true,t.getAttribute("aria-pressed")!=="true");
     });
     var pressure=document.getElementById("sys-pressure");
     if(pressure)pressure.addEventListener("click",function(e){

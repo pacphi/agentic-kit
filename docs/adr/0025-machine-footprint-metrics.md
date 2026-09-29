@@ -1,7 +1,11 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
 - **Status:** Implemented
-- **Updated:** 2026-09-28 — CLI parity (§5) is now `ak system [--refresh[=live|machine]]
+- **Updated:** 2026-09-29 — §5 deep measurement now starts with `POST /api/refresh` at
+  `machine` strength; GET routes are passive. The old GET-started scan rationale is withdrawn
+  because a read request must not start measurement work. See
+  [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md).
+- **Earlier update:** 2026-09-28 — CLI parity (§5) is now `ak system [--refresh[=live|machine]]
   [--project-trees] [--json]` (`src/lib/refresh.mjs`'s shared strengths, replacing the retired
   `--deep`); §5's `GET /api/system?refresh=deep` rationale is untouched by this branch and belongs
   to a later remediation program's dashboard work (remediation program, branch 6b; see
@@ -322,14 +326,14 @@ silent "Other" slice into a to-do list a release can close.
   ([ADR-0014](0014-dashboard-auth-and-remediation.md)), and zero egress
   ([ADR-0007](0007-maintainer-admin-local-telemetry.md)'s offline side of the line) as every
   other dashboard route.
-- `GET /api/system?refresh=deep` — starts or attaches to the single-flight deep scan. The
-  dashboard server is deliberately GET-only; a refresh is a re-*measurement* of local state, not
-  a mutation of user data, so it stays within that contract. `&trees=1|0` sets whether that scan
-  walks project working trees; it is a **measurement** parameter, not a view filter, because
-  trees that were never walked cannot be un-hidden client-side.
+- `POST /api/refresh` with `{"strength":"machine","projectTrees":true}` starts
+  the staged single-flight refresh; `projectTrees` is an optional boolean measurement choice.
+  The earlier `GET /api/system?refresh=deep&trees=1|0` trigger and its GET-only rationale
+  are withdrawn: a GET must never start scan work, even when the work only measures local
+  state. Trees that were never walked cannot be un-hidden client-side.
 - `ak system [--refresh[=live|machine]] [--project-trees] [--json]` — CLI parity sharing the same
   collector, following the usage-scorecard precedent of one collector behind both surfaces
-  (`--refresh=machine` is the CLI equivalent of the `?refresh=deep` route below).
+  (`--refresh=machine` selects the same strength as the dashboard POST).
 - `GET /api/system/summary` (amendment, 2026-09-26; extended 2026-09-28) — the page's read: the
   same payload and parameters with `catalog`, `storage`, `install`, `projects` and `consumers` each
   projected to an allow-list of keys and items cut to what the page draws (including
@@ -568,7 +572,8 @@ The draft left four points open. All four are decided; this section is the recor
    large corpus — the surprise cost is worse than a stale figure that says how stale it is. The
    snapshot's `asOf` is always rendered, and beyond `SNAPSHOT_STALE_AFTER_MS` (7 days) the
    freshness label turns amber and reads "stale, rescan". Opening the System tab issues a plain
-   `GET /api/system/summary`; only the Rescan control adds `?refresh=deep`.
+   `GET /api/system/summary`; only explicit Refresh machine starts a measurement with
+   `POST /api/refresh`.
 4. **Windows ships a current-user census plus a best-effort true `cwd`, degrading honestly, with no
    dependency added.** The draft's "unsupported on win32" answer would have blanked the whole
    Runtime view on a supported platform. Instead `src/lib/live/win-process-survey.ps1` — a plain text

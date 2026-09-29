@@ -1,7 +1,7 @@
-// Branch 6a Task 7: the providers section's hostManagementRows() stops
+// the providers section's hostManagementRows() stops
 // calling have(h.bin) for every non-enabled host — providers.mjs's
-// detectHosts() (via collectIntegrationFacts, already evidence-cached by
-// Task 5) already answers the exact same "is this host's bin on PATH"
+// detectHosts() (via collectIntegrationFacts, already backed by the
+// evidence cache) already answers the exact same "is this host's bin on PATH"
 // question once per collect(), for every host regardless of enablement, so
 // reusing integrationFacts.hosts[h.id].present removes a duplicate probe of
 // the identical fact rather than adding a second evidence kind for it.

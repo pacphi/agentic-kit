@@ -1,3 +1,4 @@
+import { SESSION_SURFACE_LABELS, SESSION_HOST_LABELS, SESSION_INITIATOR_LABELS, SESSION_PROVIDER_LABELS, sessionPresentation } from '../../src/lib/session-surface.mjs';
 // Real Maintenance markup/client/projection with fixture HTTP responses.
 // Mutation authority is covered separately by the real transaction-service test.
 import { test } from 'node:test';
@@ -50,8 +51,11 @@ test('Host alignment view filters User and Project rows and offers exact registr
     function authHeaders(){return {};}
     function esc(value){return String(value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
     function ago(){return '';}
+    function refreshRunning(){return false;}
     function beginMaintPreview(button, request){window.selectedPreview=request;}
-    ${['maintenance-workspace','maintenance-operation','maintenance-cards','maintenance-filters','maintenance-guidance','maintenance-relationships','maintenance-inspector','maintenance-language-logos','maintenance-focus','maintenance-inventory'].map(clientSource).join('\n')}
+    const SESSION_SURFACE_LABELS=${JSON.stringify(SESSION_SURFACE_LABELS)},SESSION_HOST_LABELS=${JSON.stringify(SESSION_HOST_LABELS)},SESSION_INITIATOR_LABELS=${JSON.stringify(SESSION_INITIATOR_LABELS)},SESSION_PROVIDER_LABELS=${JSON.stringify(SESSION_PROVIDER_LABELS)};
+    ${sessionPresentation.toString()}
+    ${['session-presentation','maintenance-workspace','maintenance-operation','maintenance-cards','maintenance-filters','maintenance-guidance','maintenance-relationships','maintenance-inspector','maintenance-language-logos','maintenance-focus','maintenance-inventory'].map(clientSource).join('\n')}
     MNT.scope='user';MNT.view='host-alignment';wireMntInventory();wireMntInspector();wireMntGuidance();loadMntInventory();
   ` });
   await page.locator('[data-mnt-plc]').first().waitFor();

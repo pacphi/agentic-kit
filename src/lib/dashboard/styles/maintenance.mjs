@@ -349,7 +349,6 @@ export const MAINTENANCE_CSS = `
 }
 
 /* The Maintenance toolbar owns measurement actions in this destination. */
-body:has(#panel-sys-maintenance:not([hidden])) #sys-rescan{display:none}
 .mnt-project-section{list-style:none;margin:0 0 24px}
 .mnt-project-section>h4{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;margin:8px 0 12px;color:var(--ink)}
 .mnt-inspector:not([hidden]){animation:mnt-inspector-enter .16s ease-out}

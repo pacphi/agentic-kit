@@ -29,8 +29,8 @@ test('no project memory: none running stays ok', async (t) => {
     [{ subsystem: 'daemons', level: 'ok', message: 'none running', fix: null, repair: null }]);
 });
 
-// Task 7: collect() threads refresh/record/source into the listDaemons()
-// call (gating processSweep's `ps` spawn), mirroring hosts.mjs's Task 5
+// collect() threads refresh/record/source into the listDaemons()
+// call (gating processSweep's `ps` spawn), mirroring hosts.mjs's evidence-cache
 // precedent, so a plain `ak status` stays cache-first while `--refresh`
 // forces a fresh sweep.
 test('collect() threads refresh/record/source into listDaemons, defaulting to a plain-status-shaped call', async (t) => {
@@ -143,7 +143,7 @@ test('no deferral row without a live daemon for this project', async (t) => {
   assert.equal(deferral(await collect(cwd, { now: NOW, platform: 'darwin' })), undefined);
 });
 
-// ── ak-managed daemon settings drift (Task 2.2) ────────────────────────────
+// ── ak-managed daemon settings drift ────────────────────────────
 function rufloRepo(t, { autoStart } = {}) {
   const cwd = project(t, { autoStart });
   fs.mkdirSync(path.join(cwd, '.git'));

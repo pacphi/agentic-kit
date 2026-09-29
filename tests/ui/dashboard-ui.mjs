@@ -789,10 +789,9 @@ const MAINTENANCE_PAYLOAD = {
   receipts: [],
 };
 
-let chainedMaintenanceScans = 0;
 const MAINTENANCE_STUB = {
   async report() { return MAINTENANCE_PAYLOAD; },
-  async scan() { chainedMaintenanceScans += 1; return MAINTENANCE_PAYLOAD; },
+  async scan() { return MAINTENANCE_PAYLOAD; },
   async plan() { return {}; },
 };
 
@@ -1133,6 +1132,12 @@ async function main() {
   console.log(`\ncorpus: ${REAL ? 'REAL (~/.claude, ~/.codex)' : 'fixtures (deterministic)'}`);
   console.log(`cache : ${cachePath} (temp — your real index is untouched)\n`);
 
+  const refreshStageGates = new Map();
+  const refreshStages = Object.fromEntries(['machine', 'maintenance', 'inventory', 'live', 'local'].map((id) => [id, async () => {
+    const gate = refreshStageGates.get(id);
+    if (gate) await gate;
+    return { ok: true };
+  }]));
   const srv = await startDashboard({
     port: 0,
     fetchStatus: STATUS_STUB,
@@ -1145,6 +1150,7 @@ async function main() {
     modelScopeKey: 'ab'.repeat(32),
     system: SYSTEM_STUB,
     maintenance: MAINTENANCE_STUB,
+    refreshStages,
   });
   const ORIGIN = new URL(srv.url).origin;
   const modelHeaders = { 'x-dash-token': srv.token };
@@ -1184,11 +1190,9 @@ async function main() {
     const group = document.getElementById('secondary-system')?.getBoundingClientRect();
     const tabs = document.getElementById('system-seg')?.getBoundingClientRect();
     const status = document.getElementById('system-freshness')?.getBoundingClientRect();
-    const button = document.getElementById('sys-rescan');
     return {
       statusText: document.getElementById('sys-asof')?.innerText,
       running: document.getElementById('system-freshness')?.getAttribute('data-running'),
-      buttonHidden: button?.hidden,
       statusBesideTabs: !!status && !!tabs && status.top < tabs.bottom && status.bottom > tabs.top
         && status.left >= tabs.right + 12,
       trailingSegmentSpace: Math.abs((tabs?.right ?? 0)
@@ -1199,10 +1203,9 @@ async function main() {
       documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
     };
   });
-  check('running full-scan progress sits beside a content-width System menu on wide screens',
+  check('running machine measurement progress sits beside a content-width System menu on wide screens',
     runningScanLayout.running === '1'
-      && /Full scan running.*Ranking disk use.*15 of 15/.test(runningScanLayout.statusText ?? '')
-      && runningScanLayout.buttonHidden === true
+      && /Machine measurement running.*Ranking disk use.*15 of 15/.test(runningScanLayout.statusText ?? '')
       && runningScanLayout.statusBesideTabs
       && runningScanLayout.trailingSegmentSpace < 6
       && runningScanLayout.statusInsideGroup
@@ -1226,7 +1229,7 @@ async function main() {
         ? getComputedStyle(document.getElementById('sys-asof')).whiteSpace : null,
     };
   });
-  check('narrow System navigation scrolls internally while scan status stays in its own rail',
+  check('narrow System navigation scrolls internally while measurement status stays in its own rail',
     narrowScanLayout.documentFits
       && narrowScanLayout.tabsScrollInternally
       && narrowScanLayout.statusBelowTabs
@@ -1264,8 +1267,36 @@ async function main() {
     `blocked-storage startup was ${JSON.stringify(blockedStorageStartup)} with status ${blockedStatus.join(',')}`);
   await storageBlockedPage.close();
 
+  const idlePage = await browser.newPage();
+  const idleRequests = [];
+  idlePage.on('request', request => {
+    const route = new URL(request.url()).pathname;
+    if (route === '/api/status' || route === '/api/refresh') idleRequests.push({ route, method: request.method() });
+  });
+  await idlePage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+  await idlePage.click('#poll-ivl');
+  await idlePage.click('#poll-menu [data-ms="15000"]');
+  const idleDeadline = Date.now() + 35_000;
+  while (idleRequests.filter(request => request.route === '/api/status').length < 3 && Date.now() < idleDeadline) {
+    await idlePage.waitForTimeout(250);
+  }
+  check('two idle poll ticks issue no /api/refresh request or POST',
+    idleRequests.filter(request => request.route === '/api/status').length >= 3
+      && idleRequests.every(request => request.route !== '/api/refresh'),
+    JSON.stringify(idleRequests));
+  await idlePage.close();
+
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 }, locale: 'en-US', timezoneId: 'America/Los_Angeles',
+  });
+  const refreshRequests = [];
+  const statusRequests = [];
+  const systemSummaryRequests = [];
+  page.on('request', (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === '/api/refresh') refreshRequests.push({ method: request.method(), body: request.method() === 'POST' ? request.postDataJSON() : null });
+    if (pathname === '/api/status') statusRequests.push(request.url());
+    if (pathname === '/api/system/summary') systemSummaryRequests.push(request.url());
   });
 
   // Anything the page logs as an error, or any request it fails, is a defect —
@@ -1297,7 +1328,8 @@ async function main() {
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const loc = m.location();
-    if (/status of 409 \(Conflict\)/.test(m.text()) && loc?.url && expectedHttpConsoleErrors.delete(loc.url)) return;
+    if (/status of (?:409 \(Conflict\)|503 \(Service Unavailable\))/.test(m.text())
+      && loc?.url && expectedHttpConsoleErrors.delete(loc.url)) return;
     const where = loc?.url ? ` @ ${loc.url}` : '';
     consoleErrors.push(`${m.text()}${where}`);
   });
@@ -1424,7 +1456,6 @@ async function main() {
   // check: the inventory stub answers `running` that many times, then flips
   // scanRequired off so the workspace's bounded polling sees the built page.
   let maintenanceBuildPollsRemaining = 0;
-  let maintenanceRunningPollsServed = 0;
   // Per-label override for a coverage entry's `filesystem` flag, applied
   // on top of whatever the sentinel fixture's coverage() helper produced
   // (which never sets `filesystem` at all, exercising the "flag absent ->
@@ -1472,7 +1503,8 @@ async function main() {
     for (const entry of entries) { counts[entry.lane] += 1; lanes[entry.lane].push(entry); }
     return { lanes, counts, entries };
   }
-  await page.route(/\/api\/maintenance\/v2\//, async (route) => {
+  const maintenanceV2Route = /\/api\/maintenance\/v2\//;
+  const maintenanceV2Stub = async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const pathname = url.pathname;
@@ -1496,7 +1528,6 @@ async function main() {
       maintenanceInventoryRequests.push(params);
       if (maintenanceBuildPollsRemaining > 0) {
         maintenanceBuildPollsRemaining -= 1;
-        maintenanceRunningPollsServed += 1;
         if (maintenanceBuildPollsRemaining === 0) maintenanceScanRequired = false;
         return reply(200, {
           scanRequired: true, total: 0, groups: [], facetCounts: {}, sortGroups: [], partialSources: [],
@@ -1630,7 +1661,12 @@ async function main() {
     }
     if (request.method() === 'GET' && pathname === '/api/maintenance/v2/activity') {
       return reply(200, buildActivity({
-        receipts: [INTERRUPTED_RECEIPT], dispositions: [], recipeEvents: [], scanHistory: [], inProgress: [],
+        receipts: [INTERRUPTED_RECEIPT], dispositions: [], recipeEvents: [], inProgress: [],
+        scanHistory: [
+          { sourceId: 'src-claude', environmentId: 'env-local', label: 'Claude user configuration', state: 'complete', completedAt: '2026-09-07T12:00:00.000Z', visited: 12 },
+          { sourceId: 'src-claude', environmentId: 'env-local', label: 'Claude user configuration', state: 'paused', recordedAt: '2026-09-09T12:00:00.000Z', completedAt: null, visited: 18 },
+          { sourceId: 'src-other', environmentId: 'env-local', label: 'Codex configuration', state: 'complete', completedAt: '2026-09-08T12:00:00.000Z', visited: 8 },
+        ],
       }));
     }
     const receiptMatch = pathname.match(/^\/api\/maintenance\/v2\/receipts\/([^/]+)$/);
@@ -1762,7 +1798,8 @@ async function main() {
       });
     }
     return reply(404, { code: 'NOT_FOUND' });
-  });
+  };
+  await page.route(maintenanceV2Route, maintenanceV2Stub);
   // ── Refresh evidence (MNT-DSC-010): the workspace's explicit control reuses
   // the v1 endpoint verbatim, `?refresh=scan` then polling until settled. ──
   let maintenanceProviderPollCount = 0;
@@ -1816,6 +1853,11 @@ async function main() {
     // connections. DOM readiness plus the application shell is the stable
     // navigation contract; network-idle can never be guaranteed by a Live UI.
     await page.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+    check('Refresh and Reload controls replace the retired scan buttons',
+      await page.locator('#refresh-run').count() === 1
+        && await page.locator('#refresh-strength').count() === 1
+        && await page.locator('#poll-now').getAttribute('aria-label') === 'Reload — re-read this view; runs no checks'
+        && await page.locator('#sys-rescan, #mnt-check-providers, #mnt-remeasure, #host-health-refresh').count() === 0);
     await page.waitForSelector('#panel-overview', { state: 'attached' });
 
     // ── ADR-0026 · About leads the bar but must NOT hijack the landing view ──
@@ -2588,7 +2630,7 @@ async function main() {
     check('a fresh install names coverage gaps and keeps measurement in the toolbar only',
       /^4 sources have not been scanned yet\./.test((freshInstallBanner || '').trim())
         && await page.locator('#mnt-partial button').count() === 0
-        && await page.isVisible('#mnt-remeasure')
+        && await page.locator('#mnt-remeasure').count() === 0
         && !/Fresh source/.test(freshInstallBanner || ''),
       `fresh-install banner read ${JSON.stringify(freshInstallBanner)}`);
 
@@ -2602,8 +2644,7 @@ async function main() {
     await page.fill('#mnt-search', '');
     await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length > 3);
 
-    // ── Refresh evidence (MNT-DSC-010): explicit, labeled; disables Apply/
-    // Undo while it runs; never fires on its own ──
+    // The shared Refresh control owns provider checks; opening Maintenance does not start one.
     await page.click('[data-mnt-dest="guidance"]');
     await page.waitForSelector('#mnt-tab-guidance[aria-selected="true"]');
     await page.waitForSelector('[data-mnt-plan-plc]');
@@ -2611,29 +2652,8 @@ async function main() {
     check('MNT-GUD-001: Guidance has exactly the visible lanes Can apply here, Steps available, Decisions to make, Updates available, and Recovery to finish',
       JSON.stringify(guidanceLaneLabels) === JSON.stringify([
         'Can apply here', 'Steps available', 'Decisions to make', 'Updates available', 'Recovery to finish',
-      ]),
-      `guidance lane labels read ${JSON.stringify(guidanceLaneLabels)}`);
-    check('a provider check never starts on its own',
-      maintenanceCheckProvidersReads === 0, 'the workspace probed providers without an explicit click');
-    const providerRefreshResponse = page.waitForResponse((response) => new URL(response.url()).searchParams.get('refresh') === 'scan');
-    await page.click('#mnt-check-providers');
-    await providerRefreshResponse;
-    // The button disables synchronously; Apply's disabled attribute follows
-    // once the guidance re-render that mntCheckProviders() triggers resolves.
-    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === true, null, { timeout: 5000 });
-    const providersRunning = await page.evaluate(() => ({
-      buttonDisabled: document.getElementById('mnt-check-providers')?.disabled,
-      applyDisabled: document.querySelector('[data-mnt-plan-plc]')?.disabled,
-    }));
-    check('Refresh evidence is explicit, labeled, and disables Apply while it runs',
-      maintenanceCheckProvidersReads === 1 && providersRunning.buttonDisabled === true
-        && providersRunning.applyDisabled === true,
-      `providers-running state was ${JSON.stringify(providersRunning)}`);
-    await page.waitForFunction(() => document.getElementById('mnt-check-providers')?.disabled === false, null, { timeout: 8000 });
-    check('the provider check settles and re-enables Apply',
-      await page.$eval('[data-mnt-plan-plc]', (button) => button.disabled === false),
-      'Apply stayed disabled after the provider check settled');
-
+      ]));
+    check('a provider check never starts on its own', maintenanceCheckProvidersReads === 0);
     // ── Dispositions (MNT-GUD-009/011): explained before confirmation, one
     // exact guidanceId per write ──
     await page.waitForSelector('.mnt-dispositions [data-mnt-disposition-open="acknowledged"]');
@@ -2716,6 +2736,18 @@ async function main() {
     // typed-confirmation dialog ──
     await page.click('[data-mnt-dest="activity"]');
     await page.waitForSelector('#mnt-tab-activity[aria-selected="true"]');
+    await page.waitForSelector('#mnt-scan-history .mnt-history-day');
+    const scanRows = await page.$$eval('#mnt-scan-history tbody', (groups) => groups.map((group) => ({
+      heading: group.querySelector('.mnt-history-day')?.textContent?.trim(),
+      rows: [...group.querySelectorAll('tr:not(.mnt-history-day)')].map((row) => row.textContent?.trim()),
+    })));
+    check('paused scan renders at its recorded time ahead of older completed scans',
+      scanRows.length === 3 && /Paused/.test(scanRows[0].rows[0])
+        && /Claude user configuration/.test(scanRows[0].rows[0])
+        && !/Time not recorded/.test(scanRows[0].rows[0])
+        && /Codex configuration/.test(scanRows[1].rows[0])
+        && /Complete/.test(scanRows[2].rows[0]),
+      `scan rows read ${JSON.stringify(scanRows)}`);
     await page.waitForSelector('[data-mnt-audit-receipt]');
     const auditTriggerLabel = await page.textContent('[data-mnt-audit-receipt]');
     check('MNT-RCV-001: an interrupted receipt offers Audit interruption, not generic Verify again',
@@ -2776,12 +2808,6 @@ async function main() {
       `export requests were ${JSON.stringify(maintenanceExportRequests)}`);
     await page.click('#mnt-receipt-close');
 
-    // ── Discovery: a light smoke check of the fourth destination. Waits for
-    // the CONTENT of #mnt-scan-progress specifically (not just an <li> in
-    // #mnt-automatic-sources, whose two rows are static and already present
-    // from the earlier group-collapse fixture's own stale Discovery visits)
-    // — a fresh fetch against base()'s real coverage can otherwise still be
-    // in flight when a weaker wait resolves on leftover data. ──
     await page.click('[data-mnt-dest="discovery"]');
     await page.waitForSelector('#mnt-tab-discovery[aria-selected="true"]');
     await page.waitForFunction(() => /Claude user configuration/.test(
@@ -2893,37 +2919,22 @@ async function main() {
     ));
     const failedRefreshEmpty = await visibleText(page, '#mnt-results');
     const failedRefreshStatus = await page.textContent('#mnt-status');
-    check('a failed lastRefresh names "did not complete" plus the sanitized message, never the raw code, and keeps Refresh evidence available',
+    check('a failed lastRefresh names "did not complete" plus the sanitized message, never the raw code, and keeps Refresh available',
       /did not complete/.test(failedRefreshEmpty) && /did not respond before the timeout/.test(failedRefreshEmpty)
         && !/PROVIDER_TIMEOUT/.test(failedRefreshEmpty) && !/PROVIDER_TIMEOUT/.test(failedRefreshStatus || '')
         && /did not respond before the timeout/.test(failedRefreshStatus || '')
-        && await page.isEnabled('#mnt-check-providers'),
+        && await page.isEnabled('#refresh-run'),
       `empty state read ${JSON.stringify(failedRefreshEmpty)}, status read ${JSON.stringify(failedRefreshStatus)}`);
     maintenanceInventoryLastRefresh = null;
 
-    // ── D5: scanRequired points at Refresh evidence, and settling it
-    // refreshes Inventory in place, with no page reload. Hops off Inventory
-    // and back so the destination switch re-fetches against the reset
-    // (no-lastRefresh) fixture state above, without duplicating route
-    // handlers on a fresh page. ──
+    // A missing inventory points to the shared Refresh control.
     await page.click('[data-mnt-dest="discovery"]');
     await page.click('[data-mnt-dest="inventory"]');
     await page.waitForFunction(() => /No inventory has been built yet/.test(
       document.getElementById('mnt-results')?.innerText || '',
     ));
     const scanRequiredEmpty = await visibleText(page, '#mnt-results');
-    check('the scanRequired empty state points at Refresh evidence on this workspace, not a System full scan',
-      /Refresh evidence/.test(scanRequiredEmpty) && !/full scan from System/i.test(scanRequiredEmpty),
-      `scanRequired empty state read ${JSON.stringify(scanRequiredEmpty)}`);
-    await page.click('#mnt-check-providers');
-    await page.waitForFunction(() => document.getElementById('mnt-check-providers')?.disabled === false, null, { timeout: 8000 });
-    await page.waitForSelector('#mnt-results .mnt-row', { timeout: 8000 });
-    check('settling Refresh evidence clears scanRequired and shows Inventory results in place, with no reload',
-      await page.$$eval('#mnt-results .mnt-row', (els) => els.length) > 0,
-      'Inventory did not refresh in place once the provider check settled');
-    check('D8: the workspace polled the inventory through the running build (bounded, 1.5 s apart) instead of re-fetching once',
-      maintenanceRunningPollsServed >= 2 && maintenanceBuildPollsRemaining === 0,
-      `running polls served: ${maintenanceRunningPollsServed}, remaining ${maintenanceBuildPollsRemaining}`);
+    check('the scanRequired empty state points at Refresh', /Refresh/.test(scanRequiredEmpty));
     maintenanceScanRequired = false;
 
     // ── D8: while the server reports a running build, the empty state says
@@ -2937,67 +2948,12 @@ async function main() {
       document.getElementById('mnt-results')?.innerText || '',
     ));
     const runningEmpty = await visibleText(page, '#mnt-results');
-    check('a running lastRefresh renders "Building the inventory…" and keeps Refresh evidence available',
+    check('a running lastRefresh renders "Building the inventory…" and keeps Refresh available',
       /Building the inventory/.test(runningEmpty) && !/not been built yet/.test(runningEmpty)
-        && await page.isEnabled('#mnt-check-providers'),
+        && await page.isEnabled('#refresh-run'),
       `running empty state read ${JSON.stringify(runningEmpty)}`);
     maintenanceInventoryLastRefresh = null;
     maintenanceScanRequired = false;
-
-    // ── Re-measure machine (System Full scan, exposed beside Refresh
-    // evidence): delegates to System's own #sys-rescan, then blocks writes
-    // (mntWritesBlocked) for the whole measurement + provider-check +
-    // inventory-rebuild chain. Uses its own temporary /api/system route
-    // rather than the real SYSTEM_STUB — that stub's systemDeepScans counter
-    // is asserted against a clean slate by the dedicated System-tab Rescan
-    // tests later in this run, and this block must neither depend on nor
-    // perturb that count. ──
-    await page.click('[data-mnt-dest="guidance"]');
-    await page.waitForSelector('[data-mnt-plan-plc]');
-    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
-    let remeasureSystemReadCount = 0;
-    let remeasureDeepScanRequests = 0;
-    // Deterministic on REQUEST COUNT, not wall-clock: the deep-scan kickoff
-    // itself is always the first read (reports running), every read after is
-    // settled. This cannot race system-projects.mjs's own poll cadence and
-    // mntPollSystemMeasurement's independent one against a Node-side timer.
-    await page.route(/\/api\/system(\/summary)?(\?|$)/, (route) => {
-      const reqUrl = new URL(route.request().url());
-      if (reqUrl.searchParams.get('refresh') === 'deep') remeasureDeepScanRequests += 1;
-      remeasureSystemReadCount += 1;
-      if (remeasureSystemReadCount === 2) {
-        // Deep measurement also completes a fresh provider check and inventory build.
-        maintenanceCheckProvidersReads += 1;
-        maintenanceProviderPollCount = 2;
-      }
-      return route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ ...SYSTEM_PAYLOAD, scan: { ...SYSTEM_PAYLOAD.scan, running: remeasureSystemReadCount <= 1 } }),
-      });
-    });
-    await page.click('#mnt-remeasure');
-    // mntRemeasureMachine() re-renders the active destination the instant it
-    // sets MNT.remeasureBusy — before it even clicks #sys-rescan — so both
-    // of these are observable synchronously, exactly like Refresh evidence.
-    const remeasureStarted = await page.evaluate(() => ({
-      remeasureDisabled: document.getElementById('mnt-remeasure')?.disabled,
-      applyDisabled: document.querySelector('[data-mnt-plan-plc]')?.disabled,
-    }));
-    check('Re-measure machine disables itself and blocks writes (mntWritesBlocked) the instant it starts',
-      remeasureStarted.remeasureDisabled === true && remeasureStarted.applyDisabled === true,
-      `remeasure-start state was ${JSON.stringify(remeasureStarted)}`);
-    await page.waitForFunction(() => document.getElementById('mnt-remeasure')?.disabled === false, null, { timeout: 15_000 });
-    check('Re-measure machine delegates to #sys-rescan (a real deep scan) and settles, re-enabling itself and Apply',
-      remeasureDeepScanRequests === 1 && await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled === false),
-      `deep scan requests: ${remeasureDeepScanRequests}, Apply stayed disabled after Re-measure machine settled: ${await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled)}`);
-    // A stale scheduled System poll used to restart a completed owned scan as
-    // an external operation, waiting forever for a second evidence generation.
-    await page.waitForTimeout(3200);
-    check('a completed remeasurement stays settled after the System poll interval',
-      await page.isEnabled('#mnt-remeasure') && await page.isEnabled('[data-mnt-plan-plc]')
-        && remeasureSystemReadCount === 2,
-      `system reads: ${remeasureSystemReadCount}; operation: ${await page.textContent('#mnt-check-providers-status')}`);
-    await page.unroute(/\/api\/system(\/summary)?(\?|$)/);
 
     // ── #system/catalog redirects to Maintenance Inventory (ADR-0048) ──
     await page.evaluate(() => { location.hash = '#system/catalog'; });
@@ -3518,8 +3474,6 @@ async function main() {
         text: el?.textContent.trim(),
         stale: el?.getAttribute('data-stale'),
         title: el?.getAttribute('title'),
-        rescanDisabled: document.getElementById('sys-rescan')?.disabled,
-        fullScanLabel: document.getElementById('sys-rescan')?.innerText,
         live: el?.getAttribute('aria-live'),
       };
     });
@@ -3528,27 +3482,11 @@ async function main() {
       `the freshness label read ${JSON.stringify(freshness)} — the snapshot is nine days old`);
     check('past the staleness horizon the label nudges without scanning',
       freshness.stale === '1' && /stale/i.test(String(freshness.text))
-        && freshness.rescanDisabled === false && /Full scan/.test(String(freshness.fullScanLabel))
         && freshness.live === 'polite',
       `staleness presentation was ${JSON.stringify(freshness)}`);
     check('opening System never starts a deep scan',
       systemDeepScans === 0,
       `${systemDeepScans} deep scan(s) had already run after opening the area and all five views`);
-
-    const deepResponse = page.waitForResponse(
-      (r) => r.url().includes('/api/system') && r.url().includes('refresh=deep'),
-      { timeout: 8000 },
-    ).catch(() => null);
-    await page.click('#sys-rescan');
-    await deepResponse;
-    await page.waitForTimeout(200);
-    check('Rescan is the only thing that starts a deep scan, and it starts exactly one',
-      systemDeepScans === 1,
-      `the collector saw ${systemDeepScans} deep scan(s) after one Rescan click`);
-    await page.waitForTimeout(50);
-    check('a successful deep System rescan refreshes Maintenance provider evidence once',
-      chainedMaintenanceScans === 1,
-      `the Maintenance service saw ${chainedMaintenanceScans} scan(s)`);
 
     // ── Observability: execution workspace + synchronized evidence ──
     await page.click('[data-tab="observability"]');
@@ -5770,6 +5708,330 @@ async function main() {
     const c2 = await readCollapse();
     check('and survives a reload rather than snapping back to the default',
       c2.expanded === 'true' && c2.hidden === false, JSON.stringify(c2));
+
+    // Refresh is the only route that starts checks. Its stage state is server authored.
+    check('idle dashboard requested no refresh state or operation', refreshRequests.length === 0,
+      JSON.stringify(refreshRequests));
+    await page.click('#tab-system');
+    await page.click('[data-system-view="maintenance"]');
+    await page.click('[data-mnt-dest="guidance"]');
+    await page.waitForSelector('[data-mnt-plan-plc]');
+    // The audit and undo actions are conditional on retained receipts. Keep
+    // their actual selectors in the fixture while this run has no such receipt.
+    await page.evaluate(() => {
+      const fixture = globalThis.document.createElement('div');
+      fixture.id = 'refresh-write-fixture';
+      fixture.hidden = true;
+      fixture.innerHTML = '<button data-mnt-undo-receipt="fixture">Undo</button><button data-mnt-reconcile-receipt="fixture">Record</button>';
+      globalThis.document.body.appendChild(fixture);
+    });
+    const stageRelease = new Map();
+    for (const id of ['maintenance', 'inventory', 'local']) {
+      refreshStageGates.set(id, new Promise((resolve) => stageRelease.set(id, resolve)));
+    }
+    const statusReadsBefore = statusRequests.length;
+    await page.click('#refresh-run');
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent.includes('Refreshing Maintenance evidence'));
+    check('Refresh status names the server stage and elapsed time',
+      /Refreshing Maintenance evidence · \d+s/.test(await page.locator('#refresh-status').innerText()));
+    check('Refresh starts exactly one local POST', refreshRequests.filter((r) => r.method === 'POST').length === 1
+      && JSON.stringify(refreshRequests.find((r) => r.method === 'POST')?.body) === JSON.stringify({ strength: 'local' }));
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === true);
+    check('Maintenance Apply, Undo and Record are disabled during Refresh',
+      await page.locator('[data-mnt-plan-plc]').first().isDisabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-undo-receipt]').isDisabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-reconcile-receipt]').isDisabled());
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForSelector('#mnt-tab-inventory[aria-selected="true"]');
+    const activeMaintenanceReadsBefore = maintenanceInventoryRequests.length;
+    for (const [id, label] of [['maintenance', 'Rebuilding the inventory'], ['inventory', 'Re-checking local evidence and versions']]) {
+      stageRelease.get(id)();
+      await page.waitForFunction((text) => document.getElementById('refresh-status')?.textContent.includes(text), label);
+    }
+    stageRelease.get('local')();
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.');
+    for (let attempt = 0; attempt < 30 && maintenanceInventoryRequests.length <= activeMaintenanceReadsBefore; attempt++) {
+      await page.waitForTimeout(100);
+    }
+    await page.click('[data-mnt-dest="guidance"]');
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
+    check('Maintenance write controls are restored after Refresh',
+      await page.locator('[data-mnt-plan-plc]').first().isEnabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-undo-receipt]').isEnabled()
+        && await page.locator('#refresh-write-fixture [data-mnt-reconcile-receipt]').isEnabled());
+    await page.locator('#refresh-write-fixture').evaluate(element => element.remove());
+    await page.waitForTimeout(200);
+    check('Refresh re-reads the active Maintenance view and host readiness after completion',
+      statusRequests.length > statusReadsBefore && maintenanceInventoryRequests.length > activeMaintenanceReadsBefore);
+    const localRefreshReads = refreshRequests.filter(request => request.method === 'GET').length;
+    await page.waitForTimeout(1700);
+    check('completed Refresh stops status polling', refreshRequests.filter(request => request.method === 'GET').length === localRefreshReads);
+    await page.selectOption('#refresh-strength', 'machine');
+    await page.check('#refresh-project-trees');
+    await page.click('#refresh-run');
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.');
+    check('machine Refresh carries the project tree scope', refreshRequests.filter((r) => r.method === 'POST').length === 2
+      && JSON.stringify(refreshRequests.filter((r) => r.method === 'POST')[1].body) === JSON.stringify({ strength: 'machine', projectTrees: true }));
+    const postCount = refreshRequests.filter((r) => r.method === 'POST').length;
+    const reloadRequests = [];
+    const captureReload = request => reloadRequests.push(request.method());
+    await page.click('#poll-play');
+    page.on('request', captureReload);
+    await page.waitForTimeout(3100);
+    const reloadResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/status');
+    await page.click('#poll-now');
+    await reloadResponse;
+    page.off('request', captureReload);
+    check('Reload issues only GETs and starts no checks', reloadRequests.length > 0
+      && reloadRequests.every(method => method === 'GET')
+      && refreshRequests.filter((r) => r.method === 'POST').length === postCount);
+    for (const view of ['summary', 'storage', 'projects']) {
+      await page.click(`[data-system-view="${view}"]`);
+      await page.waitForTimeout(3100);
+      const before = systemSummaryRequests.length;
+      await page.click('#poll-now');
+      await page.waitForTimeout(300);
+      check(`Reload re-reads active System ${view} without measuring`,
+        systemSummaryRequests.length > before
+          && systemSummaryRequests.slice(before).every(url => !new URL(url).searchParams.has('refresh')),
+        `System reads before/after: ${before}/${systemSummaryRequests.length}`);
+    }
+    await page.click('[data-system-view="storage"]');
+    await page.selectOption('#refresh-strength', 'local');
+    const beforeCompletion = systemSummaryRequests.length;
+    await page.click('#refresh-run');
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.');
+    await page.waitForTimeout(300);
+    check('completed Refresh re-reads active System Storage without measuring',
+      systemSummaryRequests.length > beforeCompletion
+        && systemSummaryRequests.slice(beforeCompletion).every(url => !new URL(url).searchParams.has('refresh')),
+      `System reads before/after: ${beforeCompletion}/${systemSummaryRequests.length}`);
+    await page.click('#poll-ivl');
+    await page.click('#poll-menu [data-ms="15000"]');
+    const backgroundBefore = systemSummaryRequests.length;
+    await page.click('#poll-play');
+    await page.waitForTimeout(16_000);
+    await page.click('#poll-play');
+    check('background poll keeps System Storage on the existing cheap-read policy',
+      systemSummaryRequests.length === backgroundBefore,
+      `System reads before/after background tick: ${backgroundBefore}/${systemSummaryRequests.length}`);
+    console.log(`refresh requests: idle 0; local POST 1, GET ${localRefreshReads}; machine POST 1, total GET ${refreshRequests.filter(request => request.method === 'GET').length}; Reload ${reloadRequests.length} GET`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => { localStorage.setItem('ak-dash-theme', 'light'); location.reload(); });
+    await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'light');
+    await page.screenshot({ path: path.join(SHOTS, 'refresh-header-light-390.png'), animations: 'disabled' });
+    await page.evaluate(() => { localStorage.setItem('ak-dash-theme', 'dark'); location.reload(); });
+    await page.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'dark');
+    await page.screenshot({ path: path.join(SHOTS, 'refresh-header-dark-390.png'), animations: 'disabled' });
+    check('Refresh header fits at 390px in light and dark themes',
+      await page.evaluate(() => {
+        const header = document.querySelector('.band');
+        const refresh = document.querySelector('.refresh-control');
+        return header.getBoundingClientRect().right <= globalThis.innerWidth
+          && refresh.getBoundingClientRect().right <= globalThis.innerWidth;
+      }));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    check('wide dark screenshot has the dark theme at capture time',
+      await page.evaluate(() => document.documentElement.getAttribute('data-theme') === 'dark'
+        && getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() === '#000000'));
+    await page.screenshot({ path: path.join(SHOTS, 'refresh-header-dark-1440.png'), animations: 'disabled' });
+
+    // A rejected status read cannot release the write guard for an operation
+    // this page already started. The next valid state reconciles it.
+    await page.click('[data-system-view="maintenance"]');
+    await page.click('[data-mnt-dest="guidance"]');
+    await page.waitForSelector('[data-mnt-plan-plc]');
+    let releaseStatusStage;
+    refreshStageGates.set('maintenance', new Promise(resolve => { releaseStatusStage = resolve; }));
+    let statusFailures = 2;
+    const rejectStatus = route => {
+      if (route.request().method() === 'GET' && statusFailures > 0) {
+        statusFailures--;
+        if (statusFailures === 1) expectedHttpConsoleErrors.add(route.request().url());
+        return route.fulfill(statusFailures === 1
+          ? { status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporary status failure' }) }
+          : { status: 200, contentType: 'application/json', body: JSON.stringify({ running: 'unknown', stages: [] }) });
+      }
+      return route.continue();
+    };
+    await page.route('**/api/refresh', rejectStatus);
+    const rejectedStatus = page.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh' && response.status() === 503);
+    await page.click('#refresh-run');
+    await rejectedStatus;
+    await page.waitForFunction(() => /retry/i.test(document.getElementById('refresh-status')?.textContent || ''));
+    check('rejected refresh-status GET keeps the owned operation and Maintenance writes blocked',
+      await page.locator('#refresh-run').isDisabled()
+        && await page.locator('[data-mnt-plan-plc]').first().isDisabled()
+        && /retry/i.test(await page.locator('#refresh-status').innerText()));
+    const readsAfterError = refreshRequests.filter(request => request.method === 'GET').length;
+    await page.waitForTimeout(1700);
+    check('refresh-status read retries after non-2xx JSON and keeps invalid success state blocked',
+      refreshRequests.filter(request => request.method === 'GET').length > readsAfterError
+        && await page.locator('#refresh-run').isDisabled()
+        && await page.locator('[data-mnt-plan-plc]').first().isDisabled());
+    releaseStatusStage();
+    await page.waitForFunction(() => document.getElementById('refresh-status')?.textContent === 'Refresh complete.', null, { timeout: 8000 });
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
+    check('owned refresh completes after status recovery and then unblocks writes',
+      await page.locator('#refresh-run').isEnabled()
+        && await page.locator('[data-mnt-plan-plc]').first().isEnabled());
+    await page.unroute('**/api/refresh', rejectStatus);
+
+    // Two real dashboard pages can supersede a completed operation before its
+    // first polling GET. Test both a newer terminal state and a newer running
+    // state against the actual server operation, not a route-shaped fake.
+    activeMaintenanceInventory = structuredClone(SENTINEL_FIXTURES.base());
+    const supersessionUpdate = activeMaintenanceInventory.guidanceEntries.find(entry => entry.lane === 'apply');
+    Object.assign(supersessionUpdate, { verb: 'update', outcome: 'Update Claude plugin',
+      providerCapabilityId: 'claude-plugin:v1:update:user',
+      verifiedPremises: ['placement', 'installedVersion', 'published-update', 'consumers', 'impact'],
+      impact: { summary: 'Installs the verified newer frontend-design version.' } });
+    async function latestRefresh() {
+      const response = await fetch(`${ORIGIN}/api/refresh`, { headers: modelHeaders });
+      return response.json();
+    }
+    async function waitServerRefresh(running, differentFrom) {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const state = await latestRefresh();
+        const identity = state.operationId;
+        if (state.running === running && identity !== differentFrom && identity) return state;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      throw new Error('the fixture refresh did not reach the expected server state');
+    }
+    async function exerciseSupersession(holdPeer) {
+      const firstPage = await browser.newPage();
+      const peerPage = await browser.newPage();
+      let releaseFirstPoll;
+      const firstPollGate = new Promise(resolve => { releaseFirstPoll = resolve; });
+      let interceptFirstPoll = true;
+      let releasePeerStage;
+      const holdPeerStage = new Promise(resolve => { releasePeerStage = resolve; });
+      try {
+        await firstPage.route(maintenanceV2Route, maintenanceV2Stub);
+        await Promise.all([
+          firstPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+          peerPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+        ]);
+        await firstPage.route('**/api/refresh', async route => {
+          if (route.request().method() === 'GET' && interceptFirstPoll) {
+            interceptFirstPoll = false;
+            await firstPollGate;
+          }
+          await route.continue();
+        });
+        await firstPage.click('#tab-system');
+        await firstPage.click('[data-system-view="maintenance"]');
+        await firstPage.click('[data-mnt-dest="guidance"]');
+        await firstPage.waitForSelector('[data-mnt-plan-plc]');
+        refreshStageGates.set('maintenance', Promise.resolve());
+        const firstPost = firstPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'POST');
+        await firstPage.click('#refresh-run');
+        await firstPost;
+        const firstDone = await waitServerRefresh(false, null);
+        const firstIdentity = firstDone.operationId;
+        if (holdPeer) refreshStageGates.set('maintenance', holdPeerStage);
+        const peerPost = peerPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'POST');
+        await peerPage.click('#refresh-run');
+        await peerPost;
+        const newer = await waitServerRefresh(holdPeer, firstIdentity);
+        const firstStatus = firstPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'GET');
+        releaseFirstPoll();
+        await firstStatus;
+        await firstPage.waitForTimeout(100);
+        if (holdPeer) {
+          check('superseding running refresh keeps the first page and real Apply blocked',
+            !!newer.operationId && newer.operationId !== firstDone.operationId
+              && await firstPage.locator('#refresh-run').isDisabled()
+              && await firstPage.locator('[data-mnt-plan-plc]').first().isDisabled()
+              && /another refresh|supersed/i.test(await firstPage.locator('#refresh-status').innerText()));
+          releasePeerStage();
+          await waitServerRefresh(false, firstIdentity);
+          await firstPage.waitForFunction(() => !document.getElementById('refresh-run')?.disabled,
+            null, { timeout: 8000 }).catch(() => {});
+        }
+        check(`first page recovers from newer ${holdPeer ? 'running' : 'completed'} refresh without claiming its outcome`,
+          await firstPage.locator('#refresh-run').isEnabled()
+            && await firstPage.locator('[data-mnt-plan-plc]').first().isEnabled()
+            && /outcome unavailable|supersed/i.test(await firstPage.locator('#refresh-status').innerText())
+            && !/Refresh complete\.|Refresh did not complete\./.test(await firstPage.locator('#refresh-status').innerText()));
+      } finally {
+        releaseFirstPoll();
+        releasePeerStage();
+        await Promise.all([firstPage.close(), peerPage.close()]);
+      }
+    }
+    await exerciseSupersession(false);
+    await exerciseSupersession(true);
+
+    // A page that loses the single-flight POST race must respect the running
+    // operation reported in the 409 response before accepting Maintenance writes.
+    {
+      const ownerPage = await browser.newPage();
+      const losingPage = await browser.newPage();
+      let releaseOwner;
+      const ownerStage = new Promise(resolve => { releaseOwner = resolve; });
+      try {
+        await losingPage.route(maintenanceV2Route, maintenanceV2Stub);
+        await Promise.all([
+          ownerPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+          losingPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' }),
+        ]);
+        await losingPage.click('#tab-system');
+        await losingPage.click('[data-system-view="maintenance"]');
+        await losingPage.click('[data-mnt-dest="guidance"]');
+        await losingPage.waitForSelector('[data-mnt-plan-plc]');
+        refreshStageGates.set('maintenance', ownerStage);
+        await ownerPage.click('#refresh-run');
+        await waitServerRefresh(true, null);
+        const conflict = losingPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'POST' && response.status() === 409);
+        await losingPage.click('#refresh-run');
+        await conflict;
+        check('409 refresh conflict blocks the losing page and real Apply while the winner runs',
+          await losingPage.locator('#refresh-run').isDisabled()
+            && await losingPage.locator('[data-mnt-plan-plc]').first().isDisabled());
+        releaseOwner();
+        await losingPage.waitForFunction(() => !document.getElementById('refresh-run')?.disabled,
+          null, { timeout: 8000 }).catch(() => {});
+        check('409 losing page restores Apply with an outcome-unavailable message after the winner ends',
+          await losingPage.locator('[data-mnt-plan-plc]').first().isEnabled()
+            && /outcome unavailable/i.test(await losingPage.locator('#refresh-status').innerText()));
+      } finally {
+        releaseOwner();
+        await Promise.all([ownerPage.close(), losingPage.close()]);
+      }
+    }
+
+    // An unconfirmed POST cannot adopt an older terminal operation as proof
+    // that its own request ended. The page must retain the write guard.
+    {
+      const uncertainPage = await browser.newPage();
+      try {
+        await uncertainPage.route(maintenanceV2Route, maintenanceV2Stub);
+        await uncertainPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+        await uncertainPage.click('#tab-system');
+        await uncertainPage.click('[data-system-view="maintenance"]');
+        await uncertainPage.click('[data-mnt-dest="guidance"]');
+        await uncertainPage.waitForSelector('[data-mnt-plan-plc]');
+        await uncertainPage.route('**/api/refresh', route => route.request().method() === 'POST'
+          ? route.abort() : route.continue());
+        const staleRead = uncertainPage.waitForResponse(response => new URL(response.url()).pathname === '/api/refresh'
+          && response.request().method() === 'GET');
+        await uncertainPage.click('#refresh-run');
+        await staleRead;
+        check('uncertain POST does not adopt an older completed operation or release real Apply',
+          await uncertainPage.locator('#refresh-run').isDisabled()
+            && await uncertainPage.locator('[data-mnt-plan-plc]').first().isDisabled()
+            && /retry|unavailable/i.test(await uncertainPage.locator('#refresh-status').innerText()));
+      } finally {
+        await uncertainPage.close();
+      }
+    }
 
     // ── nothing errored anywhere along the way ──
     // A 404 from /api/session/<id> is CORRECT behaviour for a session that does

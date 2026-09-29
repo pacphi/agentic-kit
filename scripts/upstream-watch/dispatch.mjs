@@ -3,7 +3,7 @@
 // at most MAX_FIRES times and not again within REFIRE_AFTER_DAYS, and record
 // the draft pull request once the branch has one. A run fires at most
 // MAX_FIRES_PER_RUN fixes, spaced apart, and stops at the first failed call;
-// the rest are deferred to the next run. A dry run lists what would fire
+// the rest stay eligible for later checks. A dry run lists what would fire
 // instead of firing. Injectable exec, fetch and pause.
 import { eventLine } from './classify.mjs';
 import { run } from './fetch.mjs';
@@ -12,12 +12,14 @@ import { toRecord } from './ledger-branch.mjs';
 export const FIRE_URL = (routine) => `https://api.anthropic.com/v1/claude_code/routines/${routine}/fire`;
 export const FIRE_HEADERS = { 'anthropic-beta': 'experimental-cc-routine-2026-04-01', 'anthropic-version': '2023-06-01', 'content-type': 'application/json' };
 export const REFIRE_AFTER_DAYS = 3;
+export const PR_OBSERVE_DAYS = 7;
 export const MAX_FIRES = 2;
 export const FIRE_TIMEOUT_MS = 30_000;
-// Sessions start gradually: a few per run, spaced apart; the rest wait for the next run.
+// Sessions start gradually: a few per run, spaced apart; later checks revisit the rest.
 export const MAX_FIRES_PER_RUN = 3;
 export const FIRE_SPACING_MS = 15_000;
-// A 5xx answer means no session was started, so the call is safe to repeat.
+// The endpoint documents retries for HTTP 500/503, but has no idempotency key.
+// These bounded retries do not guarantee that only one server-side session exists.
 export const FIRE_ATTEMPTS = 3;
 export const FIRE_BACKOFF_MS = 2_000;
 // `gh pr list --head` matches the branch name in any fork; only a pull request
@@ -26,6 +28,17 @@ export const SAME_REPO_PR = '[.[] | select(.isCrossRepository | not)][0].number 
 const ROUTINE = /^trig_[A-Za-z0-9]+$/;
 const DISPATCH_BRANCH = /^upstream\/[a-z0-9._-]+$/;
 const DAY = 86_400_000;
+
+function diagnostic(value, token) {
+  if (typeof value !== 'string') return '';
+  // Redact before bounding, so truncation cannot expose the start of a token.
+  return value.split(token).join('[REDACTED]').replace(/[\p{Cc}\p{Cf}]/gu, ' ').slice(0, 200);
+}
+
+export function sessionList(sessions) {
+  if (sessions.length < 3) return sessions.join(' and ');
+  return `${sessions.slice(0, -1).join(', ')}, and ${sessions.at(-1)}`;
+}
 
 export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env = process.env, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   return {
@@ -56,14 +69,19 @@ export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env
           method: 'POST', headers: { ...FIRE_HEADERS, authorization: `Bearer ${token}` }, body: JSON.stringify({ text }),
           signal: AbortSignal.timeout(FIRE_TIMEOUT_MS),
         });
-        const body = await response.json().catch(() => null);
+        const body = await response.json().catch((error) => {
+          // Only a complete non-JSON response uses the status-only fallback.
+          // A body-stream failure is ambiguous and must not cause another POST.
+          if (error instanceof SyntaxError) return null;
+          throw error;
+        });
         const session = body?.claude_code_session_url;
         if (response.status === 200 && typeof session === 'string') return session;
-        const requestId = response.headers?.get?.('request-id');
-        const detail = body?.error?.message ?? (typeof body?.error === 'string' ? body.error : '');
+        const requestId = diagnostic(response.headers?.get?.('request-id'), token);
+        const detail = diagnostic(body?.error?.message ?? (typeof body?.error === 'string' ? body.error : ''), token);
         failure = `the routine trigger answered HTTP ${response.status}${typeof session === 'string' ? '' : ' without a session'}`
-          + `${requestId ? ` (request-id ${requestId})` : ''}${detail ? `: ${String(detail).slice(0, 200)}` : ''}`;
-        if (response.status < 500) break;
+          + `${requestId ? ` (request-id ${requestId})` : ''}${detail ? `: ${detail}` : ''}`;
+        if (typeof session === 'string' || ![500, 503].includes(response.status)) break;
       }
       throw new Error(failure);
     },
@@ -71,7 +89,7 @@ export function createDispatcher({ exec = run, fetchImpl = globalThis.fetch, env
 }
 
 /** Fire (or, in a dry run, list in `wouldFire`) each released fix; the branch and pull request lookups only read. */
-export async function dispatch({ released, records, dispatcher, repo, sentinel, now, recordedAt, dryRun = false, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+export async function dispatch({ released, records, dispatcher, repo, sentinel, now, recordedAt, dryRun = false, eligibleIds = null, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   const out = [];
   const errors = [];
   const wouldFire = [];
@@ -86,17 +104,18 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
       if (await dispatcher.branchExists(branch)) continue;
       const firings = recordsOf(event.id, 'fired');
       if (firings.length >= MAX_FIRES) {
-        errors.push({ id: event.id, error: `dispatch did not complete after ${firings.length} firings; see ${firings.map((item) => item.fields.session).join(' and ')}` });
+        errors.push({ id: event.id, error: `dispatch did not complete after ${firings.length} firings; see ${sessionList(firings.map((item) => item.fields.session))}` });
         continue;
       }
       const newest = Math.max(...firings.map((item) => Date.parse(item.recordedAt)), 0);
       if (newest && now.getTime() - newest < REFIRE_AFTER_DAYS * DAY) continue;
-      if (dryRun) {
-        wouldFire.push({ id: event.id, version, branch });
-        continue;
-      }
       if (triggerFailed || attempted >= MAX_FIRES_PER_RUN) {
         deferred.push({ id: event.id, version, branch });
+        continue;
+      }
+      if (dryRun) {
+        attempted++;
+        wouldFire.push({ id: event.id, version, branch });
         continue;
       }
       if (attempted++) await pause(FIRE_SPACING_MS);
@@ -113,6 +132,9 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
   }
   for (const id of new Set(records.filter((item) => item.event === 'fired').map((item) => item.id))) {
     if (recordsOf(id, 'dispatch-pr').length) continue;
+    if (eligibleIds && !eligibleIds.has(id)) continue;
+    const latestFiring = Math.max(...recordsOf(id, 'fired').map((item) => Date.parse(item.recordedAt)));
+    if (!Number.isFinite(latestFiring) || now.getTime() - latestFiring >= PR_OBSERVE_DAYS * DAY) continue;
     try {
       const branch = recordsOf(id, 'fired').at(-1).fields.branch;
       const pr = await dispatcher.openPullRequest(repo, branch);

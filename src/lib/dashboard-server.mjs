@@ -1,4 +1,6 @@
 import { HOST_HEALTH_POST_ROUTES, handleHostHealthPost } from './dashboard/host-health-api.mjs';
+import { REFRESH_POST_ROUTES, REFRESH_LOCAL_TIMEOUT_MS, createRefreshOperation,
+  dashboardRefreshStages, handleRefreshPost, handleRefreshGet } from './dashboard/refresh-api.mjs';
 import { createHostReadinessReader } from './host-readiness.mjs';
 // dashboard-server.mjs — a read-only, localhost-only web dashboard for the kit.
 //
@@ -37,14 +39,13 @@ import { createHostReadinessReader } from './host-readiness.mjs';
 //   GET /api/system   → the machine-footprint payload (ADR-0025): the cheap
 //                      tier (runtime census + known-file stats, TTL-cached
 //                      ~60s) merged with the last persisted deep snapshot,
-//                      carried forward with ITS asOf. `?refresh=deep` starts
-//                      or attaches to the single-flight deep scan and returns
-//                      immediately with progress state; `&trees=1|0` sets
-//                      whether that scan walks project working trees.
-//   GET /api/system/summary → the same read (same `?refresh=deep&trees=`)
+//                      carried forward with ITS asOf. This GET is read-only.
+//   GET /api/system/summary → the same read
 //                      with the catalog projected to what the System page
 //                      draws (dashboard/system-summary.mjs). The page and its
 //                      Runtime poll read this; /api/system stays complete.
+//   POST /api/refresh → starts one explicit staged refresh operation.
+//   GET /api/refresh → reads progress for that operation.
 //
 // The status rows are gathered by calling status.mjs's own collect() IN
 // PROCESS — safe only because the evidence store (ADR-0063) made a warm-cache
@@ -148,16 +149,16 @@ const STATUS_TIMEOUT_MS = 30_000;
  *  settles within STATUS_TIMEOUT_MS, resolves to an honest empty payload rather than
  *  rejecting or hanging the server, so /api/status always answers with valid
  *  JSON. */
-function inProcessStatus(cwd) {
+function inProcessStatus(cwd, { refresh = false, timeoutMs = STATUS_TIMEOUT_MS } = {}) {
   return () => new Promise((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       resolve({ overall: 'unknown', rows: [], error: 'status collection timed out' });
-    }, STATUS_TIMEOUT_MS);
+    }, timeoutMs);
     timer.unref?.();
-    statusCollect({ pkgRoot: PKG_ROOT, cwd, refresh: false })
+    statusCollect({ pkgRoot: PKG_ROOT, cwd, refresh })
       .then((rows) => ({ overall: worstLevel(rows), rows }))
       .catch((e) => ({ overall: 'unknown', rows: [], error: String(e?.message ?? e) }))
       .then((result) => {
@@ -286,7 +287,8 @@ function censusBackedDiscovery() {
     readCensus: () => (last ? {
       everSeen: last.everSeen, onDisk: last.onDisk,
       gitRepos: last.gitRepos, learning: last.learning,
-      complete: last.complete,
+      complete: last.complete, importedExcluded: last.importedExcluded,
+      importedMixed: last.importedMixed, importedUnresolved: last.importedUnresolved,
     } : null),
   };
 }
@@ -377,8 +379,8 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot,
     intel: {
       selectedProjectKey: selected?.key ?? null,
       selectedProjectLabel: selected?.label ?? null,
-      projects: projects.map(({ key, label, path: projectPath, source, learningScope, learningScopeEvidence, learningOrigins, learningObservedAt }) => (
-        { key, label, path: projectPath, source,
+      projects: projects.map(({ key, label, path: projectPath, source, hosts, sessionOrigins, sessionSurfaces, learningScope, learningScopeEvidence, learningOrigins, learningObservedAt }) => (
+        { key, label, path: projectPath, source, hosts, sessionOrigins, sessionSurfaces,
           learningScope: ['repository', 'worktree', 'user'].includes(learningScope) ? learningScope : 'unknown',
           learningScopeEvidence: learningScopeEvidence ?? 'unclassified', learningObservedAt: learningObservedAt ?? null,
           learningOrigins: ['claude-desktop', 'codex-desktop'].filter((origin) => learningOrigins?.includes(origin)) }
@@ -1086,7 +1088,7 @@ function lazyLive(liveOptions = {}) {
  *           machineWideIntel?: (projects: Array<any>) => any,
  *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
  *           maintenance?: any, maintenanceOptions?: any, hostReadiness?: any,
- *           management?: any, managementOptions?: any }} [opts]
+ *           management?: any, managementOptions?: any, refreshStages?: Record<string, (ctx: any) => Promise<any>> }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -1097,7 +1099,7 @@ export function startDashboard({
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
-  maintenance, maintenanceOptions = {}, management, managementOptions = {}, hostReadiness,
+  maintenance, maintenanceOptions = {}, management, managementOptions = {}, hostReadiness, refreshStages,
 } = {}) {
   const refused = refusesDefaultState({
     fetchStatus, usage, limits, hooks, live, transcripts, intelWatch, discoverProjects, machineWideIntel,
@@ -1166,7 +1168,7 @@ export function startDashboard({
   const provideMaintenance = typeof maintenance === 'function'
     ? maintenance : maintenance ? async () => maintenance : async () => {
       if (refused) {
-        // Logged here because refreshMaintenanceAfterSystem swallows errors.
+        // Log once when the default Maintenance service is refused.
         if (!refusalLogged) { refusalLogged = true; console.error(HERMETIC_REFUSAL); }
         throw new TypeError(HERMETIC_REFUSAL);
       }
@@ -1216,24 +1218,11 @@ export function startDashboard({
       .finally(() => { inventoryRefreshPromise = null; });
     return inventoryRefreshPromise;
   }
-  let maintenanceRefreshSource = null;
-  let maintenanceRefreshPromise = null;
-  function refreshMaintenanceAfterSystem(deepScan) {
-    if (maintenanceRefreshSource === deepScan) return maintenanceRefreshPromise;
-    maintenanceRefreshSource = deepScan;
-    maintenanceRefreshPromise = Promise.resolve(deepScan).then(async (result) => {
-      if (result?.ok !== true || result?.persisted?.ok === false) return null;
-      const model = await (await getMaintenance()).scan({ deep: false });
-      refreshInventoryAfterProviderScan({ measured: true });
-      return model;
-    }).catch(() => null).finally(() => {
-      if (maintenanceRefreshSource === deepScan) {
-        maintenanceRefreshSource = null;
-        maintenanceRefreshPromise = null;
-      }
-    });
-    return maintenanceRefreshPromise;
-  }
+  const refreshOperation = createRefreshOperation({ stages: refreshStages ?? dashboardRefreshStages({
+    cwd, pkgRoot: PKG_ROOT, getSystem, getMaintenance, refreshInventoryAfterProviderScan,
+    getHostReadiness, statusCollect: inProcessStatus(cwd, { refresh: true, timeoutMs: REFRESH_LOCAL_TIMEOUT_MS }),
+    loadConfig: loadKitConfig,
+  }) });
   let transcriptServicePromise;
   const provideTranscripts = typeof transcripts === 'function'
     ? transcripts : transcripts ? async () => transcripts : async () => {
@@ -1403,7 +1392,7 @@ export function startDashboard({
   let maintenanceApiPromise;
   const getMaintenanceApi = async () => (maintenanceApiPromise ||= getMaintenance()
     .then((service) => createMaintenanceDashboardApi({
-      service, management: getManagement, sessionToken: token, afterScan: refreshInventoryAfterProviderScan,
+      service, management: getManagement, sessionToken: token,
     })));
 
   const server = http.createServer(async (req, res) => {
@@ -1417,7 +1406,8 @@ export function startDashboard({
     const maintenanceMutation = req.method === 'POST'
       && (MAINTENANCE_MUTATION_ROUTES.has(url) || MAINTENANCE_V2_MUTATION_ROUTES.has(url));
     const healthMutation = req.method === 'POST' && HOST_HEALTH_POST_ROUTES.has(url);
-    if (req.method !== 'GET' && !maintenanceMutation && !healthMutation) {
+    const refreshMutation = req.method === 'POST' && REFRESH_POST_ROUTES.has(url);
+    if (req.method !== 'GET' && !maintenanceMutation && !healthMutation && !refreshMutation) {
       res.writeHead(405).end('method not allowed');
       return;
     }
@@ -1445,20 +1435,21 @@ export function startDashboard({
     // Query tokens remain an SSE compatibility exception for GET. Mutation
     // capability can only be reached with the explicit header; it never rides
     // in a URL, browser history, referrer or server log.
-    const authorized = (maintenanceMutation || healthMutation)
+    const authorized = (maintenanceMutation || healthMutation || refreshMutation)
       ? tokenMatches(req.headers['x-dash-token'], token) : checkToken(req, query);
     if (url.startsWith('/api/') && !authorized) {
       sendUnauthorized(res, 'Wrong or missing dashboard token.');
       return;
     }
-    if (maintenanceMutation || healthMutation) {
+    if (maintenanceMutation || healthMutation || refreshMutation) {
       const mutationRejection = maintenanceMutationRejection(req.headers);
       if (mutationRejection) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
         res.end(mutationRejection);
         return;
       }
-      if (healthMutation) { await handleHostHealthPost(url, req, res, getHostReadiness); return; }
+      if (healthMutation) { await handleHostHealthPost(req, res, getHostReadiness); return; }
+      if (refreshMutation) { await handleRefreshPost(req, res, refreshOperation); return; }
       try { await (await getMaintenanceApi()).mutate(url, req, res); }
       catch { sendJson(res, 503, { error: 'maintenance operation unavailable' }); }
       return;
@@ -1987,35 +1978,13 @@ export function startDashboard({
     // `project` shapes the answer for a route: identity for /api/system (the
     // documented `ak system --json` shape), systemSummaryPayload for the page.
     async function handleSystem(req, res, query, project = (payload) => payload) {
+      if (query.has('refresh') || query.has('trees')) {
+        sendJson(res, 400, { error: 'start a refresh with POST /api/refresh' });
+        return;
+      }
       try {
         const collector = await getSystem();
-        // ORDER IS LOAD-BEARING: assemble the payload BEFORE starting a scan.
-        // The deep collectors are synchronous, so the first phase occupies the
-        // event loop the moment it gets a turn — and `read()` awaits, which
-        // hands it that turn. Starting first therefore made the *initiating*
-        // request wait out the phase it had just kicked off (measured: 9s),
-        // which is precisely the hang the progress state exists to avoid.
         const payload = await collector.read();
-        if (query.get('refresh') === 'deep') {
-          // Start-or-attach and answer NOW. The collector's single flight means
-          // a second refresh joins the running scan rather than racing it, and
-          // it never rejects — the catch guards an injected collector that does
-          // not honour that contract, so a bad one cannot take the process down
-          // with an unhandled rejection.
-          // `trees` is a MEASUREMENT parameter, not a view filter: project
-          // working trees are only walked when it is set, and one large
-          // repository outweighs every shared cache combined — so the ranking
-          // has to be re-measured, not re-sorted. Absent means "keep whatever
-          // the collector already defaults to".
-          const trees = query.get('trees');
-          const deepScan = Promise.resolve(collector.refreshDeep(
-            trees == null ? undefined : { includeProjectTrees: trees === '1' },
-          ));
-          refreshMaintenanceAfterSystem(deepScan);
-          // The payload predates the start by microseconds; re-stamp the live
-          // scan block so this response reads "running", not "idle".
-          if (typeof collector.scanState === 'function') payload.scan = collector.scanState();
-        }
         sendJson(res, 200, project(payload));
       } catch (e) {
         sendJson(res, 503, { error: 'system footprint unavailable', reason: String(e && e.message || e) });
@@ -2024,13 +1993,11 @@ export function startDashboard({
     }
 
     async function handleMaintenance(req, res, query) {
-      const refresh = query.getAll('refresh');
-      if ([...query.keys()].some((key) => key !== 'refresh')
-          || refresh.length > 1 || (refresh.length === 1 && refresh[0] !== 'scan')) {
-        sendJson(res, 400, { error: 'invalid maintenance scan request' });
+      if (query.size > 0) {
+        sendJson(res, 400, { error: 'start a refresh with POST /api/refresh' });
         return;
       }
-      try { await (await getMaintenanceApi()).report(req, res, { refresh: query.get('refresh') === 'scan' }); }
+      try { await (await getMaintenanceApi()).report(req, res); }
       catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
       return;
     }
@@ -2065,7 +2032,7 @@ export function startDashboard({
       // filesystem call, so the 400 happens here and nowhere deeper. Two
       // shapes are accepted: a plain id (unchanged — parseSessionId/
       // resolvesInsideRoot, exactly as before), or a namespaced
-      // `<parentId>/<stem>` Claude subagent id (Task 5 round 2), gated by
+      // `<parentId>/<stem>` Claude subagent id, gated by
       // its own dedicated parse+containment pair rather than loosening
       // parseSessionId/resolvesInsideRoot — those two also gate the
       // live-playback/SSE routes, which this fix does not touch.
@@ -2113,6 +2080,7 @@ export function startDashboard({
     // out separately into sse.mjs's sseRoute().
     const ROUTES = {
       '/api/status': handleStatus,
+      '/api/refresh': (_req, res) => handleRefreshGet(res, refreshOperation),
       '/api/host-health': async (_req, res) => {
         try { sendJson(res, 200, await getHostReadiness()); }
         catch { sendJson(res, 503, { error: 'Host health checks unavailable.' }); }

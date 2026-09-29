@@ -7,6 +7,7 @@ import { inspectProjectIdentity } from './footprint/project-identity.mjs';
 import { transcriptSessionOrigin } from './footprint/session-origin.mjs';
 import { isImportedCodexRollout } from './codex-import-marker.mjs';
 import { safeProjectLabel } from './live/project-label.mjs';
+import { classifySessionSurface } from './session-surface.mjs';
 import { claudeDir, codexDir, opencodeDir, configDir } from './paths.mjs';
 
 const CACHE = new Map();
@@ -56,7 +57,7 @@ export function observeUsageProject(cwd, { observedAt = Date.now(), cache = CACH
   return value;
 }
 
-/** Same bounded head and exact origin allowlists as footprint discovery. An
+/** Same bounded head and declared-origin token validation as footprint discovery. An
  *  imported Codex copy of a Claude Code transcript declares the ChatGPT desktop
  *  app as its originator but is not a session from it (ADR-0060 §3). */
 export function usageSessionOrigin(raw, host) {
@@ -64,4 +65,24 @@ export function usageSessionOrigin(raw, host) {
   const lines = head.split('\n').filter((line) => line.trim()).slice(0, 40);
   if (host === 'codex' && isImportedCodexRollout(lines)) return { origin: 'unknown', evidence: 'imported-copy' };
   return transcriptSessionOrigin(lines, host);
+}
+
+/** Serialize the classifier dimensions for usage records. The footprint
+ * adapter keeps them non-enumerable to preserve its legacy origin contract. */
+export function usageRecordOrigin(raw, host) {
+  const legacy = usageSessionOrigin(raw, host);
+  if (legacy.evidence === 'imported-copy') return importedUsageRecordOrigin();
+  return {
+    ...legacy,
+    surface: legacy.surface, initiator: legacy.initiator, label: legacy.label,
+    rawEvidence: legacy.rawEvidence, attributes: legacy.attributes,
+    thirdPartyProvider: legacy.thirdPartyProvider,
+  };
+}
+
+/** The parser also calls this when an import marker falls beyond the bounded
+ * head. A copied declaration never establishes a genuine session surface. */
+export function importedUsageRecordOrigin() {
+  return { origin: 'unknown', evidence: 'imported-copy',
+    ...classifySessionSurface({ host: 'codex', importedCopy: true }) };
 }

@@ -15,7 +15,7 @@ function projectDescriptor(placement, kind) {
   return { projectKind: kind ?? 'unknown', languages: placement.projectLanguages ?? [],
     repositoryId: placement.repositoryId ?? null, repositoryLabel: placement.repositoryLabel ?? null,
     repositoryEvidence: placement.repositoryEvidence ?? null, repositoryObservedAt: placement.repositoryObservedAt ?? null,
-    sessionOrigins: placement.sessionOrigins ?? [] };
+    sessionOrigins: placement.sessionOrigins ?? [], sessionSurfaces: placement.sessionSurfaces ?? null };
 }
 
 function descriptor(level, placement, resource, projectLabels, projectKinds) {

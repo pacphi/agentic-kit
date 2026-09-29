@@ -1,7 +1,7 @@
 // Test-only spawn ledger, meant to be loaded via `node --import`. Side-effect
 // free unless AK_SPAWN_LEDGER_FILE is set, so it is always safe to preload.
 //
-// Branch 6a Task 8a (Ruling C): an earlier plan wanted a spawn-ledger seam
+// A spawn ledger must cover every spawn path: a proposed seam
 // inside src/lib/exec.mjs's run(), but a repo-wide `grep -rln "child_process"
 // src/` found ~30 files that spawn directly, not through exec.mjs. A ledger
 // there would under-count and let a zero-spawn test pass vacuously on any
@@ -41,8 +41,8 @@ if (ledgerFile) {
     }
   };
 
-  // The brief's four forms, plus execSync/fork: empirically (see the Task 8a
-  // report) `exec` already routes through `execFile` internally, so it needs
+  // Wrap spawn, execFile, execFileSync, spawnSync, execSync and fork.
+  // `exec` already routes through `execFile` internally, so it needs
   // no separate wrapper, but `execSync` and `fork` call module-internal
   // implementations that bypass the four-function wrap even after
   // syncBuiltinESMExports() — confirmed nothing under src/ calls either

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
+import { fileId } from '../file-identity.mjs';
 
 const limit = (value, ceiling) => Number.isSafeInteger(value) && value > 0
   ? Math.min(value, ceiling) : ceiling;
@@ -70,7 +71,7 @@ export class JsonlTailer {
   reconcile() {
     if (!this.canRead(this.#file)) return;
     let stat;
-    try { stat = fs.statSync(this.#file); } catch (error) {
+    try { stat = fs.statSync(this.#file, { bigint: true }); } catch (error) {
       if (error.code === 'ENOENT') this.#absent();
       else this.#unreadable(error);
       return;
@@ -82,31 +83,32 @@ export class JsonlTailer {
       }));
       return;
     }
-    const identity = `${stat.dev}:${stat.ino}`;
+    const identity = `${fileId(stat.dev)}:${fileId(stat.ino)}`;
+    const size = Number(stat.size);
     if (this.#identity == null) {
       this.#identity = identity;
       // A file that appeared after tailing began holds only new records, so
       // neither a resume offset nor startAtEnd may skip any of it.
       if (this.#absentSeen) this.#offset = 0;
-      else if (this.startOffset != null) this.#offset = Math.min(this.startOffset, stat.size);
-      else if (this.startAtEnd) this.#offset = stat.size;
-    } else if (this.#identity !== identity || stat.size < this.#offset) {
+      else if (this.startOffset != null) this.#offset = Math.min(this.startOffset, size);
+      else if (this.startAtEnd) this.#offset = size;
+    } else if (this.#identity !== identity || size < this.#offset) {
       this.#identity = identity;
       this.#resetPosition();
     }
-    if (stat.size <= this.#offset) {
+    if (size <= this.#offset) {
       // Nothing new to read. Prove readability anyway when it is not yet known
       // (or was lost), so a mode-000 file cannot pass as healthy by staying
       // the same size.
       if (this.#presence !== 'readable') this.#probeReadable();
-      this.#coverage(stat.size);
+      this.#coverage(size);
       return;
     }
     try {
       const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
       const fd = fs.openSync(this.#file, flags);
       try {
-        let remaining = Math.min(stat.size - this.#offset, this.maxReadBytes);
+        let remaining = Math.min(size - this.#offset, this.maxReadBytes);
         const bytes = Buffer.alloc(Math.min(remaining, this.maxChunkBytes));
         while (remaining > 0) {
           const count = fs.readSync(fd, bytes, 0, Math.min(bytes.length, remaining), this.#offset);
@@ -118,7 +120,7 @@ export class JsonlTailer {
       } finally { fs.closeSync(fd); }
       this.#presence = 'readable';
     } catch (error) { this.#unreadable(error); }
-    this.#coverage(stat.size);
+    this.#coverage(size);
   }
 
   #resetPosition() {

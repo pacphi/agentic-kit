@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { eventLine } from '../../scripts/upstream-watch/classify.mjs';
-import { FIRE_HEADERS, FIRE_URL, SAME_REPO_PR, createDispatcher, dispatch } from '../../scripts/upstream-watch/dispatch.mjs';
+import { FIRE_HEADERS, FIRE_URL, PR_OBSERVE_DAYS, SAME_REPO_PR, createDispatcher, dispatch, sessionList } from '../../scripts/upstream-watch/dispatch.mjs';
 
 const NOW = new Date('2026-10-02T14:17:00Z');
 const RECORDED_AT = '2026-10-02T14:17:00Z';
@@ -26,8 +26,14 @@ function fakeDispatcher({ exists = false, pr = null, session = 'https://claude.a
     fire: async (text) => { calls.fire.push(text); if (fireError) throw new Error(fireError); return session; },
   };
 }
-const run = (dispatcher, records = [], { dryRun, list = [released] } = {}) => dispatch({ released: list, records, dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT, dryRun });
+const run = (dispatcher, records = [], { dryRun, list = [released], eligibleIds = new Set([ID]), now = NOW } = {}) => dispatch({ released: list, records, dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now, recordedAt: RECORDED_AT, dryRun, eligibleIds });
 const NOTHING = { records: [], errors: [], wouldFire: [], deferred: [] };
+
+test('exhausted firing links read naturally at any count', () => {
+  assert.equal(sessionList(['one']), 'one');
+  assert.equal(sessionList(['one', 'two']), 'one and two');
+  assert.equal(sessionList(['one', 'two', 'three']), 'one, two, and three');
+});
 
 test('a released fix without a branch fires once and is recorded with its session', async () => {
   const dispatcher = fakeDispatcher();
@@ -108,6 +114,22 @@ test('a fired branch with an open pull request records dispatch-pr once', async 
   assert.deepEqual(again.calls.pr, []);
 });
 
+test('PR observation stops on ineligible status or seven days after latest firing', async () => {
+  assert.equal(PR_OBSERVE_DAYS, 7);
+  const first = fired('2026-09-20T14:17:00Z');
+  const latest = fired('2026-09-26T14:17:00Z');
+  const inactive = fakeDispatcher({ exists: true, pr: 261 });
+  assert.deepEqual(await run(inactive, [latest], { list: [], eligibleIds: new Set() }), NOTHING);
+  assert.deepEqual(inactive.calls.pr, []);
+  const before = fakeDispatcher({ exists: true, pr: 261 });
+  const inside = await run(before, [first, latest], { list: [], now: new Date('2026-10-03T14:16:59Z') });
+  assert.equal(inside.records[0].event, 'dispatch-pr');
+  assert.deepEqual(before.calls.pr, [['pacphi/agentic-kit', BRANCH]]);
+  const boundary = fakeDispatcher({ exists: true, pr: 261 });
+  assert.deepEqual(await run(boundary, [first, latest], { list: [], now: new Date('2026-10-03T14:17:00Z'), dryRun: true }), NOTHING);
+  assert.deepEqual(boundary.calls.pr, []);
+});
+
 const fix = (n) => eventLine('UPSTREAM-WATCH', `proffesor-for-testing/agentic-qe#${n}`, 'released', '2026-08-06', { version: '3.14.5', branch: `upstream/proffesor-for-testing-agentic-qe-${n}` });
 const gentle = (dispatcher, list, pauses = []) => dispatch({ released: list, records: [], dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT, pause: async (ms) => { pauses.push(ms); } });
 
@@ -157,7 +179,7 @@ test('the trigger call sends the payload with the documented headers and never p
   await assert.rejects(createDispatcher({ fetchImpl: empty, env }).fire('x'), /without a session/);
 });
 
-test('the trigger call retries a 5xx answer, then reports the request id and body', async () => {
+test('the trigger call retries HTTP 503, then reports the request id and body', async () => {
   const env = { UPSTREAM_DISPATCH_ROUTINE: 'trig_01LmNVKJ4K86joHPvvPtc7yx', UPSTREAM_DISPATCH_TOKEN: 'sk-secret-token' };
   const ok = { status: 200, json: async () => ({ claude_code_session_url: 'https://claude.ai/code/session_r' }) };
   const busy = { status: 503, headers: new Headers({ 'request-id': 'req_1' }), json: async () => ({ error: { message: 'overloaded' } }) };
@@ -211,3 +233,139 @@ test('a pull request from a fork is never taken for the dispatch pull request', 
   assert.equal(await createDispatcher({ exec: forkOnly }).openPullRequest('pacphi/agentic-kit', BRANCH), null);
   assert.deepEqual(calls[0].slice(-4), ['--json', 'number,isCrossRepository', '--jq', SAME_REPO_PR]);
 });
+
+// These cases catch retrying an ambiguous or undocumented outcome.
+for (const status of [200, 400, 401, 403, 404, 429, 502, 504, 529]) {
+  test(`HTTP ${status} without a session is not retried`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return { status, json: async () => ({}) }; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status}`));
+    assert.equal(calls, 1);
+    assert.deepEqual(waits, []);
+  });
+}
+
+for (const status of [500, 503]) {
+  test(`HTTP ${status} retries exactly twice with bounded waits`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return { status, json: async () => ({}) }; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status}`));
+    assert.equal(calls, 3);
+    assert.deepEqual(waits, [2000, 4000]);
+  });
+  test(`HTTP ${status} with a session URL never repeats the request`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return { status, json: async () => ({ claude_code_session_url: 'https://claude.ai/code/session_seen' }) }; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status}`));
+    assert.equal(calls, 1);
+    assert.deepEqual(waits, []);
+  });
+}
+
+for (const failure of [new Error('connection reset'), new DOMException('timed out', 'TimeoutError')]) {
+  test(`a thrown ${failure.name} is not retried`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; throw failure; },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), { message: failure.message });
+    assert.equal(calls, 1);
+    assert.deepEqual(waits, []);
+  });
+}
+
+test('error metadata redacts the configured token before truncation and removes control characters', async () => {
+  const token = 'synthetic-secret-longer-than-the-remaining-space';
+  const dispatcher = createDispatcher({
+    env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: token },
+    fetchImpl: async () => ({
+      status: 401,
+      headers: { get: () => `req\n\x1b${token} ${'r'.repeat(190)}${token}` },
+      json: async () => ({ error: { message: `message\r\n${token} ${'m'.repeat(170)}${token}` } }),
+    }),
+  });
+  const error = await dispatcher.fire('x').catch((failure) => failure);
+  assert.doesNotMatch(error.message, /synthetic|secret|\p{Cc}/u);
+  assert.match(error.message, /request-id req.*\[REDACTED\]/);
+  assert.match(error.message, /message.*\[REDACTED\]/);
+  assert.ok(error.message.length < 500, 'both metadata fields are bounded');
+});
+
+test('non-string error metadata is ignored without coercing objects', async () => {
+  const dispatcher = createDispatcher({
+    env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+    fetchImpl: async () => ({ status: 401, headers: { get: () => ({ invalid: true }) }, json: async () => ({ error: { message: { invalid: true } } }) }),
+  });
+  await assert.rejects(dispatcher.fire('x'), { message: 'the routine trigger answered HTTP 401 without a session' });
+});
+
+test('a dry run previews three eligible fixes, defers the rest and never sleeps', async () => {
+  const dispatcher = fakeDispatcher();
+  const result = await dispatch({ released: [1, 2, 3, 4, 5].map(fix), records: [], dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT, dryRun: true, pause: async () => { assert.fail('dry run slept'); } });
+  assert.deepEqual(result.wouldFire.map((item) => item.id), [1, 2, 3].map((n) => `proffesor-for-testing/agentic-qe#${n}`));
+  assert.deepEqual(result.deferred.map((item) => item.id), [4, 5].map((n) => `proffesor-for-testing/agentic-qe#${n}`));
+  assert.deepEqual(dispatcher.calls.fire, []);
+  assert.deepEqual(result.records, []);
+});
+
+for (const fail of [false, true]) {
+  test(`PR observation remains bounded after ${fail ? 'a fire failure' : 'the fire cap'}`, async () => {
+    const dispatcher = fakeDispatcher({ pr: 261, fireError: fail ? 'unavailable' : null });
+    const waits = [];
+    const observed = (n, at) => ({ ...fired(at), id: `proffesor-for-testing/agentic-qe#${n}`, fields: { branch: fix(n).fields.branch, session: `https://claude.ai/code/session_${n}` } });
+    const records = [observed(10, '2026-10-01T14:17:00Z'), observed(11, '2026-09-25T14:17:00Z'), observed(12, '2026-10-01T14:17:00Z'), observed(13, '2026-10-01T14:17:00Z'), { ...observed(13, '2026-10-01T14:17:00Z'), event: 'dispatch-pr' }];
+    const result = await dispatch({ released: [10, 1, 2, 3, 4, 5].map(fix), records, dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT, eligibleIds: new Set([10, 11, 13].map((n) => `proffesor-for-testing/agentic-qe#${n}`)), pause: async (ms) => { waits.push(ms); } });
+    assert.equal(dispatcher.calls.fire.length, fail ? 1 : 3);
+    assert.deepEqual(waits, fail ? [] : [15000, 15000]);
+    assert.equal(result.deferred.length, fail ? 4 : 2);
+    assert.deepEqual(dispatcher.calls.pr, [['pacphi/agentic-kit', 'upstream/proffesor-for-testing-agentic-qe-10']]);
+    assert.deepEqual(result.records.filter((item) => item.event === 'dispatch-pr').map((item) => item.id), ['proffesor-for-testing/agentic-qe#10']);
+  });
+}
+
+for (const status of [500, 503]) {
+  for (const failure of [new DOMException('body timed out', 'TimeoutError'), new DOMException('body aborted', 'AbortError'), new TypeError('body stream network failure')]) {
+    test(`HTTP ${status} body ${failure.name} propagates without another POST`, async () => {
+      let calls = 0;
+      const waits = [];
+      const dispatcher = createDispatcher({
+        env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+        fetchImpl: async () => { calls++; return { status, json: async () => { throw failure; } }; },
+        sleep: async (ms) => { waits.push(ms); },
+      });
+      await assert.rejects(dispatcher.fire('x'), (error) => error === failure);
+      assert.equal(calls, 1);
+      assert.deepEqual(waits, []);
+    });
+  }
+  test(`HTTP ${status} complete malformed JSON retains the bounded status retry`, async () => {
+    let calls = 0;
+    const waits = [];
+    const dispatcher = createDispatcher({
+      env: { UPSTREAM_DISPATCH_ROUTINE: 'trig_test', UPSTREAM_DISPATCH_TOKEN: 'test-secret' },
+      fetchImpl: async () => { calls++; return new Response('not JSON', { status }); },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    await assert.rejects(dispatcher.fire('x'), new RegExp(`HTTP ${status} without a session`));
+    assert.equal(calls, 3);
+    assert.deepEqual(waits, [2000, 4000]);
+  });
+}

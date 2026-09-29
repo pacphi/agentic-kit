@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readContextConfig } from './codex-context-config.mjs';
 import { withDb } from './sqlite.mjs';
+import { xdgBase } from './paths.mjs';
 
 const LIMIT = 1024 * 1024;
 const plain = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -199,8 +200,8 @@ function selectedOpenCodeAgent(config, agentDirs) {
 }
 
 function loadOpenCode({ cwd, home, env }, evidence) {
-  const global = path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'opencode');
-  const data = path.join(env.XDG_DATA_HOME || path.join(home, '.local/share'), 'opencode');
+  const global = path.join(xdgBase('XDG_CONFIG_HOME', path.join(home, '.config'), { env }), 'opencode');
+  const data = path.join(xdgBase('XDG_DATA_HOME', path.join(home, '.local/share'), { env }), 'opencode');
   const auth = document(path.join(data, 'auth.json'), evidence, env);
   if (Object.values(auth).some(value => value?.type === 'wellknown') || openCodeRemote(data, evidence)) throw new Error('unsupported');
   if (fs.existsSync(path.join(global, 'config'))) throw new Error('unsupported'); // legacy TOML migration is native-owned
@@ -289,7 +290,7 @@ function defaultOpenCode({ config, auth, home, env, allowed, credentialed }, evi
   // Native default tries recent available selections, then a configured
   // provider. Do not borrow credentials from an unrelated provider.
 
-    const recent = document(path.join(env.XDG_STATE_HOME || path.join(home, '.local/state'), 'opencode/model.json'), evidence, env).recent;
+    const recent = document(path.join(xdgBase('XDG_STATE_HOME', path.join(home, '.local/state'), { env }), 'opencode/model.json'), evidence, env).recent;
     if (Array.isArray(recent) && recent.length) throw new Error('unsupported'); // availability requires native provider catalog
     const configured = Object.keys(config.provider ?? {}).filter(allowed);
     if (configured.length === 1) provider = configured[0];
