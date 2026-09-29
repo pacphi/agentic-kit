@@ -386,7 +386,7 @@ const T = Object.freeze({
   idDict: (prefix, value, max = 500) => ({ kind: 'dict', value, max, keyPrefix: prefix }),
   either: (...options) => ({ kind: 'either', options }),
   /** ISO timestamp, bounded machine token, and a user-facing label that refuses PROHIBITED_LABELS. */
-  iso: Object.freeze({ kind: 'iso' }), token: (max = 64) => ({ kind: 'token', max }), label: (max = 200) => ({ kind: 'label', max }),
+  iso: Object.freeze({ kind: 'iso' }), scanStamp: Object.freeze({ kind: 'scanStamp' }), token: (max = 64) => ({ kind: 'token', max }), label: (max = 200) => ({ kind: 'label', max }),
 });
 const [DICT_KEY, MAX_PAGE_ROWS, TOKEN] = [/^[A-Za-z0-9._:-]{1,120}$/, 200, /^[A-Za-z0-9._:-]+$/];
 
@@ -430,6 +430,9 @@ const SCALARS = Object.freeze({
   label: (node, value) => { const safe = evidenceText(value, node.max); return safe && !isProhibitedLabel(safe) ? safe : undefined; },
   token: (node, value) => (typeof value === 'string' && value.length <= node.max && TOKEN.test(value) ? value : undefined),
   iso: (_node, value) => (typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value)) ? value : undefined),
+  scanStamp: (_node, value) => (typeof value === 'string' && value.length <= 40
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value)) ? value : undefined),
   owner: (node, value) => text(value, node.max) ?? undefined,
   bool: (_node, value) => (typeof value === 'boolean' ? value : undefined),
   int: (_node, value) => (Number.isInteger(value) ? value : undefined),
@@ -585,7 +588,7 @@ const CONFIGURED_SOURCE = T.obj({
   sourceId: ID, kind: T.oneOf(SOURCE_TYPES), root: T.owner(1024), label: LABEL, maxDepth: T.int, includeNetwork: T.bool, present: T.bool,
 });
 const SCAN_SUMMARY = T.obj({
-  scanId: ID, sourceId: ID, environmentId: ID, state: T.oneOf(SCAN_STATES), startedAt: STAMP, completedAt: STAMP, visited: T.int,
+  scanId: ID, sourceId: ID, environmentId: ID, state: T.oneOf(SCAN_STATES), startedAt: STAMP, recordedAt: T.scanStamp, completedAt: STAMP, visited: T.int,
   limitingReason: T.oneOf(LIMITING_REASONS), ceiling: T.oneOf(SAFETY_CEILINGS), label: LABEL,
 });
 const DISCOVERY = T.obj({

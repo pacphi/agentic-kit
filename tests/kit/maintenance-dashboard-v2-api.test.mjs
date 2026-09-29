@@ -887,6 +887,16 @@ test('public activity retains historical scans as well as latest source summarie
   assert.equal(payload.scanHistory.length, 2);
 });
 
+test('public activity allows a bounded pause time while omitting invalid timestamps and private metadata', () => {
+  const scan = { sourceId: SOURCE, state: 'paused', recordedAt: '2026-09-09T12:00:00.000Z', completedAt: null, privatePath: PRIVATE_PATH };
+  const payload = publicActivity({ scans: [scan], scanHistory: [scan, { ...scan, recordedAt: PRIVATE_PATH }, { ...scan, recordedAt: '1' }] });
+  assert.equal(payload.scans[0].recordedAt, scan.recordedAt);
+  assert.equal(payload.scans[0].completedAt, null);
+  assert.equal(payload.scanHistory[1].recordedAt, undefined);
+  assert.equal(payload.scanHistory[2].recordedAt, undefined);
+  assert.equal(JSON.stringify(payload).includes(PRIVATE_PATH), false);
+});
+
 test('v2 reports native persistence refusal without suggesting an action started', async () => {
   const refusal = Object.assign(new Error('private adapter unavailable'), { code: 'MAINTENANCE_PERSISTENCE_UNAVAILABLE' });
   const { post } = harness({ management: stubManagement({ planAction: async () => { throw refusal; } }).facade });

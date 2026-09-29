@@ -71,14 +71,20 @@ function recipeEventSummary(event) {
   return { kind: event.kind, recipeId: event.recipeId ?? null, recipeVersion: event.recipeVersion ?? null, at: event.at, pendingIds: event.pendingIds ?? undefined };
 }
 
+function validScanTime(value) {
+  return typeof value === 'string' && value.length <= 40
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
 function scanSummary(entry) {
   if (!SCAN_STATES.includes(entry.state)) throw new TypeError(`unknown scan state: ${entry.state}`);
-  return { sourceId: entry.sourceId, environmentId: entry.environmentId, state: entry.state, label: entry.label, visited: entry.visited, limitingReason: entry.limitingReason ?? null, completedAt: entry.completedAt ?? null };
+  return { sourceId: entry.sourceId, environmentId: entry.environmentId, state: entry.state, label: entry.label, visited: entry.visited, limitingReason: entry.limitingReason ?? null, recordedAt: validScanTime(entry.recordedAt), completedAt: validScanTime(entry.completedAt) };
 }
 
 function latestScans(scanHistory) {
   const latest = new Map();
-  const timestamp = (entry) => Date.parse(entry.completedAt) || 0;
+  const timestamp = (entry) => Date.parse(entry.recordedAt ?? entry.completedAt) || 0;
   for (const entry of scanHistory.map(scanSummary)) {
     const key = JSON.stringify([entry.environmentId, entry.sourceId]);
     const previous = latest.get(key);

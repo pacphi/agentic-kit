@@ -1661,7 +1661,12 @@ async function main() {
     }
     if (request.method() === 'GET' && pathname === '/api/maintenance/v2/activity') {
       return reply(200, buildActivity({
-        receipts: [INTERRUPTED_RECEIPT], dispositions: [], recipeEvents: [], scanHistory: [], inProgress: [],
+        receipts: [INTERRUPTED_RECEIPT], dispositions: [], recipeEvents: [], inProgress: [],
+        scanHistory: [
+          { sourceId: 'src-claude', environmentId: 'env-local', label: 'Claude user configuration', state: 'complete', completedAt: '2026-09-07T12:00:00.000Z', visited: 12 },
+          { sourceId: 'src-claude', environmentId: 'env-local', label: 'Claude user configuration', state: 'paused', recordedAt: '2026-09-09T12:00:00.000Z', completedAt: null, visited: 18 },
+          { sourceId: 'src-other', environmentId: 'env-local', label: 'Codex configuration', state: 'complete', completedAt: '2026-09-08T12:00:00.000Z', visited: 8 },
+        ],
       }));
     }
     const receiptMatch = pathname.match(/^\/api\/maintenance\/v2\/receipts\/([^/]+)$/);
@@ -2731,6 +2736,18 @@ async function main() {
     // typed-confirmation dialog ──
     await page.click('[data-mnt-dest="activity"]');
     await page.waitForSelector('#mnt-tab-activity[aria-selected="true"]');
+    await page.waitForSelector('#mnt-scan-history .mnt-history-day');
+    const scanRows = await page.$$eval('#mnt-scan-history tbody', (groups) => groups.map((group) => ({
+      heading: group.querySelector('.mnt-history-day')?.textContent?.trim(),
+      rows: [...group.querySelectorAll('tr:not(.mnt-history-day)')].map((row) => row.textContent?.trim()),
+    })));
+    check('paused scan renders at its recorded time ahead of older completed scans',
+      scanRows.length === 3 && /Paused/.test(scanRows[0].rows[0])
+        && /Claude user configuration/.test(scanRows[0].rows[0])
+        && !/Time not recorded/.test(scanRows[0].rows[0])
+        && /Codex configuration/.test(scanRows[1].rows[0])
+        && /Complete/.test(scanRows[2].rows[0]),
+      `scan rows read ${JSON.stringify(scanRows)}`);
     await page.waitForSelector('[data-mnt-audit-receipt]');
     const auditTriggerLabel = await page.textContent('[data-mnt-audit-receipt]');
     check('MNT-RCV-001: an interrupted receipt offers Audit interruption, not generic Verify again',

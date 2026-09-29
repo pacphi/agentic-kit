@@ -77,6 +77,29 @@ test('activity shows the latest scan per source and environment without changing
   assert.deepEqual(scanHistory, original);
 });
 
+test('a newer paused record is the latest state and retains its distinct recorded time', () => {
+  const base = { sourceId: 'claude', environmentId: 'local', label: 'Claude', visited: 12 };
+  const complete = { ...base, state: 'complete', completedAt: '2026-09-08T12:00:00.000Z' };
+  const paused = { ...base, state: 'paused', recordedAt: '2026-09-09T12:00:00.000Z', completedAt: null };
+  const result = buildActivity({ scanHistory: [paused, complete] });
+  assert.equal(result.scans[0].state, 'paused');
+  assert.equal(result.scans[0].recordedAt, paused.recordedAt);
+  assert.equal(result.scans[0].completedAt, null);
+  assert.equal(result.scanHistory[1].completedAt, complete.completedAt);
+});
+
+test('invalid recorded time falls back to completion without passing metadata through', () => {
+  const base = { sourceId: 'claude', environmentId: 'local', state: 'complete' };
+  const result = buildActivity({ scanHistory: [
+    { ...base, completedAt: '2026-09-09T12:00:00.000Z', recordedAt: '/private/path', privatePath: '/private/path' },
+    { ...base, completedAt: '2026-09-08T12:00:00.000Z' },
+  ] });
+  assert.equal(result.scans[0].completedAt, '2026-09-09T12:00:00.000Z');
+  assert.equal(result.scans[0].recordedAt, null);
+  assert.equal(buildActivity({ scanHistory: [{ ...base, completedAt: '/private/path' }] }).scanHistory[0].completedAt, null);
+  assert.equal(JSON.stringify(result).includes('/private/path'), false);
+});
+
 test('no label anywhere in buildActivity output is prohibited', () => {
   const activity = buildActivity({
     receipts: [INTERRUPTED_RECEIPT],
