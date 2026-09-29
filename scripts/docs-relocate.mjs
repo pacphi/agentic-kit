@@ -139,7 +139,7 @@ export function main(argv) {
     const newFile = moves.find((row) => row.from === oldFile)?.to ?? oldFile;
     const result = rewriteText(fs.readFileSync(oldFile, 'utf8'), oldFile, newFile, rows, existsBefore);
     broken.push(...result.broken.map((link) => `${oldFile}: ${link}`));
-    if (result.rewritten) { links++; files++; }
+    if (result.rewritten) { links += result.rewritten; files++; }
     return { oldFile, newFile, ...result };
   });
   if (!dryRun) {
