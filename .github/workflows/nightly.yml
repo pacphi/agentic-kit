@@ -88,7 +88,12 @@ jobs:
       # same teardown abort on store-touching commands (`memory search` → correct
       # output, rc 134), so an `--only memory-routes` step added here would need the same
       # guard. Remove continue-on-error once that issue closes.
+      - name: Require Node 22.15+ for the macOS resolution hook
+        if: matrix.os == 'macos-latest'
+        run: node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 15)) { console.error('trace-ort requires Node 22.15+'); process.exit(1); }"
+
       - name: Deep proof against the live packages (learning)
+        if: matrix.os != 'macos-latest'
         continue-on-error: true
         env:
           HOME: ${{ runner.temp }}/kit-home
@@ -96,6 +101,52 @@ jobs:
           XDG_CONFIG_HOME: ${{ runner.temp }}/kit-home/.config
           APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
         run: node bin/agentic-kit.mjs status --refresh=live --only learning
+
+      - name: Deep proof against the live packages (learning, traced macOS)
+        if: matrix.os == 'macos-latest'
+        continue-on-error: true
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/kit-home
+          USERPROFILE: ${{ runner.temp }}/kit-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/kit-home/.config
+          APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
+          NODE_OPTIONS: --import=${{ github.workspace }}/scripts/trace-ort.mjs
+          TRACE_ORT_LOG: ${{ runner.temp }}/trace-ort.jsonl
+        run: |
+          set +e
+          node bin/agentic-kit.mjs status --refresh=live --only learning
+          learning_rc=$?
+          LEARNING_RC="$learning_rc" NODE_OPTIONS='' node --input-type=module -e '
+            import fs from "node:fs";
+            import crypto from "node:crypto";
+            const source = fs.readFileSync("scripts/trace-ort.mjs");
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/trace-ort-receipt.json", JSON.stringify({
+              sourceSha: process.env.GITHUB_SHA,
+              hookSha256: crypto.createHash("sha256").update(source).digest("hex"),
+              node: process.version, platform: process.platform, arch: process.arch,
+              learningExitCode: Number(process.env.LEARNING_RC),
+              tracePresent: fs.existsSync(process.env.TRACE_ORT_LOG),
+            }) + "\n");
+          '
+          exit "$learning_rc"
+
+      - name: Check macOS trace artifact
+        if: always() && matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          test -s "$RUNNER_TEMP/trace-ort.jsonl" || { echo '::error::trace-ort artifact absent or empty'; exit 1; }
+          test -s "$RUNNER_TEMP/trace-ort-receipt.json" || { echo '::error::trace-ort receipt absent or empty'; exit 1; }
+
+      - name: Upload macOS learning resolution trace
+        if: always() && matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-learning-ort-trace
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/trace-ort.jsonl
+            ${{ runner.temp }}/trace-ort-receipt.json
 
   clean-mac-setup:
     name: clean macOS setup (packed artifact)
@@ -134,7 +185,7 @@ jobs:
           ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
           AK_OLLAMA_PID=$!
           trap 'kill "$AK_OLLAMA_PID" 2>/dev/null || true' EXIT
-          for attempt in {1..30}; do
+          for ((ak_readiness_attempt=0; ak_readiness_attempt<30; ak_readiness_attempt++)); do
             curl --fail --silent http://127.0.0.1:11434/api/version >/dev/null && break
             sleep 1
           done
@@ -142,6 +193,7 @@ jobs:
           git -C "$AK_PROJECT" init
           (cd "$AK_PROJECT" && ak setup --yes --no-ruvnet-brain --aqe-embedding-mode local) | tee "$RUNNER_TEMP/setup.log"
           (cd "$AK_PROJECT" && ak x aqe-embedding verify --json) | tee "$RUNNER_TEMP/embedding-proof.json"
+          # shellcheck disable=SC2016 # JavaScript template literals are evaluated by Node.
           node --input-type=module -e '
             import fs from "node:fs";
             import path from "node:path";
