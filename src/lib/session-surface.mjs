@@ -149,3 +149,37 @@ export function classifySessionSurface(declaration = {}) {
   return { surface, initiator, label: sessionSurfaceLabel(surface), rawEvidence, attributes,
     thirdPartyProvider: null };
 }
+
+/** Shared display table: classification remains declaration-owned. */
+export const SESSION_SURFACE_LABELS = LABELS;
+export const SESSION_HOST_LABELS = Object.freeze({ claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' });
+export const SESSION_INITIATOR_LABELS = Object.freeze({ person: 'Person', automation: 'Automation', agent: 'Agent', 'imported-copy': 'Imported copy', unknown: 'Unknown' });
+export const SESSION_PROVIDER_LABELS = Object.freeze({ 'amazon-bedrock': 'Amazon Bedrock', 'google-vertex-ai': 'Google Vertex AI',
+  anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter', bedrock: 'Amazon Bedrock', vertex: 'Google Vertex AI',
+  foundry: 'Microsoft Foundry', gateway: 'Custom gateway', ollama: 'Ollama', lmstudio: 'LM Studio', 'local-openai': 'Local OpenAI-compatible provider' });
+
+/** Presentation accepts old snapshots without inventing a precise app mode. */
+export function sessionPresentation(origin = {}) {
+  const surface = Object.hasOwn(SESSION_SURFACE_LABELS, origin.surface) ? origin.surface : 'unknown';
+  const provider = origin.thirdPartyProviderBasis === 'assistant-model-id'
+    && ['amazon-bedrock', 'google-vertex-ai'].includes(origin.thirdPartyProvider)
+    ? SESSION_PROVIDER_LABELS[origin.thirdPartyProvider] : 'Unknown';
+  return { surface, label: SESSION_SURFACE_LABELS[surface],
+    initiator: Object.hasOwn(SESSION_INITIATOR_LABELS, origin.initiator) ? SESSION_INITIATOR_LABELS[origin.initiator] : 'Unknown', provider,
+    providerBasis: provider === 'Unknown' ? 'not established' : 'assistant-model-id; not network attestation',
+    note: !origin.surface && origin.origin === 'codex-desktop'
+      ? 'ChatGPT desktop app observed; mode not recorded in this legacy snapshot'
+      : !origin.surface && origin.origin === 'claude-desktop' ? 'Claude Desktop observed in this legacy snapshot' : '',
+  };
+}
+
+
+/** A recorded provider ID is source evidence, not network attestation. */
+export function sessionProviderPresentation(session = {}) {
+  const surface = sessionPresentation(session.sessionOrigin ?? {});
+  if (surface.provider !== 'Unknown') return { label: surface.provider, basis: surface.providerBasis };
+  const provider = typeof session.provider === 'string' ? session.provider.toLowerCase() : '';
+  return session.providerProvenance === 'observed' && Object.hasOwn(SESSION_PROVIDER_LABELS, provider)
+    ? { label: SESSION_PROVIDER_LABELS[provider], basis: 'recorded provider ID; not network attestation' }
+    : { label: 'Unknown', basis: 'not established' };
+}

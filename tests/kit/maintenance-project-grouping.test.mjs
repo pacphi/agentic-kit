@@ -54,7 +54,7 @@ test('should_filter_origin_memberships_as_overlapping_facets_without_duplicate_p
     [{ origin: 'claude-desktop', sessions: 2 }, { origin: 'codex-desktop', sessions: 3 }]);
   const either = runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['claude-desktop', 'codex-desktop'] } });
   assert.equal(either.total, 1);
-  assert.equal(runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['unknown'] } }).total, 1);
+  assert.equal(runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['unknown'] } }).total, 2);
 });
 test('should_report_session_counts_once_per_project_despite_multiple_installed_resources', () => {
   const inventory = build({ projects: [], discoveryProjects: [{ path: '/project', repository,
@@ -93,4 +93,15 @@ test('legacy basis and zero recovery keep their exact meaning; invalid basis is 
   assert.deepEqual(page.navigation.nodes[0].sessionOrigins, [
     origins[0], { origin: 'codex-desktop', sessions: 2 }, origins[2],
   ]);
+});
+test('surface evidence survives public focus and row DTOs and facets exclude zero recovery observations', () => {
+  const sessionSurfaces = [{ host: 'codex', surface: 'chatgpt-desktop-work', initiator: 'agent', sessions: 2,
+    countBasis: 'transcript-files', rawEvidence: { originator: ['codex_work_desktop'] } },
+  { host: 'claude', surface: 'cloud-session', initiator: 'automation', sessions: 0, countBasis: 'recovered-project-sighting' }];
+  const inventory = build({ projects: [], discoveryProjects: [{ path: '/project', repository, sessionSurfaces }] }, ['/project']);
+  const page = publicInventoryPage(runInventoryQuery(inventory, { scope: 'project', presentation: 'focus', facets: { sessionOrigin: ['chatgpt-desktop-work'] } }));
+  assert.equal(page.total, 1);
+  assert.equal(page.navigation.nodes[0].sessionSurfaces[0].host, 'claude');
+  assert.deepEqual(page.navigation.nodes[0].sessionSurfaces[1].rawEvidence.originator, ['codex_work_desktop']);
+  assert.equal(runInventoryQuery(inventory, { scope: 'project', facets: { sessionOrigin: ['cloud-session'] } }).total, 0);
 });

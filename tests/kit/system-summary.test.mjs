@@ -1,3 +1,5 @@
+import * as sessionVocabulary from '../../src/lib/session-surface.mjs';
+import { censusDisclosure } from '../../src/lib/census-presentation.mjs';
 // GET /api/system/summary (#237 M4, decision 8). The System page drew from
 // GET /api/system, which ships the whole persisted catalog: every presence
 // fact repeated in item.presence, item.consumerBindings, item.artifacts and
@@ -366,7 +368,7 @@ test('the projects summary drops per-project stack detection and node_modules ro
   }
   const row = summary.projects.projects[0];
   assert.deepEqual(Object.keys(row).sort(),
-    ['path', 'label', 'hosts', 'totalBytes', 'lastActivity', 'loc', 'remote', 'repository'].sort());
+    ['path', 'label', 'hosts', 'totalBytes', 'lastActivity', 'loc', 'remote', 'repository', 'sessionOrigins'].sort());
   assert.equal('stack' in row, false, 'framework/manifest detection is not rendered (system-projects.mjs langCell)');
   assert.equal('nodeModulesRoots' in row, false);
   assert.deepEqual(Object.keys(row.loc).sort(), ['total', 'languages', 'byLanguage'].sort());
@@ -374,7 +376,7 @@ test('the projects summary drops per-project stack detection and node_modules ro
   assert.deepEqual(Object.keys(row.repository).sort(), ['repositoryId', 'kind', 'root'].sort());
   assert.deepEqual(Object.keys(row.remote).sort(), ['status', 'webUrl', 'raw'].sort());
   const discovery = summary.projects.discoveryProjects[0];
-  assert.deepEqual(Object.keys(discovery).sort(), ['path', 'label', 'hosts', 'repository'].sort());
+  assert.deepEqual(Object.keys(discovery).sort(), ['path', 'label', 'hosts', 'repository', 'sessionOrigins'].sort());
 });
 
 test('the projects summary keeps byLanguage for a pre-languages loc, so an old carried-forward snapshot still renders bars', () => {
@@ -510,7 +512,9 @@ function systemClient({ fetchImpl } = {}) {
     'storageHostTotals', 'renderSysSummary', 'renderSysConsumers', 'renderSysReclaim', 'CHART_EXCLUDED_CATEGORIES',
     'transcriptIdOf', 'renderSysKpis'];
   const readout = load('system-readout', { esc, fmtNum, fmtTok, document, window }, readoutExports);
+  const surfaceHelpers = load('session-presentation', { ...sessionVocabulary, esc }, ['projectSurfacesHtml']);
   const projects = load('system-projects', {
+    ...surfaceHelpers, censusDisclosure,
     ...readout, esc, authHeaders: () => ({}), formatLocalDateTime: () => null, formatLocalDateTimeLong: () => null,
     shortSessionId: (s) => s, ago: () => 'just now', fmtNum, fmtTok, limAge, pct,
     repositoryTree,

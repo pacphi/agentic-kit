@@ -38,6 +38,7 @@
 // is the whole point of this module and no surface should render a project
 // count without one.
 import fs from 'node:fs';
+import { mergeSessionSurfaces } from './footprint/session-surfaces.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { discoverProjectSources } from './footprint/project-sources.mjs';
@@ -172,6 +173,7 @@ function mergeByIdentity(rows) {
     existing.hosts = [...new Set([...(existing.hosts ?? []), ...(row.hosts ?? [])])];
     existing.learningState = [...new Set([...(existing.learningState ?? []), ...(row.learningState ?? [])])];
     existing.learningOrigins = [...new Set([...(existing.learningOrigins ?? []), ...(row.learningOrigins ?? [])])].sort();
+    existing.sessionSurfaces = mergeSessionSurfaces([...(existing.sessionSurfaces ?? []), ...(row.sessionSurfaces ?? [])]);
     existing.sessions = (existing.sessions ?? 0) + (row.sessions ?? 0);
     if ((row.lastSeenMs ?? -1) > (existing.lastSeenMs ?? -1)) existing.lastSeenMs = row.lastSeenMs;
     // Prefer the shallowest path that carries learning state: a repo root over

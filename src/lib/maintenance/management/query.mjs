@@ -274,7 +274,9 @@ const FACET_EXTRACTORS = Object.freeze({
   project: (placement) => (placement.projectId ? [placement.projectId] : []),
   projectType: (placement) => placement.projectId ? [PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown'] : [],
   sessionOrigin: (placement) => placement.projectId
-    ? [...new Set(placement.sessionOrigins?.length ? placement.sessionOrigins.map((entry) => entry.origin) : ['unknown'])] : [],
+    ? [...new Set(Array.isArray(placement.sessionSurfaces)
+      ? placement.sessionSurfaces.filter((entry) => entry.sessions > 0).map((entry) => entry.surface)
+      : placement.sessionOrigins?.length ? placement.sessionOrigins.filter((entry) => entry.sessions > 0).map((entry) => entry.origin === 'claude-desktop' ? entry.origin : 'unknown') : ['unknown'])] : [],
   kind: (placement) => [placement.kind],
   consumer: (placement) => (placement.consumerHosts ?? []).filter((host) => ['claude', 'codex', 'opencode'].includes(host)),
   adapter: (placement) => [...new Set([...(placement.consumerHosts ?? []), ...(placement.kind === 'host-adapter' ? [placement.hostNamespace] : [])].filter((host) => typeof host === 'string' && host && !['claude', 'codex', 'opencode', 'agentic-kit'].includes(host)))],
@@ -406,7 +408,7 @@ function buildPlacementRow(placement, index) {
     ...(placement.projectId ? { projectKind: PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown' } : {}),
     ...(placement.projectId ? { repositoryId: placement.repositoryId ?? null, repositoryLabel: placement.repositoryLabel ?? null,
       repositoryEvidence: placement.repositoryEvidence ?? null, repositoryObservedAt: placement.repositoryObservedAt ?? null,
-      sessionOrigins: placement.sessionOrigins ?? [] } : {}),
+      sessionOrigins: placement.sessionOrigins ?? [], sessionSurfaces: placement.sessionSurfaces ?? null } : {}),
     displayName: placement.displayName,
     ...(index.resourcesById.get(placement.resourceId)?.installationSource ? { installationSource: index.resourcesById.get(placement.resourceId).installationSource } : {}),
     ...(description ? { description } : {}),

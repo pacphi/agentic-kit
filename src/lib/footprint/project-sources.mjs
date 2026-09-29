@@ -35,6 +35,7 @@ import { withDb } from '../sqlite.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
 import { presenceOf, statNode, UNKNOWN, walkTree } from './walk.mjs';
 import { inspectProjectIdentity } from './project-identity.mjs';
+import { mergeSessionSurfaces, sessionSurfaceSighting } from './session-surfaces.mjs';
 import { transcriptSessionOrigin } from './session-origin.mjs';
 import { isImportedCodexRollout } from '../codex-import-marker.mjs';
 import { inspectCodexImport, IMPORT_SCAN_BYTES } from './codex-import-discovery.mjs';
@@ -542,7 +543,7 @@ export function discoverProjectSources({
       const resolved = resolvePath(cwd, fsImpl);
       let row = byPath.get(resolved);
       if (!row) {
-        row = { path: resolved, hosts: new Set(), origins: new Set(), sessionOrigins: new Map(), sessions: 0, lastSeenMs: null };
+        row = { path: resolved, hosts: new Set(), origins: new Set(), sessionOrigins: new Map(), sessionSurfaces: [], sessions: 0, lastSeenMs: null };
         byPath.set(resolved, row);
       }
       row.hosts.add(host);
@@ -559,6 +560,7 @@ export function discoverProjectSources({
         row.sessionOrigins.set(origin, membership);
       }
       membership.sessions += weight;
+      row.sessionSurfaces.push(sessionSurfaceSighting(sighting, host, weight));
       membership.countBases.add(sighting.origin === 'encoded-dir' ? 'recovered-project-sighting'
         : host === 'opencode' ? 'database-sessions' : host === 'claude' ? 'declared-session-ids' : 'transcript-files');
       membership.evidence.add(origin === 'unknown' ? 'desktop-origin-not-declared' : declared.evidence);
@@ -582,6 +584,7 @@ export function discoverProjectSources({
       isGitRepo: exists && gitPresence(row.path, fsImpl),
       lastSeenMs: row.lastSeenMs,
       sessions: row.sessions,
+      sessionSurfaces: mergeSessionSurfaces(row.sessionSurfaces),
       sessionOrigins: [...row.sessionOrigins.values()].map((entry) => ({
         origin: entry.origin, sessions: entry.sessions, evidence: [...entry.evidence].filter(Boolean).sort(),
         countBasis: entry.countBases.size === 1 ? [...entry.countBases][0] : 'mixed-observations',

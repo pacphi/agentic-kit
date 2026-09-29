@@ -287,7 +287,8 @@ function censusBackedDiscovery() {
     readCensus: () => (last ? {
       everSeen: last.everSeen, onDisk: last.onDisk,
       gitRepos: last.gitRepos, learning: last.learning,
-      complete: last.complete,
+      complete: last.complete, importedExcluded: last.importedExcluded,
+      importedMixed: last.importedMixed, importedUnresolved: last.importedUnresolved,
     } : null),
   };
 }
@@ -378,8 +379,8 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot,
     intel: {
       selectedProjectKey: selected?.key ?? null,
       selectedProjectLabel: selected?.label ?? null,
-      projects: projects.map(({ key, label, path: projectPath, source, learningScope, learningScopeEvidence, learningOrigins, learningObservedAt }) => (
-        { key, label, path: projectPath, source,
+      projects: projects.map(({ key, label, path: projectPath, source, hosts, sessionOrigins, sessionSurfaces, learningScope, learningScopeEvidence, learningOrigins, learningObservedAt }) => (
+        { key, label, path: projectPath, source, hosts, sessionOrigins, sessionSurfaces,
           learningScope: ['repository', 'worktree', 'user'].includes(learningScope) ? learningScope : 'unknown',
           learningScopeEvidence: learningScopeEvidence ?? 'unclassified', learningObservedAt: learningObservedAt ?? null,
           learningOrigins: ['claude-desktop', 'codex-desktop'].filter((origin) => learningOrigins?.includes(origin)) }
