@@ -63,7 +63,7 @@ export function brainPluginRows(state) {
 /** One status row for the installed/release state. A GitHub tag without the
  *  installer's required bundle asset is visible but deliberately non-actionable:
  *  giving it a fix would make `ak sync` prescribe a download known to 404. */
-export function brainReleaseRow(b) {
+export function brainReleaseRow(b, { retry = false } = {}) {
   const releaseBlocked = !!b.latest && b.releaseAssetAvailable === false;
   const releaseUnverified = !!b.latest && b.releaseAssetAvailable == null;
   if (b.kbState === 'unknown') {
@@ -94,7 +94,7 @@ export function brainReleaseRow(b) {
     return row('ruvnet-brain', 'info',
       `ruvnet-brain ${have} retained; release v${b.latest} bundle availability awaits a live sync check`);
   }
-  const held = b.outdated ? activeHeldRefresh(b) : null;
+  const held = b.outdated && !retry ? activeHeldRefresh(b) : null;
   if (held) {
     // The installer or the bundle's updater refused this exact pair (or ran
     // without landing anything). Re-running it on every sync cannot succeed and
@@ -123,12 +123,12 @@ export default {
   id: 'ruvnet-brain',
   // A Brain drift the caller already holds (versionEvidence: what ak sync
   // looked up or read from the cache, ADR-0063) is used as given.
-  async collect({ cfg, refresh = false, versionEvidence }) {
+  async collect({ cfg, refresh = false, versionEvidence, retryBrain = false }) {
     const rows = [];
     if (!cfg.ruvnetBrain) return rows;
     try {
       const b = versionEvidence?.brain ?? await ruvnetBrainDrift({ force: refresh });
-      rows.push(brainReleaseRow(b));
+      rows.push(brainReleaseRow(b, { retry: retryBrain }));
     } catch (e) {
       rows.push(row('ruvnet-brain', 'warn', `ruvnet-brain check unavailable: ${e.message}`));
     }

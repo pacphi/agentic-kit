@@ -587,7 +587,7 @@ test('the plan read and the converge proof get exactly these collect() arguments
     pkgRoot: PKG_ROOT, cwd: PROJECT, dejaVuAdapter: calls[0].dejaVuAdapter,
     dejaVuPlanOptions: { allowUpgrade: false }, record, versionEvidence: {},
   });
-  assert.deepEqual(calls[0], expected(false));
+  assert.deepEqual(calls[0], { ...expected(false), retryBrain: false });
   assert.deepEqual(calls[1], expected(true));
   assert.equal(calls[1].dejaVuAdapter, calls[0].dejaVuAdapter);
 });
