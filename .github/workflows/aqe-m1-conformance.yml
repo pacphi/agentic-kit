@@ -30,13 +30,13 @@ jobs:
       - name: Allocate private artifact prefix and caches
         run: |
           mkdir -p "$RUNNER_TEMP/aqe-m1-artifacts" "$RUNNER_TEMP/aqe-m1-prefix" "$RUNNER_TEMP/aqe-m1-home"
-          touch "$RUNNER_TEMP/aqe-m1-home/npmrc"
+          touch "$RUNNER_TEMP/aqe-m1-home/npmrc" "$RUNNER_TEMP/aqe-m1-home/global-npmrc"
           {
             echo "AK_AQE_PREFIX=$RUNNER_TEMP/aqe-m1-prefix"
             echo "M1_ARTIFACTS=$RUNNER_TEMP/aqe-m1-artifacts"
             echo "npm_config_cache=$RUNNER_TEMP/aqe-m1-npm-cache"
             echo "npm_config_userconfig=$RUNNER_TEMP/aqe-m1-home/npmrc"
-            echo "npm_config_globalconfig=$RUNNER_TEMP/aqe-m1-home/npmrc"
+            echo "npm_config_globalconfig=$RUNNER_TEMP/aqe-m1-home/global-npmrc"
             echo "HOME=$RUNNER_TEMP/aqe-m1-home"
             echo "USERPROFILE=$RUNNER_TEMP/aqe-m1-home"
             echo "XDG_CONFIG_HOME=$RUNNER_TEMP/aqe-m1-home/config"
