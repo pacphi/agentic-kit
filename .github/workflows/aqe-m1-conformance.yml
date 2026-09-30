@@ -1,0 +1,106 @@
+name: aqe-m1-conformance
+
+# Approval-gated disposable artifact proof; never part of #262's timing legs.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      AK_AQE_EXPECTED_VERSION: 3.14.6
+      AK_AQE_MCP_LOCK_LIVE: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Allocate private artifact prefix and caches
+        run: |
+          mkdir -p "$RUNNER_TEMP/aqe-m1-artifacts" "$RUNNER_TEMP/aqe-m1-prefix" "$RUNNER_TEMP/aqe-m1-home"
+          touch "$RUNNER_TEMP/aqe-m1-home/npmrc"
+          {
+            echo "AK_AQE_PREFIX=$RUNNER_TEMP/aqe-m1-prefix"
+            echo "M1_ARTIFACTS=$RUNNER_TEMP/aqe-m1-artifacts"
+            echo "npm_config_cache=$RUNNER_TEMP/aqe-m1-npm-cache"
+            echo "npm_config_userconfig=$RUNNER_TEMP/aqe-m1-home/npmrc"
+            echo "npm_config_globalconfig=$RUNNER_TEMP/aqe-m1-home/npmrc"
+            echo "HOME=$RUNNER_TEMP/aqe-m1-home"
+            echo "USERPROFILE=$RUNNER_TEMP/aqe-m1-home"
+            echo "XDG_CONFIG_HOME=$RUNNER_TEMP/aqe-m1-home/config"
+            echo "XDG_STATE_HOME=$RUNNER_TEMP/aqe-m1-home/state"
+            echo "XDG_CACHE_HOME=$RUNNER_TEMP/aqe-m1-home/cache"
+            echo "APPDATA=$RUNNER_TEMP/aqe-m1-home/appdata"
+            echo "LOCALAPPDATA=$RUNNER_TEMP/aqe-m1-home/localappdata"
+          } >> "$GITHUB_ENV"
+
+      - name: Acquire and verify the exact AQE tarball
+        run: |
+          npm pack agentic-qe@3.14.6 --ignore-scripts --json --pack-destination "$M1_ARTIFACTS" > "$M1_ARTIFACTS/aqe-pack.json"
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { createHash } from 'node:crypto';
+          const root = process.env.M1_ARTIFACTS;
+          const [pack] = JSON.parse(fs.readFileSync(path.join(root, 'aqe-pack.json')));
+          const expected = 'sha512-ObNw+nFHj4Kz7JYulAdBSJ5/QP5lmFeRTvwBRalUXeQSQZu5PoN4Xp3ZTug3q5EoHWXVd3+xdBdlbtgqq+8+bg==';
+          const actual = 'sha512-' + createHash('sha512').update(fs.readFileSync(path.join(root, pack.filename))).digest('base64');
+          if (pack.version !== '3.14.6' || pack.integrity !== expected || actual !== expected) throw Error('AQE artifact identity mismatch');
+          JS
+
+      # Disable package-wide lifecycle execution. The separately named SQLite
+      # rebuild below executes third-party code on a disposable runner; private
+      # HOME/prefix/cache are isolation, not a filesystem/network sandbox.
+      - name: Install AQE without lifecycle scripts
+        run: |
+          npm install -g --ignore-scripts --prefix "$AK_AQE_PREFIX" "$M1_ARTIFACTS/agentic-qe-3.14.6.tgz"
+          echo "AK_AQE_PACKAGE_ROOT=$(npm root -g --prefix "$AK_AQE_PREFIX")/agentic-qe" >> "$GITHUB_ENV"
+          npm ls -g --prefix "$AK_AQE_PREFIX" --all --json > "$M1_ARTIFACTS/aqe-dependency-tree.json"
+
+      - name: Prepare the named native SQLite dependency
+        run: npm rebuild better-sqlite3 --prefix "$AK_AQE_PACKAGE_ROOT"
+
+      - name: Pack the exact checkout and record its identity
+        run: |
+          npm pack --ignore-scripts --json --pack-destination "$M1_ARTIFACTS" > "$M1_ARTIFACTS/kit-pack.json"
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { createHash } from 'node:crypto';
+          const root = process.env.M1_ARTIFACTS;
+          const [pack] = JSON.parse(fs.readFileSync(path.join(root, 'kit-pack.json')));
+          const sha256 = createHash('sha256').update(fs.readFileSync(path.join(root, pack.filename))).digest('hex');
+          fs.writeFileSync(path.join(root, 'kit-identity.json'), JSON.stringify({ source: process.env.GITHUB_SHA, filename: pack.filename, sha256, integrity: pack.integrity }, null, 2));
+          fs.appendFileSync(process.env.GITHUB_ENV, `M1_KIT_TARBALL=${path.join(root, pack.filename)}\n`);
+          JS
+
+      - name: Extract the packed kit
+        run: |
+          mkdir -p "$M1_ARTIFACTS/kit"
+          tar -xzf "$M1_KIT_TARBALL" -C "$M1_ARTIFACTS/kit"
+          echo "AK_KIT_PACKAGE_ROOT=$M1_ARTIFACTS/kit/package" >> "$GITHUB_ENV"
+
+      - name: Prove real MCP ownership and packed-kit busy startup
+        run: node scripts/run-tests.mjs focus tests/live/aqe-mcp-lock-conformance.test.mjs > "$M1_ARTIFACTS/conformance.log" 2>&1
+
+      - name: Retain artifact identities and conformance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: aqe-m1-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/aqe-m1-artifacts/*.json
+            ${{ runner.temp }}/aqe-m1-artifacts/*.log
+          if-no-files-found: warn
