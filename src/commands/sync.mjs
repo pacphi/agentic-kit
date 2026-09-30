@@ -32,6 +32,7 @@ import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, collectIntegrationFacts, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
 import { lookUpPlanVersions, skippedVersionEvidence } from './sync/plan-versions.mjs';
+import { brainRetryError } from './sync/brain-retry.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { runScaffoldAgentsFix } from '../lib/scaffold.mjs';
@@ -137,6 +138,7 @@ export async function refreshPlanHosts(flags, cwd, probes = {}) {
 export const options = {
   'dry-run': { type: 'boolean', default: false },
   'no-upgrade': { type: 'boolean', default: false },
+  'retry-brain': { type: 'boolean', default: false },
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
   skip: { type: 'string', multiple: true },
@@ -183,6 +185,11 @@ that fix anyway, so it is still listed under "needs your action" instead of
 version lookup out: the plan reads the latest versions ak last recorded for it.
 An unknown name is rejected with the list of names sync accepts.
 
+--retry-brain permits one attempt past a fresh Brain refusal hold. It leaves
+installer safety checks intact and does not clear the stored refusal. A new
+refusal starts a fresh hold. --dry-run previews only; --no-upgrade, an explicit
+--skip ruvnet-brain, or disabled Brain management cannot be overridden.
+
 --json writes every human line (the plan, step results, prompts) to stderr
 and exactly one JSON object to stdout, pretty-printed as \`ak status --json\`:
   { plan[], steps[{id, ok, detail}], unresolved[], skipped[],
@@ -202,6 +209,7 @@ Options:
   --dry-run            print the plan and stop; like a real sync it checks
                        the latest versions online first, and records nothing
   --no-upgrade         heal only; don't upgrade ruflo/aqe/kit versions
+  --retry-brain        permit one Brain retry past a fresh hold
   --skip SUBSYSTEM     leave SUBSYSTEM out of this run (repeatable, or
                        comma-separated: --skip natives,ruvnet-brain)
   --yes                approve disclosed repairs without prompting
@@ -1078,6 +1086,12 @@ async function converge({
     result.error = skipError;
     return 2;
   }
+  const retryError = brainRetryError({ flags, skip, cfg: flags['retry-brain'] ? loadKitConfig() : undefined });
+  if (retryError) {
+    fail(`ak sync: ${retryError}`);
+    result.error = retryError;
+    return 2;
+  }
   // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
   // stamped before an upstream release claims "all current" and the upgrade
   // never reaches the plan (the old force at apply time sat behind the very
@@ -1109,6 +1123,7 @@ async function converge({
   // post-repair state, not what was cached before it.
   const rows = await collectFn({
     pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false, versionEvidence,
+    retryBrain: flags['retry-brain'] === true,
   });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair

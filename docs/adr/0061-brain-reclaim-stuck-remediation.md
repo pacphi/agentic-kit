@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
-- **Updated:** 2026-09-30 — #271 adds bounded hold expiry and separate KB absence/access evidence; full explicit-retry recovery is being verified separately.
+- **Updated:** 2026-09-30 — #271 adds bounded hold expiry, separate KB absence/access evidence and one-shot sync retry; disposable kit-path proof is separate from live upstream recovery.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (machine-footprint metrics; this
   record deliberately does not add a new footprint subsystem there — see §4),
@@ -110,6 +110,12 @@ refusal forever.
    A new refusal binds the null installed side and restores the normal hold. Access errors
    remain unknown/manual, never automatic fresh-install evidence. Missing/unverified release
    assets still block installer actions. No KB or snapshot deletion is automated.
+9. **Explicit one-shot retry.** `ak sync --retry-brain` bypasses a fresh refusal hold only
+   during plan collection. The stored refusal remains until installation succeeds or records
+   a new refusal. Postcondition collection uses ordinary hold semantics; no retry loop is added.
+   Dry-run only previews. No-upgrade, explicit Brain skip and disabled management conflict
+   with the flag and are rejected before lookups/repairs. Unknown KB access or unavailable
+   release assets remain blocked. The flag is not a cross-process attempt lock.
 
 ## Consequences
 
