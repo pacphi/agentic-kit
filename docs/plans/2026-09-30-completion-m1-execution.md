@@ -109,6 +109,31 @@ No live conformance, workaround retirement, issue publication or closure is clai
 
 ## Integration and handoff
 
+### Local checkpoint, 2026-09-30
+
+Preserved planning baseline e5f9842; approvals/research 9c352ba; execution scope 3a666ea.
+Local implementation units: b535975 (bounded hold expiry), fb48cb3 (missing/unreadable KB
+classification), dfb5609 (guarded one-shot retry), 6ab1c5e (schema-oracle optimization).
+The schema-oracle optimization is a
+separate test-only unit; it changes no assertions and remains a Windows measurement candidate.
+
+Integrated focused verification: 191/191 tests passed through scripts/run-tests.mjs with
+clean real-state tripwire and own-root hygiene. Types, affected ESLint checks (including
+the repository's complexity ceiling of 50), Markdown across 245 files, full offline links
+(0 errors) and guarded build/package dry-run passed. Build checked 498 shipped files and
+552 package entries. Read-only review found no retry source defect; the requested real
+status-collector integration and retry safety cases were added and passed.
+
+The earlier full-unit gate failed four Playwright-dependent tests because this worktree
+has no installed development dependencies; coverage floors passed, but the full gate did
+not. Development-dependency installation approval remains pending. An earlier focused run
+also failed its tripwire when the real Codex config changed concurrently/unattributed;
+no real config was restored or edited. Sandbox path assertions and subsequent clean guarded
+runs provide usable local proof without attributing or waiving that earlier incident.
+
+No Windows timing acceptance, real AQE-holder conformance, issue closure, release or upstream
+recovery is claimed. Continue P00 reconciliation and P03 preparation from this branch.
+
 One logical unit commit per independently verifiable change; no attribution trailers.
 An independent review precedes handoff. Revalidate exact integrated source when new findings
 change it. Local green results do not authorize a merge/release or establish Windows runtime
