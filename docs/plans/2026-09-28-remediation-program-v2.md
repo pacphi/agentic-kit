@@ -4,6 +4,12 @@
 
 ## Status
 
+**2026-09-30 current update:** #285 merged into main as `0511d575`; its tree equals
+the reviewed final develop tree. V1–V7 delivery is retained, not replayed. This plan
+remains active for M1 timing, conformance and separately gated operational closeout.
+The [M1 successor ledger](2026-09-30-completion-m1-closeout-ledger.md) maps all 246
+historical rows and all eight completion clauses. The dated checkpoint below is historical.
+
 Active under the maintainer-confirmed [develop execution plan](2026-09-28-remediation-v2-develop-execution.md)
 (2026-09-28). V1 #267 and V2 #264/#266/#269 are delivered; #262 still needs residual
 Windows timing evidence. #251 is done, and the alpha.60 release commit is on `main`.

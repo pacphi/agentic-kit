@@ -6,6 +6,12 @@
 
 ## Status
 
+**2026-09-30 current update:** final PR #285 merged on 2026-09-29 at 22:06:48 UTC
+as main `0511d575`, with the same tree as reviewed develop `04e3de3c`.
+Phase D's final integration action is complete. Phase E remains separately gated;
+the [M1 successor ledger](2026-09-30-completion-m1-closeout-ledger.md) retains its
+open timing, conformance and operational conditions. The prior dated checkpoint follows.
+
 **Active and confirmed** — the maintainer approved this execution plan on 2026-09-28.
 Bootstrap and V1–V6 are integrated; V7 is in final validation. Approval covers isolated implementation work,
 unit commits, feature PRs into `develop`, and conditional squash integration; the final
@@ -227,10 +233,12 @@ Dependencies: V3–V6 merged and develop green. Branch: `chore/v2-close-out`. Si
   on develop from shipped on main; close only when the issue's own completion condition holds.
 - [x] Run docs alignment and archive completed branch plans with `scripts/docs-relocate.mjs`.
   Keep this program's plan active while main approval and operational work remain pending.
-- [ ] Open final `develop` → `main` PR with scope/decision matrix, feature PRs and unit commit
+- [x] Open final `develop` → `main` PR with scope/decision matrix, feature PRs and unit commit
   mappings, exact final source, tests, Windows evidence, release notes and known limitations.
   Refresh main into develop first if necessary, review resulting changes, and rerun gates.
   Leave the final PR open for human review; do not merge it.
+  Historical action completed by #285 and the subsequent human-approved main merge;
+  no new merge authorization follows from this receipt.
 
 Review-ready means all code and documentation changes are integrated and validated, with
 remaining human/external actions named. It does not claim publication, machine cleanup,

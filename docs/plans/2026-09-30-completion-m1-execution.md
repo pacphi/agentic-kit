@@ -5,6 +5,9 @@
 **Active**, authorized 2026-09-30: isolated M1 fixes, guarded tests and local unit commits.
 Base source main 0511d575; preserved planning commits e5f9842 and 9c352ba.
 Existing worktree: agentic-kit-completion-plan; implementation branch: fix/completion-m1.
+The maintainer confirmed one branch per milestone: finish M1 here, then provide the
+new-session handoff prompt before beginning the next milestone. Related repository issue
+closeout is authorized only after its criteria pass; exact upstream contributions remain gated.
 The [completion program](2026-09-29-completion-program.md) governs the full milestone;
 this document defines the first locally authorized slice, not a waiver of other M1 gates.
 
@@ -27,6 +30,9 @@ Exact writer claims for the initial slice:
 - Brain hold state: src/lib/ruvnet-brain.mjs, its status section and related tests.
 - One-shot retry integration: src/commands/sync.mjs and, only as needed, status collection/
   documented help and dedicated retry tests.
+- AQE conformance preparation: tests/live/aqe-live-lock-process.mjs, shared lock fixtures,
+  MCP session/lock conformance and their kit tests; .github/workflows/aqe-m1-conformance.yml
+  is a dispatch-only proposal. Root alone owns workflow integration; no dispatch authorized.
 - Windows experiment: tests/kit/aqe-store-merge-fixture.test.mjs; original assertions stay.
 - Brain contract: ADR-0061, troubleshooting and current CLI guidance.
 - Controller-only integration: this plan, completion program/ledger and contribution drafts.
@@ -40,6 +46,8 @@ Exact writer claims for the initial slice:
 - [x] Documentation baseline: 17 guarded tests, Markdown and full offline links passed.
 - [ ] Map original plan gates and retained 246-row remediation scope matrix to merged,
   inherited, upstream-blocked and approval-pending evidence without repeating completed work.
+  All identifiers now have a disposition in the
+  [M1 successor ledger](2026-09-30-completion-m1-closeout-ledger.md); final gate receipts remain.
 - [ ] Carry release/install, real-data and cleanup gates as open until separately approved.
 
 The original eight source plans and snapshots are preserved. P00's entire reconciliation is
@@ -50,7 +58,8 @@ upstream-release closure becomes an artificial prerequisite for unrelated local 
 
 ADR-0061 is Accepted, dated 2026-09-27, with a recorded implementation subset. Its historical
 fresh-install claim does not prove the full held-sync path: activeHeldRefresh currently matches
-only release pairs. Verify the kit path with disposable fixtures; upstream behavior stays
+only release pairs at the baseline. Committed M1 units now add bounded expiry and explicit
+retry. Verify the kit path with disposable fixtures; upstream behavior stays
 unverified until a separately authorized released-artifact conformance run.
 
 1. Add failing recovery tests before production edits: configured/default TTL boundaries,
@@ -101,11 +110,41 @@ validated here. Strict storage-error failure behavior must remain.
 - [ ] Identify/prepare disposable real-MCP-holder and packed-CLI proof; startup busy must be
   distinguished from overall embedding/corpus-check exit status.
 - [ ] Prepare cooperative Windows-compatible holder shutdown and failure-path verification.
+EOF/forced-stop fixtures and real MCP protocol/lock-PID/packaged-command harness are now
+  prepared. Capture is bounded; forced stop and watchdog cannot count as graceful proof.
+  Committed as 03bb230 (process/fixture bounds) and 40c2707 (real MCP/packed-kit harness
+  plus dispatch-only workflow). Live execution remains separately gated.
 - [ ] Prepare bounded Windows conformance invocation using existing workflow conventions,
   preserving ordinary CI job timing. Installation and dispatch remain approval gates.
 - [ ] Refresh candidate adoption/attention rows; #535 successor #786/#787 remain visible.
 
 No live conformance, workaround retirement, issue publication or closure is claimed.
+
+Read-only watcher refresh on 2026-09-30 established three actual `fired` session records,
+ledger commit 4704a58 and notice read-back; see the M1 successor ledger. Routine completion
+and resulting PRs remain unverified. No new trigger was executed by this session.
+
+### Prepared acquisition and proof request
+
+Selected candidate: published agentic-qe 3.14.6, rechecked at npm on 2026-09-30.
+Expected tarball integrity:
+`sha512-ObNw+nFHj4Kz7JYulAdBSJ5/QP5lmFeRTvwBRalUXeQSQZu5PoN4Xp3ZTug3q5EoHWXVd3+xdBdlbtgqq+8+bg==`.
+Acquire only in a disposable private prefix with private HOME/config/cache; verify tarball
+bytes and record the resolved dependency tree. Disable lifecycle scripts; the only proposed
+native preparation is an explicitly approved better-sqlite3 rebuild. This executes third-party
+code; private paths are isolation, not a filesystem/network sandbox. Do not run AQE postinstall.
+
+Pack and hash the exact kit checkout, extract separately, then run the checkout harness:
+`node scripts/run-tests.mjs focus tests/live/aqe-mcp-lock-conformance.test.mjs` with
+AK_AQE_MCP_LOCK_LIVE=1, exact package/version/prefix roots and the extracted kit root.
+The harness discovers initialize/tools-list without model/tool execution, requires the MCP
+PID to own patterns.rvf.lock, checks unchanged bytes and ordinary busy startup, and records
+semantic readiness separately. Require EOF/server-stop/no-watchdog/owned-lock release proof.
+Local acquisition/native execution and hosted dispatch each remain approval gates.
+
+The manual workflow performs the same version/integrity-bound proof on Linux/macOS/Windows,
+outside #262's ordinary timing legs. Any missing native payload or unmet ownership boundary
+fails conformance; it never becomes an inferred pass or an automatic broader install.
 
 ## Integration and handoff
 
@@ -126,10 +165,20 @@ status-collector integration and retry safety cases were added and passed.
 
 The earlier full-unit gate failed four Playwright-dependent tests because this worktree
 has no installed development dependencies; coverage floors passed, but the full gate did
-not. Development-dependency installation approval remains pending. An earlier focused run
+not. The maintainer approved worktree-only locked development dependencies on 2026-09-30,
+with isolated caches, scripts disabled and no browser downloads; the full rerun follows.
+Other installation gates remain unchanged. An earlier focused run
 also failed its tripwire when the real Codex config changed concurrently/unattributed;
 no real config was restored or edited. Sandbox path assertions and subsequent clean guarded
 runs provide usable local proof without attributing or waiving that earlier incident.
+
+Subsequent dependency-resolved full rerun passed: 6,464 unit tests, seven platform skips,
+all legacy suites; coverage 94.18% lines / 83.85% branches / 93.50% functions.
+Browser verification passed 514 assertions plus 16 tests using existing Chrome, with no
+browser download. Types, lint (0 errors; 78 existing warnings), complexity, Markdown,
+offline links, guarded build and manual-workflow actionlint passed. Native AQE conformance
+remains gated; its two opt-in tests were skipped, while 13 transport/process fixtures passed.
+These fixture passes do not validate a released AQE package or Windows native behavior.
 
 No Windows timing acceptance, real AQE-holder conformance, issue closure, release or upstream
 recovery is claimed. Continue P00 reconciliation and P03 preparation from this branch.
