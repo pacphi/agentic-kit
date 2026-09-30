@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
+- **Updated:** 2026-09-30 — #271 adds bounded hold expiry using the configured version-check TTL; full missing-KB/explicit-retry recovery is being verified separately.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (machine-footprint metrics; this
   record deliberately does not add a new footprint subsystem there — see §4),
@@ -87,16 +88,22 @@ refusal forever.
    refused for a Brain with private stores, *after* downloading the whole bundle. `ak sync`
    auto-running this for every user hitting a reclaim-stuck hold would trade one silent failure
    mode for a more expensive one. The user decides.
-5. **No new install-routing logic.** `installRuvnetBrain()` already does the right thing once
-   `--uninstall` has run: `updaterPresent()` becomes false (no `forge-update.mjs` on disk),
+5. **Installer-level fresh routing, not a complete sync proof.** Once the installer is reached
+   after `--uninstall`, `updaterPresent()` becomes false (no `forge-update.mjs` on disk),
    `present()` stays true (the plugin cache survives), so the existing pinned
    `--force --version v<tag>` fresh-install branch fires and `recordRelease` clears the hold on
-   success. This record adds a test that pins that existing behavior, not new code for it.
+   success. The original test pins installer dispatch, not sync reaching it while a hold applies.
+   The historical 4.3.29 escape hatch above is not a guarantee for later upstream installers.
 6. **No new footprint-metrics subsystem.** [ADR-0025](0025-machine-footprint-metrics.md) owns
    machine footprint reporting; a one-sentence mention of a legacy-snapshot count inside an
    already-existing warning row is not a new dashboard card, and this record does not attempt to
    fold the two together — that's future work if the legacy-snapshot signal proves worth
    surfacing outside this one warning.
+7. **Bounded hold expiry (#271).** A hold applies only to its release pair and a valid fresh
+   timestamp. The configured positive finite version-check TTL applies, defaulting to 24 hours
+   for invalid values. Expired, missing, malformed or future hold timestamps permit a half-open
+   attempt; a new refusal records a fresh hold. An unreadable current clock does not authorize
+   expiry. Status evaluation never deletes the stored refusal or private snapshots.
 
 ## Consequences
 

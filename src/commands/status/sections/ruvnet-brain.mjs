@@ -22,11 +22,12 @@ function legacySnapshotNote() {
   }
 }
 
-/** ADR-0061: --update can never clear this refusal (the legacy snapshots it is
- *  stuck on are never touched by --update); --uninstall + reinstall verified to. */
+/** ADR-0061: preserve the historical workaround without promising that a
+ * current installer bypasses its own snapshot-retention checks. */
 function reclaimStuckFix() {
   return '`npx ruvnet-brain --uninstall` (removes only the KB bundle) then `ak sync` reinstalls fresh '
-    + `and clears the version block${legacySnapshotNote()} — see upstream stuinfla/ruvnet-brain#335; `
+    + `when the installer permits it${legacySnapshotNote()}; the current installer may still refuse — `
+    + 'preserve private snapshots and resolve its named cause; see upstream stuinfla/ruvnet-brain#335; '
     + 'or set "ruvnetBrain": false in kit.json to stop ak managing the Brain';
 }
 
@@ -85,8 +86,8 @@ export function brainReleaseRow(b) {
   if (held) {
     // The installer or the bundle's updater refused this exact pair (or ran
     // without landing anything). Re-running it on every sync cannot succeed and
-    // re-downloads the bundle, so sync does not act on the row until either
-    // release changes; the options are the user's, as a manual fix.
+    // re-downloads the bundle, so sync waits for this fresh hold's TTL or a
+    // release change; manual recovery remains the user's choice.
     const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
     const fix = BRAIN_RECLAIM_STUCK.test(held.detail)
       ? reclaimStuckFix()
@@ -94,7 +95,7 @@ export function brainReleaseRow(b) {
         + 'to stop ak managing the Brain';
     return row('ruvnet-brain', 'warn',
       `ruvnet-brain ${have} retained; the refresh to v${b.latest} was refused (${held.detail}). `
-      + 'ak sync will not retry it until either release changes',
+      + 'ak sync waits for the hold to expire or either release to change before retrying',
       fix, { repair: 'manual' });
   }
   if (b.outdated) {
