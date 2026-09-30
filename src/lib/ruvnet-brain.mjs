@@ -128,6 +128,18 @@ export function present() {
     || fs.existsSync(pluginCache());
 }
 
+/** Distinguish confirmed KB absence from an unreadable or unusable entrypoint. */
+export function kbState() {
+  try {
+    const entrypoint = path.join(kbDir(), 'forge-mcp-all.mjs');
+    if (!fs.statSync(entrypoint).isFile()) return 'unknown';
+    fs.accessSync(entrypoint, fs.constants.R_OK);
+    return 'present';
+  } catch (error) {
+    return error.code === 'ENOENT' ? 'missing' : 'unknown';
+  }
+}
+
 /** Installed plugin version, or null. Reads the plugin manifest; falls back to
  *  the version-named subdir under the plugin cache. */
 export function installedVersion() {
@@ -229,7 +241,7 @@ export function recordInstalledRelease(tag, cfg = loadKitConfig()) {
 export function recordHeldRefresh({ detail, latest }, cfg = loadKitConfig()) {
   if (!latest) return;
   const cur = cfg.versionCheck?.ruvnetBrain ?? {};
-  const installed = installedReleaseOnDisk() ?? cur.installedRelease ?? null;
+  const installed = kbState() === 'missing' ? null : installedReleaseOnDisk() ?? cur.installedRelease ?? null;
   cfg.versionCheck = {
     ...cfg.versionCheck,
     ruvnetBrain: {
@@ -318,7 +330,9 @@ export async function drift({ force = false, cacheOnly = false, record = true, f
   const observed = fresh ? recordedRelease(cached, 'cache')
     : cacheOnly ? recordedRelease(cached, 'cache-fallback')
       : await lookUpRelease(cfg, cached, { record, fetchImpl });
-  const installedRelease = installedReleaseOnDisk() ?? cached.installedRelease ?? null;
+  const knowledgeBaseState = kbState();
+  const installedRelease = knowledgeBaseState === 'missing'
+    ? null : installedReleaseOnDisk() ?? cached.installedRelease ?? null;
   return {
     ...classifyDrift({ present: present(), installedRelease, latest: observed.latest }),
     releaseAssetAvailable: observed.releaseAssetAvailable,
@@ -327,5 +341,7 @@ export async function drift({ force = false, cacheOnly = false, record = true, f
     pluginVersion: installedVersion(),
     heldRefresh: cached.heldRefresh ?? null,
     holdTtlHours: cfg.versionCheck?.ttlHours ?? 24,
+    kbState: knowledgeBaseState,
+    lastRecordedRelease: cached.installedRelease ?? null,
   };
 }
