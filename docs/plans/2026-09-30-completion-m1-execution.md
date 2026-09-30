@@ -124,6 +124,35 @@ Read-only watcher refresh on 2026-09-30 established three actual `fired` session
 ledger commit 4704a58 and notice read-back; see the M1 successor ledger. Routine completion
 and resulting PRs remain unverified. No new trigger was executed by this session.
 
+### Exact upstream reply drafts, unpublished
+
+These address the three live report reply items. Each requires the maintainer's approval
+of its exact text before posting; silence and milestone authority do not authorize publication.
+
+**AQE #528:**
+Thanks for confirming the closure. Agentic-kit records the in-process MCP entry from 3.14.4.
+We have prepared a bounded 3.14.6 conformance harness for a real MCP holder plus the packed
+kit command, with native Windows proof still pending. We will share the artifact-bound
+results after execution; transport discovery alone will not be reported as provider readiness.
+
+**AQE #532:**
+Thanks for confirming the closure. Agentic-kit documents the 3.14.4 exclusive-platform
+initialization option. We retain the Codex guidance constraint until the selected released
+artifact passes full/compact/none, foreign-text preservation, repeated-init and platform
+verification checks. Closure of the upstream issue is recorded separately from that proof.
+
+**AQE #535:**
+We have recorded #535 as closed and will retain #786/#787 as separate open follow-ups.
+The released 3.14.6 candidate is not yet an agentic-kit conformance verdict. Our references
+will distinguish the confirmed fixes from test-generation quality and coherence-text limits;
+we have no fresh goap_execute proof to claim.
+
+Manual #756 refresh: PR #767 merged c2ca85185c7cb4aea29dd52939ac913887388edf on
+2026-09-28. GitHub compare proves this commit is an ancestor of v3.14.5 (behind=0,
+ahead=29); npm confirms 3.14.5 publication/integrity metadata. This resolves source/tag
+ancestry, not distribution behavior. Keep its conformance constraint until the actual
+package passes; no retirement or automatic dispatch was performed here.
+
 ### Prepared acquisition and proof request
 
 Selected candidate: published agentic-qe 3.14.6, rechecked at npm on 2026-09-30.
