@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
-- **Updated:** 2026-09-30 — #271 adds bounded hold expiry using the configured version-check TTL; full missing-KB/explicit-retry recovery is being verified separately.
+- **Updated:** 2026-09-30 — #271 adds bounded hold expiry and separate KB absence/access evidence; full explicit-retry recovery is being verified separately.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (machine-footprint metrics; this
   record deliberately does not add a new footprint subsystem there — see §4),
@@ -104,6 +104,12 @@ refusal forever.
    for invalid values. Expired, missing, malformed or future hold timestamps permit a half-open
    attempt; a new refusal records a fresh hold. An unreadable current clock does not authorize
    expiry. Status evaluation never deletes the stored refusal or private snapshots.
+8. **Missing KB is not an installed release.** A surviving plugin cache can remain present
+   after KB removal. Confirmed missing entrypoint clears only the observed installed-release
+   value, not the stored historical stamp; that release-pair change permits a fresh attempt.
+   A new refusal binds the null installed side and restores the normal hold. Access errors
+   remain unknown/manual, never automatic fresh-install evidence. Missing/unverified release
+   assets still block installer actions. No KB or snapshot deletion is automated.
 
 ## Consequences
 
