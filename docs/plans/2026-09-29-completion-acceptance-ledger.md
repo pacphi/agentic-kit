@@ -213,8 +213,8 @@ Upstream status or a task ledger cannot stand in for actual execution/persistenc
 | I239-11 | Preserve diagnostic causes and distinguish failure, inconclusive check, expected contention, disabled optional capability, preserved external advisory, and stale/unreviewed evidence. A warning count must explain what needs action. | P09 |
 | I239-12 | Detect selected services that are installed but stopped. Explain machine/project readiness and foreground-process lifetime. Startup services, backend switches, corpus migration, and new memory stores require explicit intent. | P09 |
 | I239-13 | Distinguish host identity from actual provider identity. Configured routes and host diversity alone do not prove independent vendors; review claims need invocation-level provenance. | P10 |
-| I239-14 | Inventory executable ownership and required capabilities before installs. Avoid force-overwriting foreign bins, silently pinning user-owned tools, or repeating known-impossible repairs. | P09/P12 |
-| I239-15 | A configured event source is not an ingested source. Show present/readable files, awaiting-file state, accepted/rejected events, last accepted timestamp, collection limits, and actual producer health separately. | P00/P09/P11 |
+| I239-14 | Inventory executable ownership and required capabilities before installs. Avoid force-overwriting foreign bins, silently pinning user-owned tools, or repeating known-impossible repairs. | P09; P12 optional reuse |
+| I239-15 | A configured event source is not an ingested source. Show present/readable files, awaiting-file state, accepted/rejected events, last accepted timestamp, collection limits, and actual producer health separately. | P00/P09; P11 disclosure |
 | I239-16 | Cover paths with spaces, non-Git launch folders, source rotation/recreation, malformed/schema-invalid events, denied reads, and capped discovery. Do not report complete acquisition when capped. | P00/P09 |
 | I239-17 | Use explicit shared time ranges, timezone, filters, project identity, and accounting basis for dashboard comparisons. Surface partial historical parsing instead of implying a login/model failure. | P00/P09 |
 | I239-18 | Diagnose unsupported/new event types and bounded clipping without fabricated records or unbounded reads. Refresh guidance must identify the real degraded source rather than endlessly suggesting refresh. | P00/P09 |
@@ -281,3 +281,59 @@ real-store migration, deletion and metered runs remain separate gates.
 
 The machine-readable planning snapshot is private in this worktree. No prompts, transcripts,
 credentials, corpus values or private filesystem paths belong in public closure receipts.
+
+## September 30 decisions and milestone precedence
+
+Milestone corrections, D-22 cancellation, D-23 A, D-24 recovery, D-25 A, D-27 B,
+D-28 A, D-29 A and session organization B are confirmed. This authorizes the planning choices,
+not execution. Current instructions use current commands directly: no retired-command aliases
+or redirects. #240's four source criteria require an explicit approved wording reconciliation;
+the historical issue text and this source crosswalk are not silently rewritten.
+
+P18/P19 gate the selected milestone only. M1 retains its own original closeout obligations and
+approved dispositions; M2/#239 does not require the independent Cowork implementation or broad
+M3 install classifier. ADR-0048 evaluation remains a named deferred track. For plan-level proof,
+P00 must map the 14 v1 unchecked steps, eight v2 DoD clauses, execution-plan operation gates,
+all six execution-evidence completion conditions and retained 246-row scope matrix. A reference
+to a plan is not a verified acceptance row. Original issue snapshots remain frozen.
+
+Each execution row must additionally record source clause, milestone, accountable owner,
+dependency kind, exact source/artifact/platform, pass condition, result/evidence state,
+independent review, applicable approval and rollback. Pending reproduction, inherited evidence,
+verified, upstream-blocked, approval-pending and approved disposition are distinct.
+
+## Session organization and Activity extension
+
+These 26 additional design rows extend the original 171 issue-derived rows; they do not alter
+issue wording or prove completeness of the still-pending plan-level expansion. Detail, research,
+options and remaining decisions are in the [September 30 design](2026-09-30-session-organization-and-activity-design.md).
+Owner P11S means an independent M3 feature track; it is not added to #257's literal closure criteria.
+
+| ID | Observable acceptance condition | Owner |
+| --- | --- | --- |
+| S01 | One Sessions population supports repository, folder, application-workspace, automation and workspace-unknown views with composable filters. | P11S |
+| S02 | Launch surface, later access, host, initiator, execution environment, workspace and Activity remain independent evidence fields. | P11S |
+| S03 | Declared launch cwd, later executed locations and discussed targets are distinguishable; current Git state never rewrites historical launch claims. | P11S |
+| S04 | Remote paths are environment-scoped; Git grouping follows verified common-directory/worktree proofs, not title/basename/remote-URL joins. | P11S |
+| S05 | Native identity and host-specific import/fork/subagent/compression relationships prevent duplicate counts while preserving genuine activity. | P11S |
+| S06 | Source scope A approved 2026-09-30: initial benchmark uses current Claude/Codex/OpenCode readers across repository/non-repository work. Cowork/Hermes/cloud-only/future sources enter only after verified observation contracts; all sources have version-bound fixtures and honest limitations. Exact resolved allowlist approval precedes excerpt reads. | P11S |
+| S07 | Future host observation capabilities, bounded sources and permission are explicit; execution admission grants no transcript-reading authority. | P11S |
+| S08 | User title wins; native, extractive and optional generated titles retain provenance and cannot change identity/accounting. | P11S |
+| S09 | Bounded title context excludes injected/imported/replayed material, tool bodies and assistant outcome claims; ambiguous content can abstain. Initial benchmark user excerpts have an approved 8,000-character total ceiling across the initial substantive request and up to two clarifications, with clipping disclosed and no automatic expansion. | P11S |
+| S10 | Private titles/excerpts never enter default public/export receipts; rendering, retention, invalidation and user corrections have proof. | P11S |
+| S11 | Ordinary viewing makes no model/network call or full-corpus scan; optional processing has exact scope/backend/budget approval. | P11S |
+| S12 | Repository terminology and affected ADR/DDD/API/cache contracts are reconciled explicitly, with no command aliases for retired surfaces. | P11S |
+| S13 | Re-finding success/time and title faithfulness are evaluated against the existing presentation; research analogy is not product proof. | P11S |
+| A01 | Unknown Activity fraction is strictly below 0.10 on the frozen in-scope genuine-session population; exactly 10% fails. | P11S |
+| A02 | Missing/unreadable/insufficient-evidence genuine sessions stay in the denominator and Unknown numerator; equivalent rejection buckets count. | P11S |
+| A03 | Imported-only/replayed records are excluded under predefined ownership rules; uncovered sources and cloud populations remain disclosed. | P11S |
+| A04 | A consented representative gold set has a reviewed rubric, independent annotations/adjudication, frozen labels and family-disjoint splits. Pilot approved: up to 250 genuine sessions over the most recent 120 days, with frozen timestamp boundaries and no automatic widening. Pilot families stay out of final evaluation, whose size is proposed afterward. | P11S |
+| A05 | Accuracy option A confirmed 2026-09-30: automatic accepted-label correctness is at least 95%, with a one-sided 95% lower confidence bound at least 95% on the independent holdout. | P11S |
+| A06 | Overall and per-host/class metrics, automatic/user label shares, confidence intervals and risk/coverage curves expose class imbalance and gaps. | P11S |
+| A07 | Host-normalized actions and bounded task evidence improve classification; skill invocation alone is not assumed whole-session truth. | P11S |
+| A08 | Taxonomy B approved 2026-09-30: primary plus evidence-supported secondary Activities from a fixed reviewed coding/non-coding vocabulary; secondary precision/recall is separate. Mixed cannot serve as an Unknown escape hatch. | P11S |
+| A09 | Current rules, improved evidence/rules and authorized supervised/semantic candidates are compared on the same frozen test protocol. | P11S |
+| A10 | Heuristic scores and calibrated probabilities are distinguishable; generated titles do not create circular gold labels or independent evidence. | P11S |
+| A11 | Latency/resource/cost/privacy and drift checks bind to exact sources/models; no implicit installation, provider call or policy promotion. | P11S |
+| A12 | Versioned cache/label migration and rollback preserve originals/user labels; training feedback and private sampling remain explicit opt-ins. Retention A approved 2026-09-30: permitted bounded benchmark evidence stays private, versioned and outside tracked content until separately approved cleanup. | P11S |
+| A13 | If both coverage and approved accuracy gates cannot pass, report a failed gate and causes; no fabricated labels, threshold-only fix or scope waiver. | P11S |

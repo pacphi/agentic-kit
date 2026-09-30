@@ -6,11 +6,17 @@
 
 ## Status
 
-**Blocked** on approval of this consolidated plan and the outstanding decisions below.
+**Active — M1 only:** isolated remediation fixes, guarded tests and local unit commits authorized
+2026-09-30. M2/M3 execution and unresolved decisions remain separate.
 Planning baseline: `main@0511d575d3db093139f15ec70c9b9657f297ce7e`, 2026-09-29.
 PR #285 is merged; main CI and container checks passed. The completed develop branch was removed.
-This draft does not authorize implementation, publication, upgrades, data mutation or spending.
+Authority excludes pushes, publication, installations, real-data operations, spending and cleanup.
 It changes no existing plan's authority or recorded approval.
+Updated 2026-09-30: milestone corrections and D-22–D-25/D-27–D-29 are confirmed.
+Session organization option B and Unknown Activity <10% are approved design requirements.
+M1 source work now proceeds under the recorded scope; M3 research/processing stays deferred.
+Focus reset 2026-09-30: P11S research is parked with its approved decisions; resume M1 closeout.
+M3 companion/classifier decisions are not prerequisites to authorizing a bounded M1 batch.
 
 **Goal:** Satisfy the remaining acceptance criteria of eight plan documents and all 13 currently
 open repository issues, adopt verified upstream fixes, answer upstream requests, and archive
@@ -28,6 +34,8 @@ adapters, upstream-owned Ruflo/AQE/Brain runtimes and optional companion adapter
 [acceptance ledger](2026-09-29-completion-acceptance-ledger.md). The eight source plan names and
 archival conditions are enumerated below. Two September 29 plans are currently untracked local
 drafts; snapshot and reconcile them before adopting their proposed implementation details.
+The [broader conversation/Topic rubric](2026-09-30-conversation-activity-and-topic-taxonomy-design.md)
+has approved P11S direction; exact definitions await review, and consumer-chat ingestion is unverified.
 
 ## 1. Milestones and boundaries
 
@@ -37,7 +45,8 @@ drafts; snapshot and reconcile them before adopting their proposed implementatio
 - **M2 — execution readiness closed:** execution evidence, cancellation, monitor, upgraded-install
   proof, provider provenance and required source coverage pass; close #239 against its own checklist.
 - **M3 — remaining feature backlog closed:** companion integrations, AQE-to-OpenCode routing and
-  Route Intelligence meet their own complete criteria. These do not become artificial blockers
+  Route Intelligence, independent Cowork/session organization, and deferred ADR-0048 evaluation
+  meet their own complete criteria. These do not become artificial blockers
   for M1 merely because this master program also tracks them.
 - A tested mitigation may satisfy only a criterion that permits it. Strict upstream-release
   criteria in #213/#95 stay blocked until that release exists and passes our tests.
@@ -50,13 +59,15 @@ drafts; snapshot and reconcile them before adopting their proposed implementatio
 | --- | --- | --- |
 | Windows rule — approved 2026-09-29 | Preserve #262's ten-run median plus v2's three consecutive PR runs with every Windows leg under 300 seconds; record samples without filtering failures. The stronger ten-all-green proposal is rejected for this program. | P02 closure |
 | Upstream contributions — approved 2026-09-29 | Prepare reproductions and fixes in isolated upstream forks; ask approval of exact diff/text before publishing. Preparation is approved in scope; each external publication retains its exact-text/diff approval gate. | External part of P05/P16 and native fixes |
-| D-22 cancellation | Separate requested/stopping/stopped/refused and generation-fenced results; confirm stopped only with executor evidence. Scope forced termination to owned processes. | P06–P08 |
-| D-23 fault tests | Scripted fake executors, injected time, retained sanitized fixtures, plus bounded real-executor proof. No paid work by default. | P07–P08 |
-| D-24 hold recovery | Bounded half-open recheck after configured TTL, explicit retry, truthful missing-KB state; preserve snapshots and private stores. | P04 |
-| D-25/#240 wording | Test every literal issue checkbox with the current supported command. Reconcile obsolete `ak x verify` spelling and managed-version meaning explicitly; do not invent a universal AQE floor to close a tracker. | P03 closure |
-| D-27 platform proof | Disposable Windows AQE conformance alongside macOS/Linux; separately approve any extra billable CI run. | Cross-platform claim in P03/P19 |
-| D-28 provenance | Declared configuration and observed response identity remain separate; unknown is valid; no vendor-attestation claims. | P10 |
-| D-29 Cowork | Approve bounded names/counts metadata discovery, then an optional reader only if project association can be proved. No prompt-body inspection. | P11 |
+| D-22 cancellation — confirmed 2026-09-30 | Separate requested/stopping/stopped/refused and generation-fenced results; confirm stopped only with executor evidence. Scope forced termination to owned processes. | P06–P08 execution |
+| D-23 A — confirmed 2026-09-30 | Scripted fake executors, injected time, sanitized recordings, disposable real-process tests, then separately approved real-executor proof. No paid work by default. | P07–P08 execution |
+| D-24 recovery — confirmed 2026-09-30 | Bounded half-open recheck after configured TTL, explicit retry, truthful missing-KB state; preserve snapshots and private stores. | P04 execution |
+| D-25 A — confirmed 2026-09-30 | Preserve four #240 obligations; amend obsolete command/version wording explicitly. Use the current command directly; no retired-command aliases or redirects and no invented universal AQE floor. | P03 closure |
+| D-27 B — confirmed 2026-09-30 | Inspect existing CI, add missing bounded disposable Windows AQE conformance, then decide periodic coverage. Installation and CI dispatch remain separately gated. | Cross-platform claim in P03/P19 |
+| D-28 A — confirmed 2026-09-30 | Separate configured from invocation-observed identity and evidence sources; unknown means vendor diversity unverified. No attestation claim. | P10 execution |
+| D-29 A — confirmed 2026-09-30 | Bounded metadata discovery, optional reader only with reliable workspace association; otherwise keep #257 blocked with disclosure. Private bodies remain gated. | P11 execution |
+| Session organization B — confirmed 2026-09-30 | Unified Sessions, independent filters, native/user titles and opt-in bounded context; host-specific evidence. See the [design/research](2026-09-30-session-organization-and-activity-design.md). | Independent M3 track |
+| Activity gates — confirmed 2026-09-30 | Unknown Activity strictly <10%; automatic accepted-label correctness at least 95% with independent statistical evidence (accuracy A). Revised shortlist approved: compact ONNX lead, Laya challenger, genuine LLM reference and RuVector semantic candidate. Benchmark A and local bounded-user-request policy A approved; exact sampling/processing and production selection remain pending. No forced labels or denominator gaming. | Activity release acceptance |
 | Companion relationship | Three independent opt-ins with coexistence disclosure; confirm whether GitNexus and graft are alternatives. Refresh licenses and supported commands before deciding. | P13–P15 |
 | Route Intelligence | Approve per-activity quality tolerance, evidence thresholds, feedback source, freshness, retention and replay budget in its own spec/ADR before recommendations. | P17 |
 | Operations | Approve exact release artifact, installation target, store-merge preview, deletion paths and any metered evaluation at their final gates. | P19 and paid/live proof |
@@ -72,18 +83,20 @@ Read complete amendments, not only the first status line. Existing numbered ADRs
 
 | ADR | Inspected status/date | Treatment in this program |
 | --- | --- | --- |
+| 0009 / 0014 | Implemented; updated 2026-09-29 / 2026-09-28 | Preserve Usage privacy/classification and CI coverage; session design changes need explicit reconciliation. |
 | 0016 / 0017 | Accepted; updated 2026-09-27 | Preserve ownership, opt-in hosts and external configuration in companion/OpenCode work. |
 | 0018 | Implemented; updated 2026-09-09 | Base execution exists. P06–P08 extend its contract, not rebuild it. |
 | 0019 | Accepted; updated 2026-07-30 | Preserve bounded escalation and deadlines while extending cancellation. |
 | 0021 | Accepted; updated 2026-09-09 | P10/P17 preserve host/provider separation; observation is not attestation. |
-| 0023 | Implemented; amendments through 2026-09-27 | Preserve fail-closed errors and manual versus sync repair ownership. |
+| 0023 | Implemented; amendments through 2026-09-28 | Preserve fail-closed errors and manual versus sync repair ownership. |
+| 0029 / 0033 / 0034 | Accepted experimental / Implemented / Implemented; updated 2026-09-27 / 2026-09-26 / dated 2026-08-26 | External-host observation is capability-specific; preserve schema-native handoffs and the court evidence ladder. |
 | 0031 | Accepted, governance implementation active; updated 2026-09-09 | Capability graduation needs actual evidence; registration is insufficient. |
 | 0041 | Accepted, delivered assurance/watch subset; updated 2026-09-28 | P01/P03/P05 adopt fixes under dependency removal proofs and the support window. |
-| 0048 | Accepted; delivered implementation, human evaluation outstanding; updated 2026-09-29 | P19 performs named usability, accessibility and platform gates; no automatic Implemented stamp. |
+| 0048 | Accepted; delivered implementation, human evaluation outstanding; updated 2026-09-29 | Deferred M3 evaluation owns its human/platform gates; no automatic Implemented stamp or new M1 blocker. |
 | 0054 | Implemented; updated 2026-09-20 | Preserve export privacy and evidence identity if P06/P17 expose new records. |
 | 0055 | Implemented; amendments through 2026-09-29 | Later N-1 amendment supersedes the old universal-floor removal condition. Preserve ordinary busy behavior. |
-| 0058 | Accepted, implementation in progress; updated 2026-09-23 | Retain native/governance limits until source-bound runtime proof exists. |
-| 0060 | Accepted; updated 2026-09-29 | Classification already delivered. P11 adds only the missing Cowork source; P10 concerns worker invocation evidence. |
+| 0058 | Accepted, implementation in progress; amendments through 2026-09-28 | Retain native/governance limits until source-bound runtime proof exists. |
+| 0060 | Accepted; updated 2026-09-29 | Surface classification delivered. P11 is the Cowork source; P11S extends session organization/Activity; P10 is invocation provenance. |
 | 0061 | Accepted; dated 2026-09-27 | P04 revisits the documented uninstall/fresh-install recovery contract against current Brain and held state. |
 | 0062 | Accepted; updated 2026-09-29 | Preserve live holders, starter-pattern policy and feature-specific version floor; Windows remains unverified. |
 | 0063 | Accepted; updated 2026-09-29 | Preserve explicit POST refresh, read-only GET and separate evidence freshness/attempt times. |
@@ -104,6 +117,8 @@ unless the maintainer explicitly changes that rule. Preserve unrelated PR #281 a
 Controller plus at most three workers; one writer per worktree. Only the controller changes shared
 registries, package/lockfiles, ADR indexes or global status/command wiring. Workers hand off patches
 for those paths. Integrate serially and rebase dependent work after its prerequisite merges.
+Prefer controller, two writers and one reviewer/research slot; exact file claims precede dispatch.
+Label dependencies as contract prerequisites, file serialization, or scheduling preferences.
 
 ```mermaid
 flowchart TD
@@ -118,6 +133,7 @@ flowchart TD
   P06 --> P10[Invocation provenance]
   P00 --> P09[Upgrade and ownership matrix]
   P00 --> P11[Cowork source]
+  P11 -. independent design track .-> P11S[Sessions and Activity]
   P00 --> P12[Install classifier]
   P12 --> P13[GitNexus]
   P12 --> P14[Graphify]
@@ -125,10 +141,9 @@ flowchart TD
   P00 --> P16[AQE to OpenCode]
   P06 --> P17[Route Intelligence]
   P10 --> P17
-  P02 --> P18[Milestone release candidate]
-  P03 --> P18
-  P04 --> P18
-  P09 --> P18
+  M1[M1 original closeout gates] --> P18[Candidate for selected milestone]
+  M2[M2 execution readiness gates] --> P18
+  M3[M3 independent feature gates] --> P18
   P18 --> P19[Approved live acceptance and operations]
   P19 --> P20[Per-plan and per-issue closure]
 ```
@@ -136,8 +151,12 @@ flowchart TD
 P16 research starts after P00 and its integration waits on its own upstream contract, not P05. P17 historical
 projection/specification can start before P06; prospective learned recommendations wait for P06,
 P07 and P10. P13–P15 can research in parallel; shared lifecycle/configuration integration is serial.
-P18's dependency set is explicit per milestone: M1 includes P01–P04 plus P05's route/preservation acceptance; #213's stricter upstream-release closure remains separately open if not proved;
-M2 adds P06–P11; M3 adds P12–P17. Unrelated feature branches do not hold an M1 release hostage.
+P18/P19 select one milestone, never require all three: M1 uses its original closeout gates and
+approved dispositions; #213's strict upstream closure remains independently open if unproved.
+M2 uses P06–P10 plus relevant P03/P05 runtime proof. P09 establishes executable ownership without
+requiring P12's broader classifier. M3 contains P11/P11S and P12–P17; ADR-0048 evaluation has a
+named deferred track. Cowork disclosure is required where relevant; its implementation is not a
+blanket #239 prerequisite. Each original plan still closes against its own accepted conditions.
 
 ## 5. Common work-package contract
 
@@ -179,13 +198,13 @@ outputs; unusable tool output is disclosed, not renamed as a successful AQE run.
 
 **Owns:** `src/lib/hook-audit/agentic-dependency-constraints.json`, `docs/upstream-watch.md`, registry tests.
 
-- [ ] Refresh `node scripts/upstream-watch.mjs report --json`; inspect complete comments on AQE #528/#532/#535 and prepare exact replies after verification.
+- [ ] Refresh `node scripts/upstream-watch.mjs report --json`; inspect AQE #528/#532/#535, distinguish requests from acknowledgements, and carry successor #786/#787 limitations.
 - [ ] Build one adoption row per released candidate: #735/#528/#532/#535/#754/#755/#757/#758/#759/#778; record first fixed version, fix commit and package proof.
 - [ ] Confirm #756 manually; retain #655/#753 constraints until full conformance passes. Do not treat the report's actionable label as a retirement authorization.
 - [ ] Keep Ruflo #3194/#3444/#3445/#3473 mitigations while the supported-version floor predates their fixes; record each waiting thread's owner and retest trigger.
-- [ ] Read failed scheduled-run logs and validate current preview/record/ledger/notification behavior in a disposable target; seek approval before a real routine trigger. Obtain one successful scheduled check; record real dispatch only when one occurs.
+- [ ] Reuse successful scheduled check 36729784908 (2026-09-30); separately verify ledger/notification effects and disposable failure paths. A real routine trigger needs approval; record dispatch only when proved.
 
-**Done:** every report item has an action/hold/retest disposition, three replies are ready for approval, and watcher operational evidence replaces the unknown-success state. Test `upstream-watch-*` suites; preserve raw failure observations. Rollback: retain prior registry histories and revert only the failed adoption.
+**Done:** every report item has an action/hold/retest disposition, actual replies are ready for exact-text approval, and watcher effects have evidence. Test `upstream-watch-*` suites; preserve failures. Rollback: retain registry histories and revert only the failed adoption.
 
 ### P02 — Close Windows performance #262 (M; medium confidence)
 
@@ -307,6 +326,9 @@ outputs; unusable tool output is disclosed, not renamed as a successful AQE run.
 - [ ] Verify Projects/Usage disclosure remains honest on unsupported platforms; close only when the issue's supported scope is delivered or explicitly amended.
 
 **Done:** discovery and coverage criteria pass with metadata-only evidence. Focus project-source/session-surface suites and rendered coverage. Rollback: disable this optional source; preserve every user file.
+The independent P11S Sessions/title/Activity extension follows the September 30 design and ledger.
+It requires host-specific contracts, its own benchmark, content permission and quality gates;
+metadata-only P11 proof cannot establish title/classifier accuracy or whole-account coverage.
 
 ### P12 — Shared install-method classifier #116 (M; medium confidence)
 
@@ -393,7 +415,7 @@ outputs; unusable tool output is disclosed, not renamed as a successful AQE run.
 **Owns:** explicit user-approved installation/state targets; no unrelated machine cleanup.
 
 - [ ] After exact-artifact approval, publish/install through the release gate, restart owned affected processes and verify actual host/provider/memory/embedding/task paths and rendered dashboard.
-- [ ] Run sync twice, verify ownership/no-clobber and fresh footprint schema, and complete ADR-0048's human usability/screen-reader/platform gates or retain their explicit unfulfilled status.
+- [ ] Run sync twice and verify ownership/no-clobber and fresh footprint schema for the selected milestone. ADR-0048 human evaluation stays in its named deferred track; retain Accepted status until its own gates pass.
 - [ ] For real AQE strays: resolve paths/holders; honor the recorded starter-pattern policy; present current preview; backup; rehearse on copies; obtain final apply approval; verify imported counts/integrity/audit chain and archival receipt.
 - [ ] Refresh temp/snapshot inventories and preservation hashes; obtain literal-path deletion approval. Worktree evidence must be exported/verified before any separately approved removal.
 - [ ] Diagnose project-memory persistence through exact read-back and reopened-process evidence; personal Codex memory changes require a direct user request. Record attended time as unmeasured historically; never manufacture it.
@@ -419,9 +441,9 @@ outputs; unusable tool output is disclosed, not renamed as a successful AQE run.
 | #262 Windows timing | P02 | M1; agreed measurements and preservation gates |
 | #240 AQE live lock | P03 | M1; real holder/managed-version criteria, supported command mapping |
 | #213 Ruflo memory | P05 | Upstream fixed release plus preservation/migration proof; no premature closure |
-| #239 readiness | P03/P05–P11/P18/P19 | M2; every one of its 25 checklist rows has proof or explicitly accepted criterion-permitted mitigation |
+| #239 readiness | P03/P05–P10/P18/P19 | M2; its 25 rows have proof or accepted criterion-permitted mitigation; no blanket P11/P12 dependency |
 | #255 worker monitor | P06–P08 | M2; contract and fault matrix precede monitor |
-| #257 Cowork | P11 | M2 in closure draft; stable project association and approved metadata scope |
+| #257 Cowork | P11; separate P11S extension | Independent M3 source; stable workspace association and approved metadata scope; Sessions/Activity has its own gates |
 | #116 install classifier | P12 | M3; useful shared foundation, scheduled before companions |
 | #115 GitNexus | P13 | M3; license/native/ownership and full lifecycle proof |
 | #117 Graphify | P14 | M3; Python ownership, block mediation, cost boundaries |
@@ -439,7 +461,7 @@ outputs; unusable tool output is disclosed, not renamed as a successful AQE run.
 | `2026-09-26-issues-237-238-239-verification-and-decisions.md` | Append final V7/#285 and operational dispositions; qualify original baseline; archive with program closeout per D-31 | `2026-09-26-audit-issues-237-238-239-verification-and-decisions.md` |
 | `2026-09-28-remediation-program-v2.md` | All eight DoD items reconciled under the approved execution overrides; no hidden release/store/temp/watch/retention gate | `2026-09-28-plan-remediation-program-v2.md` |
 | `2026-09-28-remediation-v2-develop-execution.md` | Phase D done; Phase E release/install/store/cleanup evidence or explicitly approved disposition, retained evidence safe | `2026-09-28-plan-remediation-v2-develop-execution.md` |
-| `2026-09-29-execution-evidence-and-upgrade-acceptance.md` (untracked) | P06–P09 and its five completion conditions, adopted/reconciled in P00 | `2026-09-29-plan-execution-evidence-and-upgrade-acceptance.md` |
+| `2026-09-29-execution-evidence-and-upgrade-acceptance.md` (untracked) | P06–P09 and its six completion conditions, adopted/reconciled in P00 | `2026-09-29-plan-execution-evidence-and-upgrade-acceptance.md` |
 | `2026-09-29-issue-239-closure-and-v5-foundation.md` (untracked) | P03–P11/P18–P20; #239 acceptance and all its issue/operation rows, with closed #254/#256 not replayed | `2026-09-29-plan-issue-239-closure-and-v5-foundation.md` |
 
 D-31's recorded order is CI pair → v1 → decision log/v2 → execution evidence → closure plan.
@@ -450,10 +472,10 @@ master plan and its ledger archive only after M3 or an explicitly approved final
 
 Recommended first vertical slice: **P06's packaged fake-worker terminal receipt**, because P07,
 P08, P10 and P17 consume it. Before writing it, complete P00 and its contract decisions.
-Then run at most three writing lanes: P02 Windows, P03 AQE conformance, P06 execution contract.
+Start M1 with P02/P03 writing lanes; P06 contract design can proceed read-only in a review slot.
 P01's read-only inventory can precede those; serialize registry/ADR handoffs. Schedule P04 after
 one lane frees. P09 fixture design can proceed read-only, but lifecycle edits wait for overlapping
-P03/P04/P12 ownership. P05 upstream work never blocks unrelated local progress.
+P03/P04/P12 ownership. P06 is M2's first slice; P05 upstream waiting does not block unrelated work.
 
 Stop affected work for missing authority, unknown destructive targets, unproved data ownership,
 contract dependency failure, or inability to establish a safe test environment. Upstream waiting
@@ -462,6 +484,7 @@ No releases, posts, installs, memory migrations, deletion, metered provider runs
 were performed while drafting this program. Planning evidence is a snapshot, not conformance proof.
 The live upstream report was valid: 10 released candidates, 3 reply flags, 1 unconfirmed release,
 2 carried workarounds, 4 support-window holds, 44 waiting threads and 4 stale flags (groups overlap).
-No successful scheduled run was established. AQE requirements_validate returned zero testable
+Scheduled check 36729784908 succeeded on 2026-09-30; dispatch/delivery remain separate proof.
+AQE requirements_validate returned zero testable
 requirements and no scenarios; it supplies no validation evidence for this plan. Direct source
 criterion mapping and documentation checks are recorded separately.
