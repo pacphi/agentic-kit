@@ -214,6 +214,22 @@ test('the #574 exception retirement records released conformance without closing
   assert.match(tracker.adjustment, /final main PR/);
 });
 
+test('the #535 risk inventory stays limited to the adjustment\'s remaining AQE gaps', () => {
+  const doc = document();
+  const item = entry(doc, 'proffesor-for-testing/agentic-qe#535');
+  assert.match(item.adjustment, /GOAP `?maxSteps`?\/world-state/);
+  assert.match(item.adjustment, /test-generation quality/);
+  assert.match(item.adjustment, /coherence recommendation-text/);
+  assert.match(item.adjustment, /memory_delete and cross-phase stats were fixed/);
+  assert.match(item.adjustment, /goap_execute was not re-exercised/);
+  assert.deepEqual(item.kitImpact.files, ['docs/host-support.md']);
+  assert.ok(item.history.some((entry) => entry.event === 'dispatched'), 'a dispatch history line records each observed release');
+  const hostSupport = fs.readFileSync('docs/host-support.md', 'utf8');
+  assert.match(hostSupport, /GOAP `maxSteps` and world-state, test-generation quality, and coherence recommendation-text gaps\]\(https:\/\/github\.com\/proffesor-for-testing\/agentic-qe\/issues\/535\)/);
+  assert.match(hostSupport, /the 3\.14\.4 recheck did not exercise `goap_execute`/);
+  assert.doesNotMatch(hostSupport, /memory_delete.{0,80}(still|remain|open|gap)/is);
+});
+
 test('stale threads are mapped to what ak carries, or retired with a reason', () => {
   const doc = document();
   const clear = entry(doc, 'openai/codex#16045');

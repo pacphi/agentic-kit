@@ -2174,11 +2174,12 @@
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
       "adjustment": "Keep the host-support.md risk link limited to the remaining 3.14.4 GOAP maxSteps/world-state, test-generation quality, and coherence recommendation-text gaps. memory_delete and cross-phase stats were fixed; goap_execute was not re-exercised.",
-      "status": "watching",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "commented", "note": "re-verified on 3.14.4: memory_delete and cross-phase stats fixed; GOAP maxSteps, GOAP world state, test generation and coherence text still reproduce; goap_execute not exercised (issuecomment-5878245564)" }
+        { "date": "2026-09-28", "event": "commented", "note": "re-verified on 3.14.4: memory_delete and cross-phase stats fixed; GOAP maxSteps, GOAP world state, test generation and coherence text still reproduce; goap_execute not exercised (issuecomment-5878245564)" },
+        { "date": "2026-10-01", "event": "dispatched", "note": "agentic-qe 3.14.6 observed; issue still open upstream, so dispatched to lock the adjustment's remaining-gap wording in tests/kit/upstream-watch-registry.test.mjs on upstream/proffesor-for-testing-agentic-qe-535 rather than to remove the workaround" }
       ]
     },
     {
