@@ -65,7 +65,7 @@ Usage (ak = alias of agentic-kit):
   ak                 status + suggested next action
   ak setup           first-time setup (machine and/or this project)    [--project] [--minimal] [--yes]
   ak status          read-only dashboard: what's true, what's drifted  [--json] [--refresh[=live|machine]]
-  ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade] [--skip SUBSYSTEM] [--json]
+  ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade] [--skip SUBSYSTEM] [--retry-brain] [--json]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak usage           offline scorecard, prompt patterns, provider cache  [status|score|prompts|refresh openrouter]

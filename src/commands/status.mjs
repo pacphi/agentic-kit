@@ -145,7 +145,7 @@ async function runSections(sections, ctx, rows) {
  *  ADR-0063); the versions, self, ruvnet-brain and ruvector sections use them
  *  instead of looking up their own.
  *  @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean,
- *   versionEvidence?: { drift?: any[], self?: any, brain?: any, ruvector?: any, cfg?: any } }} opts */
+ *   retryBrain?: boolean, versionEvidence?: { drift?: any[], self?: any, brain?: any, ruvector?: any, cfg?: any } }} opts */
 export async function collect({
   pkgRoot,
   cwd = process.cwd(),
@@ -153,6 +153,7 @@ export async function collect({
   dejaVuPlanOptions = {},
   refresh = false,
   record = true,
+  retryBrain = false,
   versionEvidence,
 }) {
   const rows = [];
@@ -176,7 +177,7 @@ export async function collect({
     cwd, cfg, refresh, record, source,
   });
   const ctx = {
-    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source, versionEvidence,
+    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source, versionEvidence, retryBrain,
   };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);

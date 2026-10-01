@@ -22,12 +22,18 @@ function legacySnapshotNote() {
   }
 }
 
-/** ADR-0061: --update can never clear this refusal (the legacy snapshots it is
- *  stuck on are never touched by --update); --uninstall + reinstall verified to. */
+/** ADR-0061: preserve the historical workaround without promising that a
+ * current installer bypasses its own snapshot-retention checks. */
 function reclaimStuckFix() {
   return '`npx ruvnet-brain --uninstall` (removes only the KB bundle) then `ak sync` reinstalls fresh '
-    + `and clears the version block${legacySnapshotNote()} — see upstream stuinfla/ruvnet-brain#335; `
+    + `when the installer permits it${legacySnapshotNote()}; the current installer may still refuse — `
+    + 'preserve private snapshots and resolve its named cause; see upstream stuinfla/ruvnet-brain#335; '
     + 'or set "ruvnetBrain": false in kit.json to stop ak managing the Brain';
+}
+
+function retainedReleaseLabel(b, unversioned = 'the existing unversioned install') {
+  if (b.kbState === 'missing') return 'KB missing (plugin cache remains)';
+  return b.installedRelease ? `release v${b.installedRelease}` : unversioned;
 }
 
 // What a user can do about an unreviewed Brain hook change. ak cannot review a
@@ -57,9 +63,13 @@ export function brainPluginRows(state) {
 /** One status row for the installed/release state. A GitHub tag without the
  *  installer's required bundle asset is visible but deliberately non-actionable:
  *  giving it a fix would make `ak sync` prescribe a download known to 404. */
-export function brainReleaseRow(b) {
+export function brainReleaseRow(b, { retry = false } = {}) {
   const releaseBlocked = !!b.latest && b.releaseAssetAvailable === false;
   const releaseUnverified = !!b.latest && b.releaseAssetAvailable == null;
+  if (b.kbState === 'unknown') {
+    return row('ruvnet-brain', 'warn', 'RuvNet Brain KB entrypoint unavailable; installation state unverified',
+      'resolve KB access or the unusable entrypoint, then run `ak sync`', { repair: 'manual' });
+  }
   if (!b.present) {
     if (releaseBlocked) {
       return row('ruvnet-brain', 'warn',
@@ -71,34 +81,37 @@ export function brainReleaseRow(b) {
     }
     return row('ruvnet-brain', 'warn', 'RuvNet Brain not installed', 'setup installs it (or `ak sync`)');
   }
+  if (b.kbState === 'missing' && !b.latest) {
+    return row('ruvnet-brain', 'warn', 'RuvNet Brain KB missing; plugin cache remains; release metadata unavailable');
+  }
   if (b.outdated && releaseBlocked) {
-    const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
+    const have = retainedReleaseLabel(b);
     return row('ruvnet-brain', 'info',
       `ruvnet-brain ${have} retained; release v${b.latest} is missing ruvnet-brain.zip — update deferred upstream`);
   }
   if (b.outdated && releaseUnverified) {
-    const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
+    const have = retainedReleaseLabel(b);
     return row('ruvnet-brain', 'info',
       `ruvnet-brain ${have} retained; release v${b.latest} bundle availability awaits a live sync check`);
   }
-  const held = b.outdated ? activeHeldRefresh(b) : null;
+  const held = b.outdated && !retry ? activeHeldRefresh(b) : null;
   if (held) {
     // The installer or the bundle's updater refused this exact pair (or ran
     // without landing anything). Re-running it on every sync cannot succeed and
-    // re-downloads the bundle, so sync does not act on the row until either
-    // release changes; the options are the user's, as a manual fix.
-    const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
+    // re-downloads the bundle, so sync waits for this fresh hold's TTL or a
+    // release change; manual recovery remains the user's choice.
+    const have = retainedReleaseLabel(b);
     const fix = BRAIN_RECLAIM_STUCK.test(held.detail)
       ? reclaimStuckFix()
       : 'fix the cause, then run `npx ruvnet-brain --update`; or set "ruvnetBrain": false in kit.json '
         + 'to stop ak managing the Brain';
     return row('ruvnet-brain', 'warn',
       `ruvnet-brain ${have} retained; the refresh to v${b.latest} was refused (${held.detail}). `
-      + 'ak sync will not retry it until either release changes',
+      + 'ak sync waits for the hold to expire or either release to change before retrying',
       fix, { repair: 'manual' });
   }
   if (b.outdated) {
-    const have = b.installedRelease ? `release v${b.installedRelease}` : 'present (unversioned install)';
+    const have = retainedReleaseLabel(b, 'present (unversioned install)');
     return row('ruvnet-brain', 'warn',
       `ruvnet-brain ${have}, release v${b.latest} available (${releaseObservationLabel(b)})`, 'sync refreshes the KB');
   }
@@ -110,12 +123,12 @@ export default {
   id: 'ruvnet-brain',
   // A Brain drift the caller already holds (versionEvidence: what ak sync
   // looked up or read from the cache, ADR-0063) is used as given.
-  async collect({ cfg, refresh = false, versionEvidence }) {
+  async collect({ cfg, refresh = false, versionEvidence, retryBrain = false }) {
     const rows = [];
     if (!cfg.ruvnetBrain) return rows;
     try {
       const b = versionEvidence?.brain ?? await ruvnetBrainDrift({ force: refresh });
-      rows.push(brainReleaseRow(b));
+      rows.push(brainReleaseRow(b, { retry: retryBrain }));
     } catch (e) {
       rows.push(row('ruvnet-brain', 'warn', `ruvnet-brain check unavailable: ${e.message}`));
     }

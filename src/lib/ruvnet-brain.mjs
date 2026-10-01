@@ -128,6 +128,18 @@ export function present() {
     || fs.existsSync(pluginCache());
 }
 
+/** Distinguish confirmed KB absence from an unreadable or unusable entrypoint. */
+export function kbState() {
+  try {
+    const entrypoint = path.join(kbDir(), 'forge-mcp-all.mjs');
+    if (!fs.statSync(entrypoint).isFile()) return 'unknown';
+    fs.accessSync(entrypoint, fs.constants.R_OK);
+    return 'present';
+  } catch (error) {
+    return error.code === 'ENOENT' ? 'missing' : 'unknown';
+  }
+}
+
 /** Installed plugin version, or null. Reads the plugin manifest; falls back to
  *  the version-named subdir under the plugin cache. */
 export function installedVersion() {
@@ -229,7 +241,7 @@ export function recordInstalledRelease(tag, cfg = loadKitConfig()) {
 export function recordHeldRefresh({ detail, latest }, cfg = loadKitConfig()) {
   if (!latest) return;
   const cur = cfg.versionCheck?.ruvnetBrain ?? {};
-  const installed = installedReleaseOnDisk() ?? cur.installedRelease ?? null;
+  const installed = kbState() === 'missing' ? null : installedReleaseOnDisk() ?? cur.installedRelease ?? null;
   cfg.versionCheck = {
     ...cfg.versionCheck,
     ruvnetBrain: {
@@ -240,12 +252,18 @@ export function recordHeldRefresh({ detail, latest }, cfg = loadKitConfig()) {
   try { saveKitConfig(cfg); } catch { /* read-only envs: best-effort */ }
 }
 
-/** The held refresh that still applies to this drift result, or null: only an
- *  exact (installed, latest) match holds — either release changing is a new attempt. */
-export function activeHeldRefresh(b) {
+/** A fresh refusal holds only its exact release pair. Expired/invalid times
+ * permit one half-open attempt; a repeated refusal records a new hold. */
+export function activeHeldRefresh(b, { now = Date.now() } = {}) {
   const held = b?.heldRefresh;
   if (!held || !b.latest) return null;
-  return held.latest === b.latest && (held.installed ?? null) === (b.installedRelease ?? null) ? held : null;
+  if (held.latest !== b.latest || (held.installed ?? null) !== (b.installedRelease ?? null)) return null;
+  if (!Number.isFinite(now)) return held;
+  const configuredMs = typeof b.holdTtlHours === 'number' ? b.holdTtlHours * 3600_000 : NaN;
+  const ttlMs = Number.isFinite(configuredMs) && configuredMs > 0 && configuredMs <= Number.MAX_SAFE_INTEGER
+    ? configuredMs : 24 * 3600_000;
+  if (!Number.isSafeInteger(held.at) || held.at <= 0 || held.at > now) return null;
+  return now - held.at < ttlMs ? held : null;
 }
 
 /** Pure drift classifier — both sides in the RELEASE-TAG namespace.
@@ -312,7 +330,9 @@ export async function drift({ force = false, cacheOnly = false, record = true, f
   const observed = fresh ? recordedRelease(cached, 'cache')
     : cacheOnly ? recordedRelease(cached, 'cache-fallback')
       : await lookUpRelease(cfg, cached, { record, fetchImpl });
-  const installedRelease = installedReleaseOnDisk() ?? cached.installedRelease ?? null;
+  const knowledgeBaseState = kbState();
+  const installedRelease = knowledgeBaseState === 'missing'
+    ? null : installedReleaseOnDisk() ?? cached.installedRelease ?? null;
   return {
     ...classifyDrift({ present: present(), installedRelease, latest: observed.latest }),
     releaseAssetAvailable: observed.releaseAssetAvailable,
@@ -320,5 +340,8 @@ export async function drift({ force = false, cacheOnly = false, record = true, f
     latestObservedAt: observed.latestObservedAt,
     pluginVersion: installedVersion(),
     heldRefresh: cached.heldRefresh ?? null,
+    holdTtlHours: cfg.versionCheck?.ttlHours ?? 24,
+    kbState: knowledgeBaseState,
+    lastRecordedRelease: cached.installedRelease ?? null,
   };
 }

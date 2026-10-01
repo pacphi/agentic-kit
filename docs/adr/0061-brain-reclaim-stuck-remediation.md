@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
+- **Updated:** 2026-09-30 — #271 adds bounded hold expiry, separate KB absence/access evidence and one-shot sync retry; disposable kit-path proof is separate from live upstream recovery.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (machine-footprint metrics; this
   record deliberately does not add a new footprint subsystem there — see §4),
@@ -87,16 +88,34 @@ refusal forever.
    refused for a Brain with private stores, *after* downloading the whole bundle. `ak sync`
    auto-running this for every user hitting a reclaim-stuck hold would trade one silent failure
    mode for a more expensive one. The user decides.
-5. **No new install-routing logic.** `installRuvnetBrain()` already does the right thing once
-   `--uninstall` has run: `updaterPresent()` becomes false (no `forge-update.mjs` on disk),
+5. **Installer-level fresh routing, not a complete sync proof.** Once the installer is reached
+   after `--uninstall`, `updaterPresent()` becomes false (no `forge-update.mjs` on disk),
    `present()` stays true (the plugin cache survives), so the existing pinned
    `--force --version v<tag>` fresh-install branch fires and `recordRelease` clears the hold on
-   success. This record adds a test that pins that existing behavior, not new code for it.
+   success. The original test pins installer dispatch, not sync reaching it while a hold applies.
+   The historical 4.3.29 escape hatch above is not a guarantee for later upstream installers.
 6. **No new footprint-metrics subsystem.** [ADR-0025](0025-machine-footprint-metrics.md) owns
    machine footprint reporting; a one-sentence mention of a legacy-snapshot count inside an
    already-existing warning row is not a new dashboard card, and this record does not attempt to
    fold the two together — that's future work if the legacy-snapshot signal proves worth
    surfacing outside this one warning.
+7. **Bounded hold expiry (#271).** A hold applies only to its release pair and a valid fresh
+   timestamp. The configured positive finite version-check TTL applies, defaulting to 24 hours
+   for invalid values. Expired, missing, malformed or future hold timestamps permit a half-open
+   attempt; a new refusal records a fresh hold. An unreadable current clock does not authorize
+   expiry. Status evaluation never deletes the stored refusal or private snapshots.
+8. **Missing KB is not an installed release.** A surviving plugin cache can remain present
+   after KB removal. Confirmed missing entrypoint clears only the observed installed-release
+   value, not the stored historical stamp; that release-pair change permits a fresh attempt.
+   A new refusal binds the null installed side and restores the normal hold. Access errors
+   remain unknown/manual, never automatic fresh-install evidence. Missing/unverified release
+   assets still block installer actions. No KB or snapshot deletion is automated.
+9. **Explicit one-shot retry.** `ak sync --retry-brain` bypasses a fresh refusal hold only
+   during plan collection. The stored refusal remains until installation succeeds or records
+   a new refusal. Postcondition collection uses ordinary hold semantics; no retry loop is added.
+   Dry-run only previews. No-upgrade, explicit Brain skip and disabled management conflict
+   with the flag and are rejected before lookups/repairs. Unknown KB access or unavailable
+   release assets remain blocked. The flag is not a cross-process attempt lock.
 
 ## Consequences
 
