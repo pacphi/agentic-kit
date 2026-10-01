@@ -624,6 +624,60 @@ async function stepPurgeExtras(ctx) {
   await purgeAgentdb(x, ctx);
 }
 
+// #312 (exit release): ak's own config and state folders go once every teardown that reads
+// receipts has finished. Two things are the user's data, not ak's, and stay unless a typed
+// interactive yes (not --yes) says otherwise: the AQE store-merge archives and backups, and
+// the user-level Ruflo memory store. Runs LAST: install-edits.json lives in the state folder
+// and stepInstallEdits reads it.
+const UNRESTORABLE_EDITS = 'Three edits that older ak releases made inside Ruflo\'s install before ak kept receipts cannot be restored. Reinstall Ruflo to get its shipped files back.';
+
+// Only ever remove a folder this code created: its own name, and not a symlink.
+function removableOwnDir(dir) {
+  try { return path.basename(dir) === 'agentic-kit' && !fs.lstatSync(dir).isSymbolicLink(); } catch { return false; }
+}
+async function keepOrDelete(x, ctx, dir, label, question) {
+  if (!fs.existsSync(dir)) return true;
+  if (await x.confirmKeep(question)) {
+    try { fs.rmSync(dir, { recursive: true }); ok(`${label} deleted`); return false; }
+    catch (error) { warn(`${label} could not be deleted: ${error.message}`); ctx.state.extrasOk = false; return true; }
+  }
+  info(`kept ${label} (${dir}) — it is your data, not ak configuration`);
+  return true;
+}
+
+async function stepPurgeConfigState(ctx) {
+  const stateDir = path.join(paths.stateBase(), 'agentic-kit');
+  const configDir = paths.configDir();
+  const archives = paths.aqeStoreMergeDir();
+  const memory = paths.userMemoryDir();
+  if (ctx.dry) {
+    info(`[dry-run] ${UNRESTORABLE_EDITS}`);
+    info(`[dry-run] remove ${configDir} and ${stateDir} after teardown succeeds (adapter consent and grants go with the config folder)`);
+    if (fs.existsSync(archives)) info(`[dry-run] keep the AQE store-merge archives in ${archives} unless you answer yes at the prompt (--yes does not approve it)`);
+    if (fs.existsSync(memory)) info(`[dry-run] keep the Ruflo memory store ${memory} unless you answer yes at the prompt (--yes does not approve it)`);
+    return;
+  }
+  if (!ctx.state.ownershipTeardownOk) {
+    warn('config and state folders retained because a teardown above is incomplete; they hold the receipts a retry needs');
+    return;
+  }
+  const x = { ...REAL_EXTRAS, ...(ctx.deps?.extras ?? {}) };
+  const archivesKept = fs.existsSync(archives)
+    ? await keepOrDelete(x, ctx, archives, 'AQE store-merge archives and backups', `Delete the AQE store-merge archives and backups in ${archives}? They are your data.`)
+    : false;
+  await keepOrDelete(x, ctx, memory, 'the Ruflo memory store', `Delete the user-level Ruflo memory store ${memory}? It holds your memories.`);
+  if (removableOwnDir(stateDir)) {
+    for (const entry of fs.readdirSync(stateDir)) {
+      if (archivesKept && path.join(stateDir, entry) === archives) continue;
+      fs.rmSync(path.join(stateDir, entry), { recursive: true, force: true });
+    }
+    if (!fs.readdirSync(stateDir).length) fs.rmdirSync(stateDir);
+    ok(`removed ak state${archivesKept ? ' (archives kept)' : ''}`);
+  }
+  if (removableOwnDir(configDir)) { fs.rmSync(configDir, { recursive: true, force: true }); ok('removed ak config'); }
+  info(UNRESTORABLE_EDITS);
+}
+
 function stepPurgeArtifacts(ctx) {
   for (const [label, file] of [
     ['model inventory cache', modelInventoryPath()], ['model scope key', modelScopeKeyPath()],
@@ -798,6 +852,7 @@ export const UNINSTALL_STEPS = [
   { id: 'this-project', when: (ctx) => ctx.flags['this-project'], run: stepThisProject },
   { id: 'install-edits', when: () => true, run: stepInstallEdits },
   { id: 'global-packages', when: () => true, run: stepGlobalPackages },
+  { id: 'purge-config-state', when: (ctx) => ctx.flags.purge, run: stepPurgeConfigState },
   { id: 'ruvnet-brain-notice', when: () => true, run: stepRuvnetBrainNotice },
 ];
 
