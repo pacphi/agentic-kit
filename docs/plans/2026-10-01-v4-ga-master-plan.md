@@ -2,8 +2,8 @@
 
 ## Status
 
-**Active: decisions in progress.** Decisions 1–3 are made, and an amendment to Decision 3 is
-proposed. Decisions 4–8 are open. No GitHub issues have been created yet. When the decisions are
+**Active: decisions in progress.** Decisions 1–3 are made, including the amendment to
+Decision 3. Decisions 4–8 are open. No GitHub issues have been created yet. When the decisions are
 complete, this file gains the card inventory (scope, acceptance criteria, size, release and
 dependencies for every card) for review before any issue is created.
 
@@ -39,7 +39,7 @@ has the same columns: Backlog, Ready, In progress, In review and Done.
 | 1 | Release train and version names | **A.** `4.0.0-alpha.61` is the last alpha and the exit release; `next` stays on it. The project-scoped line ships as `4.0.0-beta.1` … `beta.4` on a new **`beta`** npm tag, so older installations never update into it on their own. Then `4.0.0-rc.N` on `next`, and `4.0.0` on `latest`. The release workflow change is a `beta.1` card. |
 | 2 | What `beta.1` covers | **B.** Claude Code and Codex, including the Codex exception register. OpenCode and add-on hosts follow in `beta.2`. Acceptance criterion on every beta release card until all hosts are back: the release notes say which hosts are supported, which are not yet, the release each is planned for, and that users who rely on them should stay on `alpha.61`. |
 | 3 | What each board holds | **A, across three boards.** **v4.0.0:** the project-scope redesign (prerequisites A–C, then P0–P7), remediation v2 close-out and its surviving leftovers, #271, #262, #257, #240 and #213 (waiting on upstream), the gpt-6.1-sol model registry update, and GA readiness. **v4.1.0:** #255, starting with a design card. **v5.0.0:** #239, plus intake cards for the `codex/v5-experience-research` branch, the dashboard taxonomy proposal, and the Claude artifacts and meeting sources in the [v5 planning sources](../proposals/v5-planning-sources.md) register. |
-| 3a | Upstream integration (proposed amendment, awaiting confirmation) | v4.1.0 gains an **Upstream integration** epic. Its standing card runs the upstream report at the start of v4.1 planning and turns each released fix, or each workaround ak still carries, into a unit card through the existing dispatch flow. A second card raises the tested version range and the default pins. First cards: agentic-qe#655 and #753 (released, workaround still carried), plus an intake card for the three threads with no recorded ak change. **The rule:** upstream work belongs to v4.1.0, unless a fix ships before `4.0.0-rc.1` **and** either removes a workaround the redesign is already touching or affects GA quality. Items still waiting at rc.1 move to v4.1.0. |
+| 3a | Upstream integration (amendment, confirmed) | v4.1.0 gains an **Upstream integration** epic. Its standing card runs the upstream report at the start of v4.1 planning and turns each released fix, or each workaround ak still carries, into a unit card through the existing dispatch flow. A second card raises the tested version range and the default pins. First cards: agentic-qe#655 and #753 (released, workaround still carried), plus an intake card for the three threads with no recorded ak change. **The rule:** upstream work belongs to v4.1.0, unless a fix ships before `4.0.0-rc.1` **and** either removes a workaround the redesign is already touching or affects GA quality. Items still waiting at rc.1 move to v4.1.0. |
 | 4 | How the remaining remediation is sequenced against the redesign | Open |
 | 5 | How release, size and workstream are recorded | Open |
 | 6 | How dependencies are recorded | Open |
