@@ -26,6 +26,7 @@ import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
 import { disableRuvnetBrainNightly } from '../lib/heal.mjs';
 import { AQE_EMBEDDING_MODEL, OLLAMA_EMBEDDING_MODEL } from '../lib/aqe-embedding-config.mjs';
 import * as paths from '../lib/paths.mjs';
+import { brainShimPath } from '../lib/opencode-core.mjs';
 import { ok, warn, fail, info } from '../lib/output.mjs';
 import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
 import { modelInventoryPath, modelScopeKeyPath } from '../lib/model-inventory/store.mjs';
@@ -543,27 +544,63 @@ const REAL_EXTRAS = {
   run: runCmd,
   have,
   brainPresent: rbPresent,
+  brainShim: brainShimPath,
   disableNightly: disableRuvnetBrainNightly,
   // The standalone global copy, never the one Ruflo bundles inside its own tree.
   agentdbDir: () => { try { const d = path.join(paths.globalRoot(), 'agentdb'); return fs.existsSync(d) ? d : null; } catch { return null; } },
 };
 const AGENTDB_REMOVE_CMD = 'npm uninstall -g agentdb';
 
+// The Brain installer, not ak, writes this stable-spine MCP shim, so it goes only after the
+// same confirmation as the plugin, only as a regular file, and its folders only when empty.
+function brainShimFile(x) {
+  const shim = x.brainShim();
+  try {
+    if (fs.lstatSync(shim).isFile()) return shim;
+    info(`${shim} is not a regular file — left alone`);
+  } catch { /* absent */ }
+  return null;
+}
+function removeBrainShim(shim, ctx) {
+  try {
+    fs.rmSync(shim);
+    for (const dir of [path.dirname(shim), path.dirname(path.dirname(shim))]) {
+      try { fs.rmdirSync(dir); } catch { break; } // not empty or already gone: leave it
+    }
+    ok(`RuvNet Brain MCP shim: removed ${shim}`);
+  } catch (e) {
+    warn(`RuvNet Brain MCP shim: could not remove ${shim} — ${e.message}`);
+    ctx.state.extrasOk = false;
+  }
+}
+
 async function purgeBrain(x, ctx) {
-  if (!x.brainPresent()) return;
+  const plugin = x.brainPresent();
+  const shim = brainShimFile(x);
+  if (!plugin && !shim) return;
+  const what = [
+    plugin && 'the RuvNet Brain plugin and its nightly LaunchAgent',
+    shim && `the Brain MCP shim ${shim}`,
+  ].filter(Boolean).join(' and ');
   if (ctx.dry) {
-    info('[dry-run] remove the RuvNet Brain plugin and its nightly LaunchAgent (confirmed); the knowledge base in ~/.cache/ruvnet-brain is kept');
+    info(`[dry-run] remove ${what} (confirmed); the knowledge base in ~/.cache/ruvnet-brain is kept`);
     return;
   }
-  if (!await x.confirm('Remove the RuvNet Brain plugin and its nightly LaunchAgent? The knowledge base is kept.', ctx.flags.yes)) {
-    info('kept the RuvNet Brain plugin');
+  if (!await x.confirm(`Remove ${what}? The knowledge base is kept.`, ctx.flags.yes)) {
+    info('kept the RuvNet Brain plugin and shim');
     return;
   }
-  const plugin = await x.run('claude', ['plugin', 'uninstall', 'ruvnet-brain@ruvnet-brain'], { timeout: 60_000 });
-  const nightly = await x.disableNightly();
-  (plugin.code === 0 ? ok : warn)(`RuvNet Brain plugin: ${plugin.code === 0 ? 'removed' : 'could not remove — run `claude plugin uninstall ruvnet-brain@ruvnet-brain`'}`);
-  (nightly.ok ? ok : warn)(`RuvNet Brain nightly updater: ${nightly.detail}`);
-  if (plugin.code !== 0 || !nightly.ok) ctx.state.extrasOk = false;
+  let pluginGone = !plugin;
+  if (plugin) {
+    const removed = await x.run('claude', ['plugin', 'uninstall', 'ruvnet-brain@ruvnet-brain'], { timeout: 60_000 });
+    const nightly = await x.disableNightly();
+    pluginGone = removed.code === 0;
+    (pluginGone ? ok : warn)(`RuvNet Brain plugin: ${pluginGone ? 'removed' : 'could not remove — run `claude plugin uninstall ruvnet-brain@ruvnet-brain`'}`);
+    (nightly.ok ? ok : warn)(`RuvNet Brain nightly updater: ${nightly.detail}`);
+    if (!pluginGone || !nightly.ok) ctx.state.extrasOk = false;
+  }
+  if (shim && pluginGone) removeBrainShim(shim, ctx);
+  else if (shim) warn(`RuvNet Brain MCP shim kept at ${shim} while the plugin is installed — run the purge again once the plugin is removed`);
   info('RuvNet Brain knowledge base kept in ~/.cache/ruvnet-brain (delete it yourself if you do not want it)');
 }
 

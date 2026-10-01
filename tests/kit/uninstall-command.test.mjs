@@ -635,6 +635,86 @@ test('declining the Brain confirmation removes nothing', async () => {
   assert.ok(!calls.some((c) => c[0] === 'nightly'));
 });
 
+// The Brain installer (not ak) writes a stable-spine MCP shim at ~/.claude/ruvnet-brain/mcp/server.mjs.
+// --purge removes that one file after the Brain confirmation, and its folders only when empty.
+const { brainShimPath } = await import('../../src/lib/opencode-core.mjs');
+function seedShim(extra = {}) {
+  const shim = brainShimPath();
+  fs.mkdirSync(path.dirname(shim), { recursive: true });
+  fs.writeFileSync(shim, '// shim\n');
+  if (extra.sibling) {
+    fs.mkdirSync(path.dirname(extra.sibling), { recursive: true });
+    fs.writeFileSync(extra.sibling, 'upstream file');
+  }
+  return shim;
+}
+
+test('--purge removes the Brain MCP shim and then its empty folders', async () => {
+  seedHome();
+  const shim = seedShim();
+  const { out } = await purgeWith(fakeExtras([]), { yes: true });
+  assert.equal(fs.existsSync(shim), false);
+  assert.equal(fs.existsSync(path.dirname(path.dirname(shim))), false, 'the empty ruvnet-brain folder goes too');
+  assert.match(out, /Brain MCP shim/i);
+});
+
+test('the Brain shim removal never deletes another file the installer put beside it', async () => {
+  seedHome();
+  const sibling = path.join(path.dirname(path.dirname(brainShimPath())), 'hooks', 'notes.txt');
+  const shim = seedShim({ sibling });
+  await purgeWith(fakeExtras([]), { yes: true });
+  assert.equal(fs.existsSync(shim), false);
+  assert.equal(fs.existsSync(path.dirname(shim)), false, 'the emptied mcp folder is removed');
+  assert.equal(fs.readFileSync(sibling, 'utf8'), 'upstream file', 'a file ak did not ask about survives');
+});
+
+test('declining the Brain confirmation keeps the shim', async () => {
+  seedHome();
+  const shim = seedShim();
+  await purgeWith(fakeExtras([], { confirm: false }));
+  assert.equal(fs.existsSync(shim), true);
+});
+
+test('the Brain shim stays while the plugin could not be removed, and the purge fails', async () => {
+  seedHome();
+  const shim = seedShim();
+  const { result, out } = await purgeWith(fakeExtras([], { runCode: 1 }), { yes: true });
+  assert.equal(fs.existsSync(shim), true);
+  assert.equal(result, 1);
+  assert.match(out, /shim kept/i);
+});
+
+test('a shim left behind after the plugin is gone is still removed on a retry', async () => {
+  seedHome();
+  const shim = seedShim();
+  const calls = [];
+  await purgeWith(fakeExtras(calls, { brain: false }), { yes: true });
+  assert.equal(fs.existsSync(shim), false);
+  assert.deepEqual(ran(calls).filter((c) => c.includes('plugin')), [], 'no plugin command when the plugin is already gone');
+});
+
+test('a Brain shim that is not a regular file is left alone', { skip: process.platform === 'win32' }, async () => {
+  seedHome();
+  const shim = brainShimPath();
+  const target = path.join(HOME, 'elsewhere.mjs');
+  fs.writeFileSync(target, 'user file');
+  fs.mkdirSync(path.dirname(shim), { recursive: true });
+  fs.symlinkSync(target, shim);
+  await purgeWith(fakeExtras([], { brain: false }), { yes: true });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'user file');
+  assert.equal(fs.lstatSync(shim).isSymbolicLink(), true);
+});
+
+test('--purge --dry-run names the Brain shim and removes nothing; a plain uninstall ignores it', async () => {
+  seedHome();
+  const shim = seedShim();
+  const { out } = await purgeWith(fakeExtras([]), { yes: true, 'dry-run': true });
+  assert.match(out, /\[dry-run\].*Brain MCP shim/);
+  assert.equal(fs.existsSync(shim), true);
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([]) } }));
+  assert.equal(fs.existsSync(shim), true);
+});
+
 test('--purge removes the Ollama alias only when it is a copy of the model ak pulled', async () => {
   seedHome();
   const calls = [];
