@@ -706,3 +706,85 @@ test('a plain uninstall touches none of the extras', async () => {
   await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls) } }));
   assert.deepEqual(ran(calls), []);
 });
+
+// #312 (exit release): after teardown succeeds, --purge removes ak's state and config
+// folders, but keeps the user's data: AQE store-merge archives and ~/.claude-flow/memory
+// stay unless a typed interactive yes says otherwise (--yes does not).
+function seedLeftovers() {
+  seedHome();
+  const state = path.join(paths.stateBase(), 'agentic-kit');
+  fs.mkdirSync(path.join(state, 'aqe-store-merge', 'backup-1'), { recursive: true });
+  fs.writeFileSync(path.join(state, 'aqe-store-merge', 'backup-1', 'memory.db'), 'user data');
+  fs.mkdirSync(path.join(state, 'evidence'), { recursive: true });
+  fs.writeFileSync(path.join(state, 'evidence', 'x.json'), '{}');
+  fs.writeFileSync(path.join(paths.configDir(), 'adapter-consent.json'), '{}');
+  fs.writeFileSync(path.join(paths.configDir(), 'adapter-grants.json'), '{}');
+  const memory = paths.userMemoryDir();
+  fs.mkdirSync(memory, { recursive: true });
+  fs.writeFileSync(path.join(memory, 'memory.db'), 'memories');
+  return { state, memory, archives: path.join(state, 'aqe-store-merge') };
+}
+const purgeData = (extrasOver = {}, flags = {}, depsOver = {}) => captureLog(() => uninstall.run({
+  flags: { purge: true, ...flags },
+  deps: { undo: fakeUndo([]), extras: fakeExtras([], { brain: false, ...extrasOver }), ...depsOver },
+}));
+
+test('a default --purge removes ak config and state but keeps AQE archives and the Ruflo memory store', async () => {
+  const { state, memory, archives } = seedLeftovers();
+  const { result, out } = await purgeData({}, { yes: true });
+  assert.equal(result, 0, out);
+  assert.equal(fs.existsSync(path.join(paths.configDir(), 'adapter-consent.json')), false, 'adapter consent goes with the config folder');
+  assert.equal(fs.existsSync(path.join(paths.configDir(), 'adapter-grants.json')), false, 'adapter grants go with the config folder');
+  assert.equal(fs.existsSync(path.join(state, 'evidence')), false);
+  assert.equal(fs.existsSync(path.join(archives, 'backup-1', 'memory.db')), true, 'archives are user data');
+  assert.equal(fs.existsSync(path.join(memory, 'memory.db')), true, 'the Ruflo memory store is user data');
+  assert.match(out, /kept.*aqe-store-merge/i);
+  assert.match(out, /kept.*\.claude-flow[\\/]memory/i);
+});
+
+test('only a typed interactive yes deletes the archives and the memory store; --yes does not', async () => {
+  const { memory, archives } = seedLeftovers();
+  await purgeData({ confirmKeep: true }, { yes: true });
+  assert.equal(fs.existsSync(archives), false);
+  assert.equal(fs.existsSync(memory), false);
+});
+
+test('a failed teardown keeps config and state folders for the retry', async () => {
+  const { state } = seedLeftovers();
+  const undo = fakeUndo([], { codexMcp: async () => ({ ok: false, changed: false, detail: 'codex MCP removal failed' }) });
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { codex: { mcp: 'ak' } } } });
+  const { result } = await purgeData({}, { yes: true }, { undo });
+  assert.equal(result, 1);
+  assert.equal(fs.existsSync(path.join(state, 'evidence', 'x.json')), true);
+  assert.equal(fs.existsSync(paths.kitConfigPath()), true);
+});
+
+test('state is cleaned after the install-edit receipts are used, never before', async () => {
+  const { state } = seedLeftovers();
+  let receiptSeen = null;
+  const receipts = path.join(state, 'install-edits.json');
+  fs.writeFileSync(receipts, '{"edits":[]}');
+  const installEdits = { ledger: receipts, runner: async () => { receiptSeen = fs.existsSync(receipts); return { code: 0, stdout: '', stderr: '' }; } };
+  await purgeData({}, { yes: true }, { installEdits });
+  assert.equal(fs.existsSync(receipts), false, 'removed in the end');
+  assert.notEqual(receiptSeen, false, 'present whenever the restore step ran');
+});
+
+test('--purge --dry-run names the unrestorable edits and each folder it would keep or remove', async () => {
+  const { state, memory, archives } = seedLeftovers();
+  const before = snapshot(HOME);
+  const { out } = await purgeData({}, { yes: true, 'dry-run': true });
+  assert.match(out, /\[dry-run\].*three edits.*before.*receipts.*cannot be restored/i);
+  assert.match(out, /reinstall Ruflo/i);
+  assert.match(out, /\[dry-run\].*aqe-store-merge/);
+  assert.match(out, /\[dry-run\].*\.claude-flow[\\/]memory/);
+  assertUnchanged(before, HOME, 'a previewed purge must not touch the filesystem');
+  assert.ok(fs.existsSync(state) && fs.existsSync(memory) && fs.existsSync(archives));
+});
+
+test('a plain uninstall never removes config, state, archives or memory', async () => {
+  const { state, memory } = seedLeftovers();
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([], { brain: false }) } }));
+  assert.equal(fs.existsSync(path.join(state, 'evidence', 'x.json')), true);
+  assert.equal(fs.existsSync(path.join(memory, 'memory.db')), true);
+});
