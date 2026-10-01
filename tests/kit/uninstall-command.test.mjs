@@ -518,3 +518,74 @@ test('uninstall restores autoStart and removes the managed daemon keys in receip
   assert.match(run.out, /ruflo daemon settings restored/);
   rmrf(root, elsewhere);
 });
+
+// #310 (exit release): --purge runs the host-off teardown that `ak host off` runs —
+// provider env, the AQE router, the Codex MCP entries and the AQE embedding
+// projections — while kit.json still holds the receipts, then deletes kit.json.
+function seedHostOwnership(ownership) {
+  seedHome();
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { codex: ownership } } });
+}
+function fakeUndo(calls, overrides = {}) {
+  const ok = (detail) => ({ ok: true, changed: true, detail });
+  return {
+    providers: (cwd) => { calls.push(['providers', cwd]); return ok('provider env restored'); },
+    aqeRouter: (cwd) => { calls.push(['aqeRouter', cwd]); return ok('aqe router restored'); },
+    codexMcp: async (cwd, opts) => { calls.push(['codexMcp', cwd, opts.managed]); return ok('codex MCP removed'); },
+    rufloMcpInCodex: async (cwd, opts) => { calls.push(['rufloMcpInCodex', cwd, opts.managed]); return ok('ruflo MCP removed from codex'); },
+    aqeEmbedding: (cfg, cwd) => { calls.push(['aqeEmbedding', cfg.aqeEmbedding?.mode, cwd]); return ok('embedding projections released'); },
+    ...overrides,
+  };
+}
+
+test('--purge runs every host-off teardown, each before kit.json is deleted', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  let kitJsonSeen = null;
+  const undo = fakeUndo(calls, {
+    aqeEmbedding: (cfg, cwd) => { kitJsonSeen = fs.existsSync(paths.kitConfigPath()); calls.push(['aqeEmbedding', cfg.aqeEmbedding?.mode, cwd]); return { ok: true, changed: true, detail: 'x' }; },
+  });
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true }, deps: { undo } }));
+  assert.equal(result, 0, out);
+  assert.deepEqual(calls.map((c) => c[0]), ['providers', 'aqeRouter', 'codexMcp', 'rufloMcpInCodex', 'aqeEmbedding']);
+  assert.equal(calls.find((c) => c[0] === 'codexMcp')[2], true, 'ak-owned Codex MCP is removed');
+  assert.equal(calls.find((c) => c[0] === 'rufloMcpInCodex')[2], true, 'ak-owned ruflo-in-Codex entry is removed');
+  assert.equal(calls.find((c) => c[0] === 'aqeEmbedding')[1], 'unmanaged', 'embedding projections are released through the receipts');
+  assert.equal(kitJsonSeen, true, 'teardown reads receipts while kit.json still exists');
+  assert.equal(fs.existsSync(paths.kitConfigPath()), false);
+});
+
+test('--purge never removes a Codex MCP entry the user added themselves', async () => {
+  seedHostOwnership({});
+  const calls = [];
+  await captureLog(() => uninstall.run({ flags: { yes: true, purge: true }, deps: { undo: fakeUndo(calls) } }));
+  assert.equal(calls.find((c) => c[0] === 'codexMcp')[2], false);
+  assert.equal(calls.find((c) => c[0] === 'rufloMcpInCodex')[2], false);
+});
+
+test('a failed host teardown keeps kit.json under --purge and exits 1', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  const undo = fakeUndo(calls, { codexMcp: async () => ({ ok: false, changed: false, detail: 'codex MCP removal failed: exit 1' }) });
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true }, deps: { undo } }));
+  assert.equal(result, 1, out);
+  assert.match(out, /codex MCP removal failed/);
+  assert.ok(fs.existsSync(paths.kitConfigPath()), 'kit.json holds the receipts a retry needs');
+});
+
+test('--purge --dry-run lists each host teardown step and runs none', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  const before = snapshot(HOME);
+  const { out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true, 'dry-run': true }, deps: { undo: fakeUndo(calls) } }));
+  assert.deepEqual(calls, []);
+  for (const label of ['provider env', 'AQE router', 'Codex MCP', 'AQE embedding']) assert.match(out, new RegExp(`\\[dry-run\\].*${label}`));
+  assertUnchanged(before, HOME, 'a previewed purge must not touch the filesystem');
+});
+
+test('a plain uninstall (no --purge) leaves provider env and Codex MCP alone', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo(calls) } }));
+  assert.deepEqual(calls, []);
+});
