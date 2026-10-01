@@ -11,7 +11,7 @@ shipped", blocked by the `4.0.0` release card.
 
 | Key | Source |
 | --- | --- |
-| DSN | [Project-scoped management only](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md) (the design) |
+| DSN | [Project-scoped management only](../plans/2026-10-01-project-scope-only-design.md) (the design) |
 | GA | The [v4 GA master plan](../plans/2026-10-01-v4-ga-master-plan.md) |
 | ME | `meeting-evidence.md` |
 | RPT | `report.md` |

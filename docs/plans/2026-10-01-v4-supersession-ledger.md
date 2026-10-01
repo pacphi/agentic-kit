@@ -40,7 +40,7 @@ Each entry has a source citation, a state, the redesign's impact on it, and one 
 
 **Citation keys:**
 
-- **DSN** is the [design](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md).
+- **DSN** is the [design](2026-10-01-project-scope-only-design.md).
 - **v2** is [remediation program v2](2026-09-28-remediation-program-v2.md).
 - **EX** is its [develop execution plan](2026-09-28-remediation-v2-develop-execution.md).
 - **v1** is [remediation program v1](2026-09-26-remediation-program.md).

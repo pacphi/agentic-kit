@@ -2,11 +2,12 @@
 
 ## Status
 
-**Active: decisions complete; card inventory ready for review.** Decisions 1–8 are made, with
-amendments 3a and 3b and the design gaps G1, G6, G10, G12 and G13. The
-[card inventory](#card-inventory) has 127 cards in `.github/program/v4-ga-cards.csv`. No GitHub
-issue has been created yet. Three PRs that carry finished work (#291, #292 and #293) are held as
-drafts until their cards exist.
+**Active: issues created.** Decisions 1–8 are made, with amendments 3a and 3b and the design gaps
+G1, G6, G10, G12 and G13. On 2026-10-01 the [card inventory](#card-inventory) became GitHub issues:
+the 13 epics are #294–#306, the 107 new cards are #307–#413, and seven cards adopted existing
+issues. The `issue` column of `.github/program/v4-ga-cards.csv` records each number. The first
+dependency sync ran the same day: it added 193 links, and a second run found nothing left to add.
+The held PRs #291, #292 and #293 were then linked to their cards.
 
 ## Boards
 
@@ -124,9 +125,10 @@ committed.
 
 With the 13 epics, that makes 127 cards.
 
-**Existing issues the cards adopt.** These keep their numbers and titles. Each gets its routing
-label, milestone, size and workstream labels, and a comment in card format, instead of a rewritten
-body.
+**Existing issues the cards adopt.** These keep their numbers, titles and text. Each gets its
+routing label, milestone, size and workstream labels, its issue type and its epic. The card's
+sections are appended below the existing text, which stays unchanged. They go in the body rather
+than a comment because the dependency sync reads only issue bodies.
 
 | Card | Issue | PR |
 | --- | --- | --- |
@@ -137,6 +139,10 @@ body.
 | `GA-05` | #213 | — |
 | `C41-01` | #255 | — |
 | `V5-01` | #239 | — |
+
+**#239 is the one exception.** Another contributor opened it, so its text is left exactly as
+written. Its card, including its **Blocked by** line, is a comment, and the dependency sync does not
+see it. The first sync therefore adds 193 links, not 194.
 
 **How the issues are created, after this PR merges:**
 
@@ -265,13 +271,10 @@ Exit codes: `0` means success, `1` an error (the message says which), `2` a usag
 
 ## Sources
 
-- [Project-scoped management only](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md), and its prerequisites:
-  - [A: the dangling Ruflo reference pointer](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-ruflo-reference-pointer.md);
-  - [B: Intelligence writes into projects](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-intelligence-no-project-writes.md);
-  - [C: hook scope in the Maintenance inventory](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-maintenance-hook-scope.md).
-
-  Until that design's pull request merges, these documents live on the branch
-  `docs/project-scope-only-design`.
+- [Project-scoped management only](2026-10-01-project-scope-only-design.md), and its prerequisites:
+  - [A: the dangling Ruflo reference pointer](2026-10-01-prereq-ruflo-reference-pointer.md);
+  - [B: Intelligence writes into projects](2026-10-01-prereq-intelligence-no-project-writes.md);
+  - [C: hook scope in the Maintenance inventory](2026-10-01-prereq-maintenance-hook-scope.md).
 - [Remediation program v2](2026-09-28-remediation-program-v2.md), its
   [develop execution plan](2026-09-28-remediation-v2-develop-execution.md), and the
   [issues 237–239 decision log](2026-09-26-issues-237-238-239-verification-and-decisions.md).
