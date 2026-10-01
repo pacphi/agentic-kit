@@ -1,8 +1,8 @@
 // Shared harness for tests that need a REAL dashboard-server.mjs HTTP server,
 // in a real child process with tests/helpers/spawn-guard.mjs preloaded (Branch
-// 6a Task 9 — proving the in-process /api/status path spawns nothing on a warm
+// Proving the in-process /api/status path spawns nothing on a warm
 // cache needs the same "every child_process spawn lands in a ledger" technique
-// tests/fixtures/status-zero-spawn-child.mjs (Task 8a) uses for a bare
+// tests/fixtures/status-zero-spawn-child.mjs uses for a bare
 // collect() call, applied here to a whole running server instead).
 //
 // Unlike status-zero-spawn-child.mjs (which drives collect() directly and

@@ -49,19 +49,23 @@ import { beginMaintUndo } from './system-maintenance-actions.mjs';
       +(entry.at?" — "+esc(mntAge(entry.at)):"")+"</li>";
   }
   var mntExpandedHistoryDays=new Set();
+  function mntScanTime(entry){
+    var recorded=entry&&entry.recordedAt,completed=entry&&entry.completedAt;
+    return recorded&&Number.isFinite(Date.parse(recorded))?recorded:(completed&&Number.isFinite(Date.parse(completed))?completed:null);
+  }
   function renderMntScanHistory(){
     var el=document.getElementById("mnt-scan-history");if(!el)return;
     var history=(MNT.activity&&(MNT.activity.scanHistory||MNT.activity.scans))||[];
-    if(!history.length){el.innerHTML="<h3>Scan history</h3><p>No scans have completed yet.</p>";return;}
+    if(!history.length){el.innerHTML="<h3>Scan history</h3><p>No scan records yet.</p>";return;}
     var groups=new Map();
-    history.slice().sort(function(a,b){return (Date.parse(b.completedAt)||0)-(Date.parse(a.completedAt)||0);}).forEach(function(entry){
-      var day=formatLocalDay(entry.completedAt)||'Date not recorded';
+    history.slice().sort(function(a,b){return (Date.parse(mntScanTime(b))||0)-(Date.parse(mntScanTime(a))||0);}).forEach(function(entry){
+      var day=formatLocalDay(mntScanTime(entry))||'Date not recorded';
       if(!groups.has(day))groups.set(day,[]);
       groups.get(day).push(entry);
     });
-    el.innerHTML='<h3>Scan history</h3><div class="mnt-history-scroll" role="region" aria-label="Scan history by date" tabindex="0"><table class="mnt-coverage-table mnt-history-table"><caption class="sr-only">Scanned sources grouped by local date, newest first</caption><thead><tr><th scope="col">Date / time</th><th scope="col">Source scanned</th><th scope="col">Status</th><th scope="col">Entries</th></tr></thead>'
+    el.innerHTML='<h3>Scan history</h3><div class="mnt-history-scroll" role="region" aria-label="Scan history by date" tabindex="0"><table class="mnt-coverage-table mnt-history-table"><caption class="sr-only">Scan records grouped by local date, newest first</caption><thead><tr><th scope="col">Date / time</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col">Entries</th></tr></thead>'
       +Array.from(groups,function(group,index){var expanded=mntExpandedHistoryDays.has(group[0]);return '<tbody><tr class="mnt-history-day"><th colspan="4" scope="rowgroup"><button type="button" class="mnt-history-toggle" data-mnt-history-day="'+index+'" aria-expanded="'+expanded+'"><span class="mnt-history-chevron" aria-hidden="true"></span>'+esc(group[0])+'</button></th></tr>'
-        +group[1].map(function(entry){return '<tr'+(expanded?'':' hidden')+'><td>'+esc(formatLocalTime(entry.completedAt)||'Time not recorded')+'</td><th scope="row">'+esc(entry.label||'Source no longer configured')+'</th><td>'+esc(MNT_SOURCE_COVERAGE_LABELS[entry.state]||(entry.state==='published'?'Complete':entry.state))
+        +group[1].map(function(entry){return '<tr'+(expanded?'':' hidden')+'><td>'+esc(formatLocalTime(mntScanTime(entry))||'Time not recorded')+'</td><th scope="row">'+esc(entry.label||'Source no longer configured')+'</th><td>'+esc(MNT_SOURCE_COVERAGE_LABELS[entry.state]||(entry.state==='published'?'Complete':entry.state))
           +(entry.limitingReason?'<small>'+esc(entry.limitingReason)+'</small>':'')+'</td><td>'+(Number.isFinite(entry.visited)?esc(entry.visited.toLocaleString()):'—')+'</td></tr>';}).join('')+'</tbody>';}).join('')+'</table></div>';
     el.onclick=function(event){
       var button=event.target.closest&&event.target.closest('[data-mnt-history-day]');

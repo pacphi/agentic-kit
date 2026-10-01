@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 import { MAX_AUDIT_SOURCE_BYTES, sha256 } from '../hook-audit/common.mjs';
+import { fileId, sameFileId, statMtimeMs } from '../file-identity.mjs';
 
 export const MAX_HOOK_TARGET_BYTES = MAX_AUDIT_SOURCE_BYTES;
 
@@ -44,29 +45,27 @@ export function inspectHookTarget(file, containmentRoot, {
     const realFile = fsImpl.realpathSync(file);
     if (!contained(realRoot, realFile, platform)) throw new Error('target escapes its containment root');
     descriptor = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-    const opened = fsImpl.fstatSync(descriptor);
+    const opened = fsImpl.fstatSync(descriptor, { bigint: true });
     if (!opened.isFile() || opened.size > maxBytes) throw new Error('opened target is not a bounded regular file');
-    // BigInt identity: Windows file IDs can exceed 2^53; `opened` stays Number for the image.
-    const openedId = fsImpl.fstatSync(descriptor, { bigint: true });
-    if (openedId.dev !== stat.dev || openedId.ino !== stat.ino) {
+    if (opened.dev !== stat.dev || opened.ino !== stat.ino) {
       throw new Error('target identity changed between inspection and open');
     }
     const reopened = fsImpl.realpathSync(file);
     if (reopened !== realFile || !contained(realRoot, reopened, platform)) {
       throw new Error('target path changed between inspection and open');
     }
-    const bytes = readDescriptor(fsImpl, descriptor, opened.size);
+    const bytes = readDescriptor(fsImpl, descriptor, Number(opened.size));
     const parent = path.dirname(realFile);
-    const parentStat = fsImpl.statSync(parent);
+    const parentStat = fsImpl.statSync(parent, { bigint: true });
     return {
       file: path.resolve(file), containmentRoot: path.resolve(containmentRoot),
       realFile, realRoot, bytes, sha256: sha256(bytes), size: bytes.length,
-      mode: platform === 'win32' ? null : opened.mode & 0o777,
-      modeSupported: platform !== 'win32', mtimeMs: opened.mtimeMs,
-      uid: typeof opened.uid === 'number' ? opened.uid : null,
-      gid: typeof opened.gid === 'number' ? opened.gid : null,
-      specialMode: platform === 'win32' ? 0 : opened.mode & 0o7000,
-      parent: { realPath: parent, dev: parentStat.dev, ino: parentStat.ino },
+      mode: platform === 'win32' ? null : Number(opened.mode & 0o777n),
+      modeSupported: platform !== 'win32', mtimeMs: statMtimeMs(opened),
+      uid: typeof opened.uid === 'bigint' ? Number(opened.uid) : null,
+      gid: typeof opened.gid === 'bigint' ? Number(opened.gid) : null,
+      specialMode: platform === 'win32' ? 0 : Number(opened.mode & 0o7000n),
+      parent: { realPath: parent, dev: fileId(parentStat.dev), ino: fileId(parentStat.ino) },
     };
   } finally {
     if (descriptor !== undefined) fsImpl.closeSync(descriptor);
@@ -134,9 +133,10 @@ export function atomicReplaceHookTarget(snapshot, bytes, desiredMode = snapshot.
       || current.specialMode !== snapshot.specialMode) {
     throw new Error(`target changed immediately before replacement: ${snapshot.file}`);
   }
-  const currentParent = fsImpl.statSync(path.dirname(current.realFile));
+  const currentParent = fsImpl.statSync(path.dirname(current.realFile), { bigint: true });
   if (current.parent.realPath !== snapshot.parent.realPath
-      || currentParent.dev !== snapshot.parent.dev || currentParent.ino !== snapshot.parent.ino) {
+      || !sameFileId(currentParent.dev, snapshot.parent.dev)
+      || !sameFileId(currentParent.ino, snapshot.parent.ino)) {
     throw new Error(`target parent changed immediately before replacement: ${snapshot.file}`);
   }
   const suffix = randomBytes(12).toString('hex');

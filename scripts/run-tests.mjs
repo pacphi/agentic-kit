@@ -9,6 +9,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ownerRecord, writeOwner, prepareRunRootHolds, inspectRunRootHolds,
+  unsafeTempBase, removableRunRoot, collectAbandonedRoots, IGNORED_IN_ROOT } from './run-roots.mjs';
 import { realStateRoots, snapshotRoots, compareSnapshots, isStrict, formatReport } from './real-state-tripwire.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,7 +28,8 @@ export const SUITES = {
     ['--test', 'tests/ui/dashboard-project-context.mjs', 'tests/ui/maintenance-projects.mjs',
       'tests/ui/maintenance-host-alignment.mjs', 'tests/ui/intelligence-picker.mjs',
       'tests/ui/usage-project-groups.mjs', 'tests/ui/context-coverage.mjs', 'tests/ui/host-readiness.mjs',
-      'tests/ui/maintenance-focus.mjs', 'tests/ui/maintenance-guidance.mjs'],
+      'tests/ui/maintenance-focus.mjs', 'tests/ui/maintenance-guidance.mjs',
+      'tests/ui/session-surfaces.mjs'],
   ],
 };
 
@@ -47,23 +50,50 @@ export function commandsFor(mode, env = process.env) {
  * @param {{ env?: NodeJS.ProcessEnv, repoRoot?: string, platform?: string, homedir?: string, log?: (s: string) => void }} [o]
  * @returns {number} exit code: 2 when the suite temp root sits inside a git repository,
  *   else the first failing command's, else 3 on a real-state change, else 4 on leftover
- *   temp folders, else 0
+ *   temp folders or failed own-root inspection/cleanup, else 0
  */
 export function runGuarded(commands, {
   env = process.env, repoRoot = REPO, platform = process.platform, homedir = os.homedir(), log = console.error,
 } = {}) {
   // Every command runs with this run's own templated temp root: leftovers are then
   // attributable to the run, and they fail it.
-  const tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-suite-')));
+  const tmpdir = fs.realpathSync(os.tmpdir());
+  const unsafe = unsafeTempBase(tmpdir, fs.realpathSync(homedir));
+  if (unsafe) { log(`unsafe temp base ${tmpdir}: ${unsafe}`); return 2; }
+  const tempRoot = fs.mkdtempSync(path.join(tmpdir, 'ak-suite-'));
+  const owner = ownerRecord();
+  try { writeOwner(tempRoot, owner); }
+  catch (error) { log(`could not record run owner; kept run root ${tempRoot}: ${error.message}`); return 2; }
+  const identity = fs.lstatSync(tempRoot, { bigint: true });
+  const removeOwnRoot = () => {
+    const safe = removableRunRoot(tempRoot, { tmpdir, homedir, requireOwner: false });
+    if (!safe.ok) { log(`kept own run root ${tempRoot}: ${safe.reason}`); return false; }
+    try {
+      const current = fs.lstatSync(tempRoot, { bigint: true });
+      if (current.dev !== identity.dev || current.ino !== identity.ino || current.birthtimeNs !== identity.birthtimeNs) {
+        log(`kept own run root ${tempRoot}: directory identity changed`); return false;
+      }
+      fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });
+      try { log(`removed own run root ${tempRoot}`); }
+      catch { /* Reporting cannot change a completed removal into a failure. */ }
+      return true;
+    } catch (error) {
+      log(`own run root removal failed; may be partially removed ${tempRoot}: ${error.message}`);
+      return false;
+    }
+  };
   const enclosing = enclosingRepository(tempRoot);
   if (enclosing) {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
+    removeOwnRoot();
     log(`the suite temp root ${tempRoot} is inside the git repository ${enclosing}; tests that probe "outside a `
       + 'git repository" would write into it. Point TMPDIR outside any repository.');
     return 2;
   }
+  try { prepareRunRootHolds(tempRoot, owner.runId); }
+  catch (error) { log(`could not prepare run-root holds; kept ${tempRoot}: ${error.message}`); return 2; }
   /** @type {NodeJS.ProcessEnv} */
-  const childEnv = { ...env, TMPDIR: tempRoot, TEMP: tempRoot, TMP: tempRoot };
+  const childEnv = { ...env, TMPDIR: tempRoot, TEMP: tempRoot, TMP: tempRoot,
+    AK_SUITE_ROOT: tempRoot, AK_SUITE_RUN_ID: owner.runId };
   // Tests assert on plain text; a shell's FORCE_COLOR (Claude Code sets 3)
   // colours console.log into pipes and, beside NO_COLOR, adds a Node warning.
   delete childEnv.FORCE_COLOR;
@@ -74,16 +104,33 @@ export function runGuarded(commands, {
   let code = 0;
   for (const args of commands) {
     const r = spawnSync(process.execPath, args, { cwd: repoRoot, env: childEnv, stdio: 'inherit' });
+    if (r.signal) { log(`interrupted run; kept run root ${tempRoot}: ${r.signal}`); return 1; }
     if (r.error) { log(`could not run node ${args.join(' ')}: ${r.error.message}`); code = 1; break; }
     if (r.status !== 0) { code = r.status ?? 1; break; }
   }
-  const leftovers = fs.readdirSync(tempRoot).filter((name) => name !== 'node-compile-cache');
-  fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });
+  let leftovers = [];
+  let ownHygieneFailed = false;
+  try { leftovers = fs.readdirSync(tempRoot).filter((name) => !IGNORED_IN_ROOT.has(name)); }
+  catch (error) {
+    log(`could not list own run root; kept ${tempRoot}: ${error.message}`);
+    ownHygieneFailed = true;
+  }
+  // A child may have explicitly declared unresolved ownership before launch.
+  // Ordinary test failures still remove their own roots when all holds clear.
+  if (!ownHygieneFailed) {
+    const holds = inspectRunRootHolds(tempRoot, owner.runId);
+    if (holds.unresolved) {
+      log(`kept own run root ${tempRoot}: ${holds.reason}`);
+      ownHygieneFailed = true;
+    } else if (!removeOwnRoot()) ownHygieneFailed = true;
+  }
+  try { collectAbandonedRoots({ tmpdir, selfRoot: tempRoot, homedir, log }); }
+  catch (error) { log(`could not list sibling run roots: ${error.message}`); }
   if (leftovers.length) log(`temp folders left behind by the run (${leftovers.length}):\n  ${leftovers.join('\n  ')}`);
   const result = compareSnapshots(before, snapshotRoots(roots), { strict: isStrict(env) });
   const report = formatReport(result);
   if (report) log(report);
-  return code || (result.failing.length ? 3 : 0) || (leftovers.length ? 4 : 0);
+  return code || (result.failing.length ? 3 : 0) || (leftovers.length || ownHygieneFailed ? 4 : 0);
 }
 
 /** The nearest folder at or above `dir` that holds a `.git` entry, or null. */
@@ -100,6 +147,15 @@ function enclosingRepository(dir) {
 function main(argv) {
   const [mode] = argv;
   if (mode === 'unit' || mode === 'ui') return runGuarded(commandsFor(mode));
+  if (mode === 'focus') {
+    const files = argv.slice(1);
+    // Reject Node options disguised as filenames before constructing an argv vector.
+    if (!files.length || files.some((file) => !file || file.startsWith('-') || !isTestFile(file))) {
+      console.error('usage: run-tests.mjs focus <test files…> (each file must exist)');
+      return 2;
+    }
+    return runGuarded([['--test', ...files]]);
+  }
   if (mode === 'exec') {
     const sep = argv.indexOf('--');
     const repoAt = argv.indexOf('--repo');
@@ -107,8 +163,13 @@ function main(argv) {
     const repoRoot = repoAt >= 0 && repoAt < sep ? path.resolve(argv[repoAt + 1]) : REPO;
     return runGuarded([argv.slice(sep + 1)], { repoRoot });
   }
-  console.error('usage: run-tests.mjs unit|ui|exec');
+  console.error('usage: run-tests.mjs unit|ui|exec|focus');
   return 2;
+}
+
+function isTestFile(file) {
+  try { return fs.statSync(path.resolve(REPO, file)).isFile(); }
+  catch { return false; }
 }
 
 // Compare real paths (drive-letter case differs on Windows): a missed match would

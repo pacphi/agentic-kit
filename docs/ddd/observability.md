@@ -901,6 +901,8 @@ agentic-qe source adapters require explicit, repeatable `--live-source 'surface=
 registration, where `surface` is `ruflo` or `aqe`. Explicit sources consume tailer
 capacity before Claude/Codex discovery. Paths resolve against the startup working directory and are
 not confined to the project, so registration is an operator authorization to read that file.
+The structured input remains experimental: parser fixtures exist, but no real producer has been
+verified. Registration alone supplies no activity or runtime coverage.
 Independent plugin, skill, MCP, and gate registries are not implemented. This is an explicit source
 coverage limitation; ADR-0012 is Implemented because the supported adapter contract does not claim
 automatic upstream discovery.

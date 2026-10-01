@@ -291,12 +291,12 @@ test('readMachineWideIntel aggregates totals and perProject rows across multiple
     {
       path: cwdAlpha, label: 'Alpha', key: null, learningScope: 'repository', patternsLearned: 10, patternStoreCount: 2,
       trajectoriesRecorded: 4, graphLatest: { nodes: 5, edges: 8 }, lastAdaptation: 1000,
-      learningState: [],
+      learningState: [], hosts: [], sessionOrigins: [], sessionSurfaces: null,
     },
     {
       path: cwdBeta, label: 'Beta', key: null, learningScope: 'repository', patternsLearned: 20, patternStoreCount: 3,
       trajectoriesRecorded: 6, graphLatest: null, lastAdaptation: 2000,
-      learningState: [],
+      learningState: [], hosts: [], sessionOrigins: [], sessionSurfaces: null,
     },
   ]);
 });
@@ -357,10 +357,12 @@ test('readMachineWideIntel degrades a project with missing/malformed data to nul
   assert.deepEqual(result.perProject[1], {
     path: cwdEmpty, label: 'Empty', key: null, learningScope: 'unknown', patternsLearned: null, patternStoreCount: 0,
     trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null, learningState: [],
+    hosts: [], sessionOrigins: [], sessionSurfaces: null,
   });
   assert.deepEqual(result.perProject[2], {
     path: cwdMalformed, label: 'Malformed', key: null, learningScope: 'unknown', patternsLearned: null, patternStoreCount: 0,
     trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null, learningState: [],
+    hosts: [], sessionOrigins: [], sessionSurfaces: null,
   });
 });
 
@@ -438,4 +440,11 @@ test('a project row with no learningState degrades to [] rather than undefined',
   for (const row of [{ path: cwd, label: 'X' }, { path: cwd, label: 'X', learningState: 'nope' }]) {
     assert.deepEqual(readMachineWideIntel([row]).perProject[0].learningState, []);
   }
+});
+
+test('readMachineWideIntel passes through declared session presentation evidence', () => {
+  const evidence = { hosts: ['codex'], sessionOrigins: [{ origin: 'unknown', sessions: 2 }],
+    sessionSurfaces: [{ host: 'codex', surface: 'codex-cli', sessions: 2 }] };
+  const [row] = readMachineWideIntel([{ path: tmp(), label: 'CLI project', ...evidence }]).perProject;
+  assert.deepEqual({ hosts: row.hosts, sessionOrigins: row.sessionOrigins, sessionSurfaces: row.sessionSurfaces }, evidence);
 });

@@ -13,17 +13,18 @@
 // on bad input — an absent/corrupt db simply reads as "no opencode source".
 //
 // Two attribution rules, grounded in the store itself:
-//   - COST is opencode's own metered figure on each assistant message
-//     (data.cost). That is OBSERVED truth, so usage rows carry it as
-//     `costObserved` and the aggregate prefers it over the pricing table —
-//     never re-priced from a guessed rate (kimi/openrouter/local rates are
-//     exactly what ak does not know and must not invent).
+//   - COST is opencode's own figure on each assistant message (data.cost).
+//     A positive recorded cost is observed. A zero with positive tokens from
+//     an unverified non-local provider is unpriced: OpenCode may default a
+//     missing model rate to zero. Never re-price that row from a guessed rate.
 //   - INFERENCE PROVIDER is the assistant row's providerID when observed
 //     (provenance 'observed'), never the host. A bare `opencode` host id says
 //     nothing about who served the model.
 // Subagent sessions (parent_id set) keep their tokens: opencode child sessions
 // record their OWN messages, not a replay of the parent's — the codex
 // double-count rule does not apply (different storage semantics).
+import { availableOpencodeMetadata, opencodeObservations } from './usage-opencode-observations.mjs';
+import { opencodeObservationFingerprint } from './usage-opencode-cache.mjs';
 import { withDb } from './sqlite.mjs';
 import { sessionAcquisitionCoverage } from './usage-opencode-bounds.mjs';
 // Shared record shape/accumulator with parseClaude/parseCodex — see their
@@ -34,11 +35,15 @@ import {
   addUsage, blankSession, noteContextSample, noteLatencySample, notePromptFingerprint,
 } from './usage-parsers.mjs';
 import { normalizeMode } from './usage-modes.mjs';
+import { xdgBase } from './paths.mjs';
+export { selectOpencodeSource } from './usage-opencode-source.mjs';
 import { observeUsageProject } from './usage-project-evidence.mjs';
+import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 
-/** The live opencode store. Overridable via roots in tests. */
+/** Conventional footprint census location, not an authoritative transcript source.
+ * Usage and project discovery must use selectOpencodeSource instead. */
 export function defaultOpencodeDbPath() {
-  const home = process.env.XDG_DATA_HOME ?? null;
+  const home = xdgBase('XDG_DATA_HOME', null);
   return home
     ? `${home}/opencode/opencode.db`
     : `${process.env.HOME ?? process.env.USERPROFILE}/.local/share/opencode/opencode.db`;
@@ -190,15 +195,16 @@ function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage })
   // Opens the prompt→assistant-message latency window; closed by the next
   // recordAssistantMessage (mirrors parseClaude/parseCodex's latState).
   rec.pendingPromptMs = at;
-  // Every opencode user message IS a prompt-kind turn (this source carries no
-  // harness-injected user rows), so it always fingerprints — on BOTH paths,
-  // which is why the scan path now loads user text parts (see loadTextParts).
-  // I1: that makes this the WIDEST of the three fingerprinted populations —
+  // Main-session user messages are prompt-kind turns. A child session's user
+  // messages are agent-written, so they do not enter the prompt fingerprint
+  // layer, though its prompts and usage remain accounted for on BOTH paths.
+  // The scan path loads user text parts for main-session fingerprints.
+  // I1: main sessions are the widest of the three fingerprinted populations —
   // claude gates on userTurnKind, codex additionally on
-  // CODEX_MACHINE_ENVELOPE_RE, opencode on nothing. Compare per provenance tag,
+  // CODEX_MACHINE_ENVELOPE_RE, opencode on no further turn kind. Compare per provenance tag,
   // never in total.
   const text = messagePartsText(partsByMessage, rowId, ['text']);
-  notePromptFingerprint(rec, text, 'prompt');
+  if (!rec.sidechain) notePromptFingerprint(rec, text, 'prompt');
   if (!withTurns) return;
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
 }
@@ -250,10 +256,6 @@ function recordAssistantUsage(rec, data, at) {
   const model = typeof data.modelID === 'string' && data.modelID ? data.modelID : 'unknown';
   if (!rec.models.includes(model)) rec.models.push(model);
   const provider = typeof data.providerID === 'string' && data.providerID ? data.providerID : null;
-  if (provider) {
-    rec.inferenceProvider = provider;
-    rec.providerProvenance = 'observed';
-  }
   const t = data.tokens ?? {};
   const cache = t.cache ?? {};
   const day = localDay(at || Date.now());
@@ -271,7 +273,11 @@ function recordAssistantUsage(rec, data, at) {
   if (isUnreportedUsage(data, t, cache)) usageRow.tokensUnreported = (usageRow.tokensUnreported ?? 0) + 1;
   // Retain missing-cost tokens separately before coalescing by day/model.
   usageRow.costObserved ??= null;
-  if (typeof data.cost === 'number' && Number.isFinite(data.cost) && data.cost >= 0) {
+  const hasMeasuredTokens = [t.input, t.output, t.reasoning, cache.read, cache.write]
+    .some((value) => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  if (data.cost === 0 && hasMeasuredTokens && !isLocalInferenceProvider(provider)) {
+    usageRow.costUntrustedMessages = (usageRow.costUntrustedMessages ?? 0) + 1;
+  } else if (typeof data.cost === 'number' && Number.isFinite(data.cost) && data.cost >= 0) {
     usageRow.costObserved = (usageRow.costObserved ?? 0) + data.cost;
     usageRow.costObservedMessages = (usageRow.costObservedMessages ?? 0) + 1;
   } else {
@@ -368,22 +374,9 @@ function processMessageRow(rec, turns, row, { withTurns, partsByMessage }) {
   recordAssistantMessage(rec, turns, { data, rowId: row.id, at, withTurns, partsByMessage });
 }
 
-/** The `part` rows a parse needs. `withTurns` wants every part (text, tool and
- *  reasoning, for both roles) to build turn rows; the scan path wants only the
- *  USER text parts, which is all a prompt fingerprint reads — the assistant
- *  bodies it would otherwise pull in are the bulk of the store and are never
- *  looked at there.
- *
- *  This is the one place the scan path reads message BODIES at all, so its cost
- *  was measured rather than assumed. The live store on this machine is too
- *  small to time (2 sessions, 2 parts; ~5 µs/session, where the two
- *  `json_extract` predicates cannot pay for themselves because there is nothing
- *  to exclude). Benchmarked instead against a synthetic store at realistic scale
- *  — 300 sessions, 18k messages, 63k parts, 75 MB — the filtered query runs
- *  **45 µs/session and materializes 0.6 MB**, against 125 µs/session and 61 MB
- *  for the unfiltered join the reader path uses: 2.8x faster, and ~100x less
- *  text pulled into memory. Only the fingerprints are retained; the text itself
- *  is discarded with the row. */
+/** Scan reads user text for fingerprints and compaction/step-finish metadata
+ * for observations. Step-finish usage is never added to message usage.
+ * Detail additionally reads text/reasoning/tool bodies for transcript turns. */
 function loadTextParts(db, id, withTurns) {
   if (withTurns) {
     return db.prepare(`
@@ -395,9 +388,10 @@ function loadTextParts(db, id, withTurns) {
   return db.prepare(`
     SELECT p.message_id AS message_id, p.data AS data
     FROM part p JOIN message m ON m.id = p.message_id
-    WHERE m.session_id = ?
-      AND json_extract(m.data, '$.role') = 'user'
-      AND json_extract(p.data, '$.type') = 'text'
+    WHERE m.session_id = ? AND (
+      (json_extract(m.data, '$.role') = 'user'
+       AND json_extract(p.data, '$.type') IN ('text', 'compaction'))
+      OR json_extract(p.data, '$.type') = 'step-finish')
     ORDER BY p.rowid ASC
   `).all(id);
 }
@@ -455,15 +449,22 @@ export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, m
       delete rec.stamps;
       return { session: rec, turns: [] };
     }
-    const srow = db.prepare('SELECT id, parent_id, directory, title FROM session WHERE id = ?').get(id);
+    const columns = ['id', 'parent_id', 'directory', 'title', ...availableOpencodeMetadata(db)];
+    const srow = db.prepare(`SELECT ${columns.join(', ')} FROM session WHERE id = ?`).get(id);
     if (!srow) return null;
     const msgRows = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC, id ASC').all(id);
     const partsByMessage = buildPartsIndex(loadTextParts(db, id, withTurns));
 
     const rec = initSessionRecord(srow);
-    Object.assign(rec, { acquisitionCoverage });
+    Object.assign(rec, { acquisitionCoverage }, opencodeObservations(db, srow, msgRows, partsByMessage));
     const turns = [];
     for (const row of msgRows) processMessageRow(rec, turns, row, { withTurns, partsByMessage });
+    // A session can switch providers, including to a row with no providerID.
+    // Its usage rows retain the observed identity; the session names a provider
+    // only when every assistant row agrees on one.
+    const providers = new Set(rec.usage.map((row) => row.provider ?? null));
+    rec.inferenceProvider = providers.size === 1 ? [...providers][0] : null;
+    rec.providerProvenance = rec.inferenceProvider ? 'observed' : 'unknown';
     if (!withTurns) collectScanToolCounts(db, id, rec);
 
     if (!rec.title) rec.title = '(untitled)';
@@ -472,7 +473,7 @@ export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, m
     delete rec.stamps;
     delete rec.pendingPromptMs;
     delete rec.spans;
-    return { session: rec, turns };
+    return { session: rec, turns, observationFingerprint: opencodeObservationFingerprint(db, id) };
   });
   return result.ok ? result.value : null;
 }

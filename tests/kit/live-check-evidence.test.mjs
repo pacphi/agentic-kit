@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
@@ -18,9 +19,11 @@ const paths = await import('../../src/lib/paths.mjs');
 const evidence = await import('../../src/lib/live-check-evidence.mjs');
 const { writeEvidence } = await import('../../src/lib/evidence.mjs');
 const aqeSection = (await import('../../src/commands/status/sections/aqe.mjs')).default;
+const projectMemorySection = (await import('../../src/commands/status/sections/project-memory.mjs')).default;
 const { SYNC_STEPS } = await import('../../src/commands/sync.mjs');
 assertSandboxed(paths, HOME);
-paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
+const GLOBAL_ROOT = fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+paths._setGlobalRootForTest(GLOBAL_ROOT);
 
 const PROJECT = sandboxProject('ak-live-evidence');
 const NOW = Date.parse('2026-09-26T12:00:00Z');
@@ -33,6 +36,70 @@ test('the store lives under the kit state directory, one file per check', () => 
   assert.deepEqual([...evidence.LIVE_CHECK_IDS].sort(),
     ['aqe-embedding', 'deja-vu', 'mcp', 'memory', 'providers', 'security']);
   assert.equal(evidence.LIVE_CHECK_TTL_MS, 24 * 3600_000);
+  assert.deepEqual(evidence.RECORDED_CHECK_IDS, [...evidence.LIVE_CHECK_IDS, 'memory-routes']);
+});
+
+test('routing evidence is separate from the generic memory round trip and bound to CLI version and platform', () => {
+  reset();
+  const key = (routingVersion, platform) => evidence.liveCheckInputsKey('memory-routes', { routingVersion, platform });
+  assert.notEqual(key('3.45.0', 'darwin'), key('3.45.1', 'darwin'));
+  assert.notEqual(key('3.45.0', 'darwin'), key('3.45.0', 'linux'));
+  evidence.recordLiveCheck({ id: 'memory', status: 'passed', source: 'status-refresh-live', inputsKey: 'generic' }, { now: NOW });
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: key('3.45.0', 'darwin'), now: NOW }), null);
+  evidence.recordLiveCheck({ id: 'memory-routes', status: 'passed', source: 'status-refresh-live',
+    inputsKey: key('3.45.0', 'darwin') }, { now: NOW });
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: key('3.45.1', 'darwin'), now: NOW }).invalidated, true);
+  assert.equal(evidence.readLiveCheck('memory-routes', { inputsKey: key('3.45.0', 'linux'), now: NOW }).invalidated, true);
+});
+
+test('the routing key follows the installed CLI even when the wrapper version stays fixed', (t) => {
+  const root = fs.mkdtempSync(path.join(HOME, 'route-version-'));
+  t.after(() => { paths._setGlobalRootForTest(GLOBAL_ROOT); rmrf(root); });
+  const wrapper = path.join(root, 'ruflo');
+  const cli = path.join(wrapper, 'node_modules', '@claude-flow', 'cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(wrapper, 'package.json'), JSON.stringify({ version: '3.45.0' }));
+  const setCli = (version) => fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ version }));
+  paths._setGlobalRootForTest(root);
+  setCli('3.45.0');
+  const before = evidence.liveCheckInputsKey('memory-routes', { platform: 'darwin' });
+  setCli('3.45.1');
+  assert.notEqual(evidence.liveCheckInputsKey('memory-routes', { platform: 'darwin' }), before);
+});
+
+test('two-store row lowers only for applicable routing proof and warns after failure or upgrade', async (t) => {
+  reset();
+  const cwd = sandboxProject('ak-route-row');
+  t.after(() => rmrf(cwd));
+  const dir = path.join(cwd, '.swarm');
+  fs.mkdirSync(dir);
+  for (const name of ['memory.db', 'agentdb-memory.db']) {
+    const db = new DatabaseSync(path.join(dir, name));
+    db.exec('CREATE TABLE memory_entries (status TEXT); INSERT INTO memory_entries VALUES (NULL)');
+    db.close();
+  }
+  const row = async (routingVersion = '3.45.0', platform = 'darwin', now = NOW) =>
+    (await projectMemorySection.collect({ cwd, rufloVersion: routingVersion, platform, now }))
+      .find((item) => /two project memory stores/.test(item.message));
+  const key = evidence.liveCheckInputsKey('memory-routes', { routingVersion: '3.45.0', platform: 'darwin' });
+  assert.equal((await row()).level, 'warn');
+  evidence.recordLiveCheck({ id: 'memory', status: 'passed', source: 'status-refresh-live', inputsKey: 'generic' }, { now: NOW });
+  assert.equal((await row()).level, 'warn');
+  evidence.recordLiveCheck({ id: 'memory-routes', status: 'passed', source: 'status-refresh-live', inputsKey: key }, { now: NOW });
+  const beforeRead = snapshot(HOME);
+  assert.equal((await row()).level, 'info');
+  assert.match((await row()).message, /existing-corpus access unverified/);
+  assertUnchanged(beforeRead, HOME, 'ordinary project-memory status reads neither probe nor write');
+  assert.equal((await row('3.45.1')).level, 'warn');
+  assert.equal((await row('3.45.0', 'linux')).level, 'warn');
+  assert.equal((await row(null)).level, 'warn');
+  assert.equal((await row('3.45.0', 'darwin', NOW + 2 * evidence.LIVE_CHECK_TTL_MS)).level, 'info');
+  evidence.recordLiveCheck({ id: 'memory-routes', status: 'inconclusive', source: 'status-refresh-live', inputsKey: key }, { now: NOW + 1000 });
+  assert.equal((await row('3.45.0', 'darwin', NOW + 2000)).level, 'warn');
+  evidence.recordLiveCheck({ id: 'memory', status: 'passed', source: 'status-refresh-live', inputsKey: 'generic' }, { now: NOW + 3000 });
+  assert.equal((await row('3.45.0', 'darwin', NOW + 4000)).level, 'warn');
+  fs.writeFileSync(path.join(evidence.liveCheckDir(), 'memory-routes.json'), '{corrupt');
+  assert.equal((await row()).level, 'warn');
 });
 
 test('a recorded result reads back with its source and age', () => {

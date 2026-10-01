@@ -143,24 +143,34 @@ export function removeMemoryProbe(root, namespace, key) {
 //   aqe         a .agentic-qe/ folder below the project root (AQE resolves a
 //               relative AQE_MEMORY_PATH against the folder it runs in)
 // Bounded: at most `maxDirs` folders listed and `maxDepth` levels deep; dot
-// folders (other checkouts under .claude/worktrees, .git) and node_modules are
-// never walked, only a root dot folder's own markers are checked. A folder that
+// tool homes (including other checkouts under .claude/worktrees), .git and
+// node_modules are never walked. Ordinary dot folders are walked. A folder that
 // holds `.git` (nested repository, submodule, worktree inside the checkout) is
 // another repository: neither it nor anything below it is searched; it is
 // listed in `nestedRepositories`.
 const RUFLO_STORE_FILES = Object.freeze(['memory.db', 'agentdb-memory.db']);
 const ROOT_STRAYS = Object.freeze([['agentdb.db', 'agentdb-cli'], ['agentdb.rvf', 'agentdb-rvf'], ['ruvector.db', 'ruvector']]);
+const SCAN_EXCLUDED_DIRS = new Set(['.git', '.swarm', '.agentic-qe', '.claude', '.codex', '.claude-flow', '.agents', '.harness', 'node_modules']);
 
-const isDirectory = (file) => { try { return fs.lstatSync(file).isDirectory(); } catch { return false; } };
 const isFile = (file) => { try { return fs.lstatSync(file).isFile(); } catch { return false; } };
 const storeBytes = (file) => (fileBytes(file) ?? 0) + (fileBytes(`${file}-wal`) ?? 0);
 
 export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {}) {
-  if (!isDirectory(root)) return { strays: [], complete: true, visited: 0, nestedRepositories: [] };
+  let rootStat;
+  try { rootStat = fs.lstatSync(root); } catch (e) {
+    return { strays: [], complete: e.code === 'ENOENT', visited: 0, nestedRepositories: [] };
+  }
+  if (!rootStat.isDirectory()) return { strays: [], complete: true, visited: 0, nestedRepositories: [] };
   const found = new Map();
   const nestedRepositories = [];
   let visited = 0;
   let complete = true;
+  const stat = (file) => {
+    try { return fs.lstatSync(file); } catch (e) {
+      if (e.code !== 'ENOENT') complete = false;
+      return null;
+    }
+  };
   const add = (kind, file, sizeBytes) => {
     const relative = path.relative(root, file).split(path.sep).join('/');
     found.set(relative, { kind, path: relative, file, sizeBytes });
@@ -170,14 +180,14 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
     visited += 1;
     try {
       return fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-    } catch { return []; }
+    } catch { complete = false; return []; }
   };
   const checkMarkers = (dir, { ruflo = true } = {}) => {
-    if (isDirectory(path.join(dir, '.agentic-qe'))) add('aqe', path.join(dir, '.agentic-qe'), null);
+    if (stat(path.join(dir, '.agentic-qe'))?.isDirectory()) add('aqe', path.join(dir, '.agentic-qe'), null);
     if (!ruflo) return;
     for (const name of RUFLO_STORE_FILES) {
       const file = path.join(dir, '.swarm', name);
-      if (isFile(file)) add('ruflo', file, storeBytes(file));
+      if (stat(file)?.isFile()) add('ruflo', file, storeBytes(file));
     }
   };
   const walkSwarm = (dir, depth) => {
@@ -192,7 +202,7 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
   // a worktree inside the checkout) is another repository: its stores are its
   // own, and ak's pin makes its `.agentic-qe` that repository's store (review M3).
   const otherRepository = (full) => {
-    try { fs.lstatSync(path.join(full, '.git')); } catch { return false; }
+    if (!stat(path.join(full, '.git'))) return false;
     nestedRepositories.push(path.relative(root, full).split(path.sep).join('/'));
     return true;
   };
@@ -200,25 +210,26 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
     const entries = list(dir);
     for (const entry of entries ?? []) {
       if (!entry.isDirectory()) continue;
+      if (entry.name === 'node_modules') continue;
       const full = path.join(dir, entry.name);
       if (entry.name !== '.git' && otherRepository(full)) continue;
-      if (entry.name.startsWith('.')) {
-        // .swarm's own subtree is walked separately; only its AQE marker here.
-        if (depth === 0 && entry.name !== '.git') checkMarkers(full, { ruflo: entry.name !== '.swarm' });
-        continue;
-      }
-      if (entry.name === 'node_modules') continue;
-      checkMarkers(full);
+      if (entry.name !== '.git') checkMarkers(full, { ruflo: entry.name !== '.swarm' });
+      if (SCAN_EXCLUDED_DIRS.has(entry.name)) continue;
       if (depth + 1 < maxDepth) walk(full, depth + 1);
+      else {
+        // A marker at the depth boundary is visible, but descendants are not.
+        const children = list(full);
+        if (children?.some((child) => child.isDirectory() && !SCAN_EXCLUDED_DIRS.has(child.name))) complete = false;
+      }
     }
   };
 
   for (const [name, kind] of ROOT_STRAYS) {
     const file = path.join(root, name);
-    if (isFile(file)) add(kind, file, storeBytes(file));
+    if (stat(file)?.isFile()) add(kind, file, storeBytes(file));
   }
   // .swarm first: it is small, and the most likely home of a stray Ruflo store.
-  if (isDirectory(path.join(root, '.swarm'))) walkSwarm(path.join(root, '.swarm'), 0);
+  if (stat(path.join(root, '.swarm'))?.isDirectory()) walkSwarm(path.join(root, '.swarm'), 0);
   walk(root, 0);
   const strays = [...found.values()].sort((a, b) => a.path.localeCompare(b.path));
   return { strays, complete, visited, nestedRepositories: nestedRepositories.sort() };

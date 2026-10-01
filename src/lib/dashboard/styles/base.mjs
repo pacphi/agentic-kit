@@ -115,7 +115,7 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
   background:var(--panel);
 }
 .verdict-text{font-size:13px; font-weight:500; letter-spacing:-.006em}
-.band-tools{display:flex; align-items:center; gap:10px}
+.band-tools{display:flex; align-items:center; gap:10px;flex-wrap:wrap;max-width:100%}
 .pulse{
   width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none;
   animation:pulse 2.4s ease-out infinite;
@@ -148,7 +148,15 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .poll .play.on{color:var(--accent)}
 .poll .ivl{min-width:56px; justify-content:space-between}
 .poll .caret{opacity:.5}
-.poll .refresh{width:28px; padding:0; font-size:14px}
+.poll .refresh{padding:0 8px; font-size:12px}
+.refresh-control{display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap}
+.refresh-control button,.refresh-control select{border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;font-size:11px;padding:5px 8px}
+.refresh-control button{cursor:pointer;font-weight:700}
+.refresh-control button:disabled{opacity:.5;cursor:wait}
+.refresh-control :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.refresh-trees{display:flex;align-items:center;gap:3px;font-size:10px;white-space:nowrap}
+#refresh-status{font-size:10px;color:var(--ink-2);min-width:0}
+@media(max-width:560px){.band-tools{width:100%;gap:6px}.refresh-control{width:100%}.refresh-trees{white-space:normal}}
 .poll .refresh.spin{animation:spin .6s linear}
 @keyframes spin{to{transform:rotate(360deg)}}
 .menu{

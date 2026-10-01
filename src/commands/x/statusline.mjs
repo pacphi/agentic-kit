@@ -3,7 +3,7 @@ import {
   PRESETS, applyCodexStatusline, inspectCodexStatusline, projectionFor, removeCodexStatusline,
   statuslineDrift,
 } from '../../lib/codex-statusline.mjs';
-import { ok, info, warn } from '../../lib/output.mjs';
+import { ok, info, warn, reportFailure } from '../../lib/output.mjs';
 
 export const options = {
   'dry-run': { type: 'boolean', default: false },
@@ -33,7 +33,7 @@ Examples:
 export async function run({ flags, positionals }) {
   const cfg = loadKitConfig();
   const [target = 'status', choice] = positionals;
-  if (target === 'status') {
+  if (target === 'status' && positionals.length <= 1) {
     const current = inspectCodexStatusline();
     const drift = statuslineDrift(cfg);
     const result = { ownership: cfg.statusline?.codex ?? null, current, drifted: drift.drifted };
@@ -45,8 +45,9 @@ export async function run({ flags, positionals }) {
     }
     return 0;
   }
-  if (target !== 'codex' || !choice) {
-    warn('usage: ak x statusline status | codex native | codex extended | codex off');
+  if (target !== 'codex' || !choice || positionals.length !== 2) {
+    const error = 'usage: ak x statusline status | codex native | codex extended | codex off';
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(error) });
     return 2;
   }
   if (choice === 'off') {
@@ -63,7 +64,11 @@ export async function run({ flags, positionals }) {
     ok(`codex status-line management disabled${result.changed ? '; unchanged managed keys removed' : '; user-modified keys preserved'}`);
     return 0;
   }
-  if (!PRESETS[choice]) { warn(`unknown preset '${choice}' (expected native, extended, or off)`); return 2; }
+  if (!PRESETS[choice]) {
+    const error = `unknown preset '${choice}' (expected native, extended, or off)`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(error) });
+    return 2;
+  }
   if (flags['dry-run']) { info(`[dry-run] apply Codex ${choice} preset at user scope`); return 0; }
   // Persist ownership first. If the TOML merge then fails, sync retains enough
   // intent to report/retry it; the inverse ordering could mutate config.toml

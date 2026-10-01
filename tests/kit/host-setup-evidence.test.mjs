@@ -1,4 +1,4 @@
-// Branch 6a Task 5, Part 1: detectHosts()/hostInstallState() stop spawning
+// detectHosts()/hostInstallState() stop spawning
 // `which`/`<bin> --version` on every plain `ak status` call — they reuse
 // fresh evidence instead, gated by `refresh` (Ruling A: 6h max age; Ruling B:
 // every new `refresh` param defaults to true, so every caller other than
@@ -6,7 +6,7 @@
 //
 // Neither `have()` nor `hostVersion()` (providers.mjs) nor `installedVersion()`
 // (versions.mjs, via globalRoot()) is injectable, so — mirroring
-// tests/kit/natives-runtime.test.mjs's Task 4 precedent — these tests break
+// tests/kit/natives-runtime.test.mjs's state-isolation precedent — these tests break
 // PATH and redirect the npm global root to an empty fixture dir so a REAL
 // probe deterministically returns "absent", then seed cached evidence with a
 // value ("...-cache-marker") a real probe could never produce. Getting the
@@ -227,7 +227,7 @@ test('collectIntegrationFacts({ refresh: true }) (its default) threads through a
   resetEvidence();
 });
 
-// ── Task 4/5 joint fix: `record` suppresses persistence, never the probe ────
+// ── `record` suppresses persistence, never the probe ────
 // (`sync.mjs`'s plan-computation reads pass `record: false` so a cold-cache
 // probe never writes evidence as a side effect of merely building the plan.)
 

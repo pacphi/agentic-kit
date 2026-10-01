@@ -10,10 +10,10 @@ import { runLifecycle } from '../../src/lib/adapters/lifecycle.mjs';
 import { evidenceDir, writeEvidence, stableInputsKey } from '../../src/lib/evidence.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
-// Task 5 Part 2: detect() now reads/writes evidence under the kit state dir
+// detect() now reads/writes evidence under the kit state dir
 // (evidenceDir()) when refresh:false. Redirect the state base for this whole
 // file so those reads/writes never touch this machine's real evidence store —
-// mirrors tests/kit/natives-runtime.test.mjs's Task 4 redirect.
+// mirrors tests/kit/natives-runtime.test.mjs's state redirect.
 process.env.XDG_STATE_HOME = tempDir('ak-deja-vu-lifecycle-state');
 process.env.LOCALAPPDATA = process.env.XDG_STATE_HOME;
 const resetEvidence = () => fs.rmSync(evidenceDir(), { recursive: true, force: true });
@@ -406,7 +406,7 @@ test('undo removes verified target before exact owned npm package and never touc
   ]);
 });
 
-// ── detect() refresh caching (Branch 6a Task 5 Part 2) ──────────────────────
+// ── detect() refresh caching ──────────────────────
 // Ruling A: 6h max age. Ruling B: `refresh` defaults to true, so every caller
 // other than status's plain-status path (collectDejaVuRows) keeps probing
 // unconditionally — including detect()'s own internal reuse inside plan()

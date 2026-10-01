@@ -9,6 +9,16 @@ Everything you need is below: what was wrong, why the fix can be trusted
 without re-auditing the code yourself, how to run one script, and exactly
 what to send back.
 
+**Updated 2026-09-29 — diagnostic scope.** This script remains an independent historical
+cumulative-snapshot comparison. It does not reproduce the current parser's per-turn import
+ownership, replay subtraction, counter segments, per-day/model attribution, or positive component
+usage with zero responses. Use [ADR-0052](adr/0052-codex-usage-attribution.md) and the
+[current accounting contracts](usage-scorecard-metrics.md#current-accounting-and-cache-contracts)
+to interpret differences. Total-only counters remain unsupported for split/pricing, Auto-review
+models may be unpriced, and host-reported first-token/compaction evidence is separate. A mismatch
+with this script alone is not evidence of a present accounting defect. The figures below are
+historical, not a new corpus measurement.
+
 ---
 
 ## The short version

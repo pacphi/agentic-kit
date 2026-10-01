@@ -492,7 +492,7 @@ test('a failed typesafe package removal keeps kit.json under --purge', async () 
 
 test.after(() => rmrf(HOME));
 
-// Branch 3, Task 2.2: uninstall puts back what ak changed for Ruflo's daemon
+// uninstall puts back what ak changed for Ruflo's daemon
 // in every receipted project: the autoStart value and the flat keys (and the
 // .claude-flow/config.json ak created).
 test('uninstall restores autoStart and removes the managed daemon keys in receipted projects', async () => {

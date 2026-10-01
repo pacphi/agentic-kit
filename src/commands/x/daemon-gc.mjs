@@ -4,7 +4,7 @@ import {
   listDaemons, staleDaemons, reap, listMcpTransports, orphanedMcpTransports,
   reapMcpTransports,
 } from '../../lib/daemons.mjs';
-import { ok, warn, dim } from '../../lib/output.mjs';
+import { ok, warn, dim, reportFailure } from '../../lib/output.mjs';
 
 export const options = {
   kill: { type: 'boolean', default: false },
@@ -32,10 +32,19 @@ Examples:
   ak x daemon-gc --kill   reap stale background daemons
   ak x daemon-gc --mcp --kill  also reap same-user PPID-1 MCP orphans`;
 
-export async function run({ flags }) {
-  const daemons = await listDaemons();
+export async function run({ flags, positionals = [], deps = { daemonLifecycle: undefined, mcpLifecycle: undefined } }) {
+  if (positionals.length) {
+    const error = `unexpected argument '${positionals[0]}'`;
+    reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => warn(error) });
+    return 2;
+  }
+  const { list, reap: reapFn } = { list: listDaemons, reap, ...deps.daemonLifecycle };
+  const { list: listMcp, reap: reapMcp } = {
+    list: listMcpTransports, reap: reapMcpTransports, ...deps.mcpLifecycle,
+  };
+  const daemons = await list();
   const stale = staleDaemons(daemons);
-  const mcpTransports = await listMcpTransports();
+  const mcpTransports = await listMcp();
   const mcpOrphans = orphanedMcpTransports(mcpTransports);
   if (flags.json) {
     console.log(JSON.stringify({
@@ -47,14 +56,14 @@ export async function run({ flags }) {
     return 0;
   }
   if (stale.length && flags.kill) {
-    const reaped = reap(stale);
+    const reaped = reapFn(stale);
     for (const r of reaped) {
       if (r.killed) ok(`stopped stale daemon pid=${r.pid} ${dim(r.workspace ?? '')}`);
       else warn(`could not stop pid=${r.pid} (already exited?)`);
     }
     // Refresh daemon-sweep evidence so a later read sees the daemons that are
     // actually still alive, not the pre-reap list.
-    if (reaped.some((r) => r.killed)) await listDaemons({ refresh: true, record: true, source: 'daemon-gc' });
+    if (reaped.some((r) => r.killed)) await list({ refresh: true, record: true, source: 'daemon-gc' });
   } else if (stale.length) {
     for (const d of stale) {
       warn(`stale daemon pid=${d.pid} ${dim(d.workspace ?? '(unknown workspace)')} ${dim(d.workspaceExists ? `age ${d.ageSecs}s > TTL` : 'workspace gone')}`);
@@ -63,7 +72,7 @@ export async function run({ flags }) {
   }
 
   if (flags.mcp && flags.kill) {
-    for (const result of reapMcpTransports(mcpOrphans)) {
+    for (const result of reapMcp(mcpOrphans)) {
       if (result.killed) ok(`stopped orphaned Ruflo MCP pid=${result.pid}`);
       else warn(`could not stop MCP pid=${result.pid} (identity or orphan proof changed)`);
     }

@@ -1,4 +1,4 @@
-// Task 6 (Branch 6a refactor/evidence-store): `ak status --refresh` had no
+// `ak status --refresh` had no
 // effect on version-drift rows because four sections silently dropped the
 // `refresh` key their shared collect() ctx already carries. The four
 // libraries (versions.mjs/ruvector.mjs/ruvnet-brain.mjs's driftReport/
@@ -151,7 +151,7 @@ function seedSelfHome({ ageMs = 0 } = {}) {
       ttlHours: 24,
       last: Date.now(),
       seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' },
-      self: { last: Date.now() - ageMs, best: { version: '0.0.1', tag: 'latest' } },
+      self: { last: Date.now() - ageMs, best: { version: '0.0.1', tag: 'latest' }, lastTags: ['latest', 'next'] },
     },
   });
   writeKitConfig(HOME, cfg);

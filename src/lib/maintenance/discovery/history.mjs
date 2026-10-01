@@ -1,9 +1,9 @@
 // ADR-0048 scan history — bounded, retained scan summaries
 // (docs/maintenance.md "Retention").
-// This store holds ONLY terminal scan summaries. It structurally cannot reach
+// This store holds terminal scan summaries and paused continuation boundaries. It cannot reach
 // receipts, dispositions, or recipe acceptance records — those live in other
 // agents' stores — so `clearHistory` cannot violate MNT-PRV-008 by scope
-// alone; the `isProtected` guard below is defense in depth for a summary that
+// alone; the `hasOpenContinuation` guard below is defense in depth for a summary that
 // still names an open continuation.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,14 +30,14 @@ function pruneSummaries(summaries, retention, now) {
   const cutoff = now - retention.maxAgeDays * 86_400_000;
   const bySource = new Map();
   for (const summary of summaries
-    .filter((entry) => Date.parse(entry.completedAt) >= cutoff)
-    .sort((a, b) => Date.parse(a.completedAt) - Date.parse(b.completedAt))) {
+    .filter((entry) => Date.parse(entry.recordedAt ?? entry.completedAt) >= cutoff)
+    .sort((a, b) => Date.parse(a.recordedAt ?? a.completedAt) - Date.parse(b.recordedAt ?? b.completedAt))) {
     const key = JSON.stringify([summary.environmentId, summary.sourceId]);
     const list = bySource.get(key) ?? [];
     list.push(summary);
     bySource.set(key, list.slice(-retention.maxSummaries));
   }
-  return [...bySource.values()].flat().sort((a, b) => Date.parse(a.completedAt) - Date.parse(b.completedAt));
+  return [...bySource.values()].flat().sort((a, b) => Date.parse(a.recordedAt ?? a.completedAt) - Date.parse(b.recordedAt ?? b.completedAt));
 }
 
 /**
@@ -47,7 +47,8 @@ function pruneSummaries(summaries, retention, now) {
  */
 export function createScanHistoryStore(dir, {
   fsImpl = fs, now = Date.now, retention = SCAN_HISTORY_RETENTION,
-  hasOpenContinuation = (/** @type {string} */ _scanId) => false,
+  hasOpenContinuation = (scanId) => typeof scanId === 'string' && /^[A-Za-z0-9_-]{1,80}$/u.test(scanId)
+    && fsImpl.existsSync(path.join(dir, 'checkpoints', `${scanId}.json`)),
 } = {}) {
   const file = path.join(dir, 'scan-history.json');
   let effectiveRetention = clampRetention(retention);
@@ -86,7 +87,7 @@ export function createScanHistoryStore(dir, {
     return environmentId ? summaries.filter((entry) => entry.environmentId === environmentId) : summaries;
   }
 
-  /** Remove only terminal, non-protected summaries; refuses (never throws) to
+  /** Remove only non-protected summaries; refuses (never throws) to
    *  touch a summary whose scanId still names an open continuation.
    *  @param {{environmentId?: string}} [options] */
   function clearHistory({ environmentId } = {}) {

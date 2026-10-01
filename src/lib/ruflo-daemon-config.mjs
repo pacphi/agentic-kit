@@ -100,10 +100,14 @@ function readDaemonConfig(file) {
   }
 }
 
+const pathPresent = (candidate) => {
+  try { fs.lstatSync(candidate); return true; } catch (error) { return error?.code !== 'ENOENT'; }
+};
+
 /** A desired key ak leaves to the user: the file is unreadable (`invalid`),
  *  or it holds the user's own value `have` instead of `want`.
  *  @typedef {{ key: string, want: number, have?: unknown }} HeldKey
- *  @typedef {{ invalid: boolean, entries: HeldKey[] } | null} HeldConfig */
+ *  @typedef {{ invalid: boolean, entries: HeldKey[], reason?: 'yaml-shadow'|'higher-priority-json'|'explicit-config' } | null} HeldConfig */
 
 /** Plan the config.json edit: which owned keys to drop, which to set. */
 function planConfig(current, owned, desired) {
@@ -127,26 +131,64 @@ function planConfig(current, owned, desired) {
   return { next, nextOwned, removed, written, conflicts };
 }
 
-function reconcileConfig(root, receipt, desired, dryRun) {
+/** @returns {{status: string, changed: boolean, activeChanged: boolean, held: HeldConfig}} */
+function reconcileConfig(root, receipt, desired, dryRun, env) {
   const file = path.join(root, DAEMON_CONFIG_RELATIVE);
+  // Never follow a user-controlled .claude-flow link (or special file) when
+  // reading, creating, replacing or removing config.json.
+  try {
+    const dir = fs.lstatSync(path.dirname(file));
+    if (!dir.isDirectory() || dir.isSymbolicLink()) {
+      const entries = Object.entries(desired).map(([key, want]) => ({ key, want }));
+      return { status: 'user-managed', changed: false, activeChanged: false, held: entries.length ? { invalid: true, entries } : null };
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      const entries = Object.entries(desired).map(([key, want]) => ({ key, want }));
+      return { status: 'user-managed', changed: false, activeChanged: false, held: entries.length ? { invalid: true, entries } : null };
+    }
+  }
+  const higherPriority = pathPresent(path.join(root, 'claude-flow.config.json'));
+  // ConfigFileManager.findConfig checks the explicit path only after both
+  // JSON candidates. existsSync resolves a relative env path from process.cwd,
+  // exactly as Ruflo does; it does not resolve it against the project root.
+  const explicitConfig = !higherPriority && typeof env?.CLAUDE_FLOW_CONFIG === 'string'
+    && fs.existsSync(env.CLAUDE_FLOW_CONFIG);
   const owned = receipt.configKeys ?? {};
   const current = readDaemonConfig(file);
   if (current.state === 'invalid') {
     const entries = Object.entries(desired).map(([key, want]) => ({ key, want }));
-    return { status: 'user-managed', changed: false, held: entries.length ? { invalid: true, entries } : null };
+    return { status: 'user-managed', changed: false, activeChanged: false, held: entries.length ? { invalid: true, entries } : null };
   }
   if (current.state === 'absent') {
     receipt.configKeys = {};
     receipt.configCreated = false;
-    if (!Object.keys(desired).length) return { status: 'absent', changed: false, held: null };
+    if (!Object.keys(desired).length) return { status: 'absent', changed: false, activeChanged: false, held: null };
+    // Ruflo 3.48.0 chooses root JSON, then .claude-flow/config.json, then
+    // config.yaml/yml. Creating our JSON over YAML would hide all user YAML
+    // daemon values; under root JSON this file would have no effect at all.
+    const yaml = ['config.yaml', 'config.yml'].some((name) => pathPresent(path.join(root, '.claude-flow', name)));
+    if (higherPriority || explicitConfig || yaml) return {
+      status: 'user-managed', changed: false, activeChanged: false,
+      held: {
+        invalid: false, reason: higherPriority ? 'higher-priority-json' : explicitConfig ? 'explicit-config' : 'yaml-shadow',
+        entries: Object.entries(desired).map(([key, want]) => ({ key, want })),
+      },
+    };
     if (!dryRun) {
       writePrivateFileAtomic(file, `${JSON.stringify(desired, null, 2)}\n`);
       receipt.configKeys = { ...desired };
       receipt.configCreated = true;
     }
-    return { status: 'written', changed: true, held: null };
+    return { status: 'written', changed: true, activeChanged: true, held: null };
   }
-  const plan = planConfig(current.value, owned, desired);
+  // A root JSON file wins even over existing .claude-flow/config.json. Keep
+  // receipted still-needed keys and clean obsolete ones, but add no new keys
+  // to a file the daemon does not read.
+  const effectiveDesired = higherPriority
+    ? Object.fromEntries(Object.entries(desired).filter(([key]) => Object.hasOwn(owned, key)))
+    : desired;
+  const plan = planConfig(current.value, owned, effectiveDesired);
   const changed = plan.written || plan.removed;
   const empty = Object.keys(plan.next).length === 0;
   if (!dryRun) {
@@ -156,10 +198,13 @@ function reconcileConfig(root, receipt, desired, dryRun) {
     receipt.configCreated ??= false;
     if (changed && empty && receipt.configCreated === true) receipt.configCreated = false;
   }
-  const held = plan.conflicts.length ? { invalid: false, entries: plan.conflicts } : null;
-  if (plan.written) return { status: 'written', changed, held };
-  if (plan.removed) return { status: 'removed', changed, held };
-  return { status: held ? 'user-managed' : 'converged', changed: false, held };
+  /** @type {HeldConfig} */
+  const held = higherPriority && Object.keys(desired).length
+    ? { invalid: false, reason: 'higher-priority-json', entries: Object.entries(desired).map(([key, want]) => ({ key, want })) }
+    : plan.conflicts.length ? { invalid: false, entries: plan.conflicts } : null;
+  if (plan.written) return { status: 'written', changed, activeChanged: !higherPriority, held };
+  if (plan.removed) return { status: 'removed', changed, activeChanged: !higherPriority, held };
+  return { status: held ? 'user-managed' : 'converged', changed: false, activeChanged: false, held };
 }
 
 function reconcileAutostart(root, receipt, wanted, dryRun) {
@@ -196,25 +241,27 @@ const hasOwnership = (receipt) => Object.keys(receipt.configKeys ?? {}).length >
  * Converge one project's managed daemon settings.
  * @param {string} root the Ruflo project root
  * @param {{rufloVersion?: (string|null), platform?: string, receipts: Record<string, any>,
- *   autoStart?: boolean, dryRun?: boolean, desired?: Record<string, number>, runner?: unknown}} options
+ *   autoStart?: boolean, dryRun?: boolean, desired?: Record<string, number>, runner?: unknown,
+ *   env?: NodeJS.ProcessEnv}} options
  *   `autoStart` is kit.json rufloDaemon.autoStart !== false; `runner` is accepted and never used.
- * @returns {{config: string, autostart: string, changed: boolean, held: HeldConfig}}
+ * @returns {{config: string, autostart: string, changed: boolean, configActiveChanged: boolean, held: HeldConfig}}
  *   `held` names the desired keys ak cannot manage here (null when none).
  */
 export function reconcileRufloDaemon(root, {
   rufloVersion = null, platform = process.platform, receipts, autoStart = true, dryRun = false,
-  desired = desiredDaemonKeys({ rufloVersion, platform }),
+  desired = desiredDaemonKeys({ rufloVersion, platform }), env = process.env,
 } = /** @type {any} */ ({})) {
   const key = path.resolve(root);
   const receipt = structuredClone(receipts[key] ?? {});
-  const config = reconcileConfig(root, receipt, desired, dryRun);
+  const config = reconcileConfig(root, receipt, desired, dryRun, env);
   const autostart = reconcileAutostart(root, receipt, autoStart, dryRun);
   if (!dryRun) {
     if (hasOwnership(receipt)) receipts[key] = receipt;
     else delete receipts[key];
   }
   return {
-    config: config.status, autostart: autostart.status, changed: config.changed || autostart.changed, held: config.held,
+    config: config.status, autostart: autostart.status, changed: config.changed || autostart.changed,
+    configActiveChanged: config.activeChanged, held: config.held,
   };
 }
 
@@ -254,16 +301,17 @@ export function daemonIntent(cfg) {
  * is left for Ruflo's start-on-use. Returns null outside a Ruflo project.
  * @param {string} cwd
  * @param {{cfg: any, rufloVersion?: (string|null), platform?: string, runner?: typeof run,
- *   alive?: (root: string) => boolean, dryRun?: boolean}} options
+ *   alive?: (root: string) => boolean, dryRun?: boolean, env?: NodeJS.ProcessEnv}} options
  */
 export async function applyRufloDaemon(cwd, {
   cfg, rufloVersion = null, platform = process.platform, runner = run, alive = projectDaemonAlive, dryRun = false,
+  env = process.env,
 }) {
   const root = rufloDaemonProjectRoot(cwd);
   if (!root) return null;
   const intent = daemonIntent(cfg);
-  const result = reconcileRufloDaemon(root, { rufloVersion, platform, receipts: intent.receipts, autoStart: intent.autoStart, dryRun });
-  const configChanged = result.config === 'written' || result.config === 'removed';
+  const result = reconcileRufloDaemon(root, { rufloVersion, platform, receipts: intent.receipts, autoStart: intent.autoStart, dryRun, env });
+  const configChanged = result.configActiveChanged;
   // A config.json that keeps the floor from ak (unreadable, or the user's own
   // value) changed nothing a restart would pick up.
   const floorHeld = result.held?.entries.some((e) => e.key === MEMORY_FLOOR_KEY) ?? false;
@@ -279,17 +327,17 @@ export async function applyRufloDaemon(cwd, {
 
 /** Status: the desired keys a user-managed config.json keeps from ak (a dry run).
  *  @returns {HeldConfig} */
-export function daemonConfigHeld(root, { cfg, rufloVersion = null, platform = process.platform }) {
+export function daemonConfigHeld(root, { cfg, rufloVersion = null, platform = process.platform, env = process.env }) {
   const intent = daemonIntent(structuredClone(cfg ?? {}));
   const receipts = structuredClone(intent.receipts);
-  return reconcileRufloDaemon(root, { rufloVersion, platform, receipts, autoStart: intent.autoStart, dryRun: true }).held;
+  return reconcileRufloDaemon(root, { rufloVersion, platform, receipts, autoStart: intent.autoStart, dryRun: true, env }).held;
 }
 
 /** Status: what a sync would change here, as phrases, or null when converged. */
-export function daemonDrift(root, { cfg, rufloVersion = null, platform = process.platform }) {
+export function daemonDrift(root, { cfg, rufloVersion = null, platform = process.platform, env = process.env }) {
   const intent = daemonIntent(structuredClone(cfg ?? {}));
   const receipts = structuredClone(intent.receipts);
-  const r = reconcileRufloDaemon(root, { rufloVersion, platform, receipts, autoStart: intent.autoStart, dryRun: true });
+  const r = reconcileRufloDaemon(root, { rufloVersion, platform, receipts, autoStart: intent.autoStart, dryRun: true, env });
   if (!r.changed) return null;
   const parts = [];
   const desired = desiredDaemonKeys({ rufloVersion, platform });

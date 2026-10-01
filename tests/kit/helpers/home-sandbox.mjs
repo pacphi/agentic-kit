@@ -218,7 +218,7 @@ export const snapshot = (dir) => walk(dir, dir, new Map());
  *  modified path — the load-bearing assertion behind every `--dry-run` test.
  *  `opts.ignore` is a list of relative-path prefixes (as `snapshot()` keys,
  *  e.g. from `path.relative(dir, someSubdir)`) excluded from the diff — for a
- *  deliberate, documented side-channel write (Branch 6a Task 5: the shared
+ *  deliberate, documented side-channel write (the shared
  *  evidence probe cache) a caller still wants every OTHER path covered for.
  * @param {Map<string,string>} before
  * @param {string} dir
@@ -287,7 +287,9 @@ export function offlineKitConfig(extra = {}) {
       ttlHours: 24,
       last: Date.now(),
       seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' },
-      self: { last: Date.now(), best: { version: '0.0.1', tag: 'latest' } },
+      // This fixture runs against the prerelease kit, whose self check uses
+      // both channels. A legacy latest-only record must retry under A3.
+      self: { last: Date.now(), best: { version: '0.0.1', tag: 'latest' }, lastTags: ['latest', 'next'] },
     },
     ...extra,
   };

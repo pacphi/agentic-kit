@@ -1,4 +1,5 @@
 // @ts-nocheck — dashboard browser bundle.
+import { surfaceFacetLabel } from './session-presentation.mjs';
 import { mntIcon, mntProjectDesignation } from './maintenance-cards.mjs';
 import { esc } from './bootstrap.mjs';
 import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIAL_READINESS_LABELS, MNT_CURATED_VIEW_LABELS, MNT_SCOPE_LABELS, mntHumanize, mntKindLabel } from './maintenance-workspace.mjs';
@@ -9,13 +10,13 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
     "evidenceFields","recentlyChanged",
   ];
   var MNT_FACET_LABEL={
-    family:"Resource",scope:"Scope",environment:"Environment",project:"Project",sessionOrigin:"Session origin",projectType:"Project type",kind:"Type",adapter:"Adapters",consumer:"Hosts",
+    family:"Resource",scope:"Scope",environment:"Environment",project:"Project",sessionOrigin:"Session surface",projectType:"Project type",kind:"Type",adapter:"Adapters",consumer:"Hosts",
     carrier:"Carrier",provenance:"Source",packageManager:"Package manager",versionState:"Version state",
     guidance:"Guidance",dependencyRole:"Dependency role",conflict:"Conflict",
     credentialReadiness:"Credential",channel:"Channel",evidenceFields:"Evidence available",
     recentlyChanged:"Recently changed",
   };
-  var MNT_ADAPTER_LABELS={claude:'Claude',codex:'Codex',opencode:'OpenCode',hermes:'Hermes'};
+  var MNT_ADAPTER_LABELS={claude:'Claude Code',codex:'Codex',opencode:'OpenCode',hermes:'Hermes Agent'};
   var MNT_DEPENDENCY_ROLE_LABEL={"depends-on":"Depends on","depended-on-by":"Depended on by","none":"No dependency role"};
 
   function mntFacetLabelsFor(facet){
@@ -24,8 +25,8 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
   }
   export function mntFacetValueLabel(facet,value){
     if(facet==="adapter"||facet==="consumer")return MNT_ADAPTER_LABELS[value]||mntHumanize(value);
-    if(facet==="sessionOrigin")return ({"claude-desktop":"Claude Desktop","codex-desktop":"ChatGPT Desktop",unknown:"Unclassified"})[value]||"Unclassified";
-    if(facet==="projectType")return ({git:'Git',folder:'Folder',worktree:'Worktree',unknown:'Not checked'})[value]||'Not checked';
+    if(facet==="sessionOrigin")return surfaceFacetLabel(value);
+    if(facet==="projectType")return ({git:'Git',folder:'Folder',worktree:'Worktree',unknown:'Unknown'})[value]||'Unknown';
     if(facet==="scope")return MNT_SCOPE_LABELS[value]||mntHumanize(value);
     if(facet==="kind")return mntKindLabel(value);
     if(facet==="guidance")return MNT_GUIDANCE_LANE_LABELS[value]||mntHumanize(value);

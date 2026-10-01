@@ -1,6 +1,6 @@
-// Task 10: dashboard panel + About chip for ruflo components (ADR-0058).
+// dashboard panel + About chip for ruflo components (ADR-0058).
 // Payload logic (rufloComponentsPayload) is already covered by
-// tests/kit/ruflo-components-snapshot.test.mjs (Task 9's shared projection —
+// tests/kit/ruflo-components-snapshot.test.mjs (the shared projection —
 // controller ruling 1), so this file covers only the dashboard-specific
 // surface: the route registration and the client bundle renderer.
 import { test } from 'node:test';

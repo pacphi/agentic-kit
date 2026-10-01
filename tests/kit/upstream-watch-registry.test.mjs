@@ -193,11 +193,10 @@ test('the tracking issues carry their whole upstream remainder', () => {
   const t240 = entry(doc, 'pacphi/agentic-kit#240');
   assert.deepEqual([...t240.tracks].sort(), ['proffesor-for-testing/agentic-qe#574', 'proffesor-for-testing/agentic-qe#719']);
   assert.match(t240.adjustment, /agentic-qe#574/);
-  assert.ok(t240.kitImpact.files.includes('src/lib/aqe-readiness.mjs'));
+  assert.ok(t240.kitImpact.files.includes('docs/troubleshooting.md'));
 });
 
-// agentic-qe#719 is a partial fix for #574: releasing it alone must not dispatch removing the busy rule.
-test('the partial fix agentic-qe#719 is context only; agentic-qe#574 drives the dispatch', () => {
+test('the #574 exception retirement records released conformance without closing #240', () => {
   const doc = document();
   const partial = entry(doc, 'proffesor-for-testing/agentic-qe#719');
   assert.equal(partial.mapping, 'unmapped');
@@ -206,7 +205,13 @@ test('the partial fix agentic-qe#719 is context only; agentic-qe#574 drives the 
   assert.match(partial.note, /agentic-qe#574/);
   const driver = entry(doc, 'proffesor-for-testing/agentic-qe#574');
   assert.equal(driver.mapping, 'mapped');
-  assert.match(driver.adjustment, /busy rule/);
+  assert.equal(driver.status, 'retired');
+  assert.match(driver.adjustment, /macOS and Linux/);
+  assert.match(driver.adjustment, /not a universal AQE minimum/);
+  assert.ok(driver.history.some((item) => item.event === 'retired' && item.date === '2026-09-29'));
+  const tracker = entry(doc, 'pacphi/agentic-kit#240');
+  assert.equal(tracker.status, 'watching');
+  assert.match(tracker.adjustment, /final main PR/);
 });
 
 test('stale threads are mapped to what ak carries, or retired with a reason', () => {

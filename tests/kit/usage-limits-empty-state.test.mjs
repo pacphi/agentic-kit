@@ -33,17 +33,17 @@ const text = (html) => html.replace(/<[^>]+>/g, '').replace(/&mdash;/g, '—').r
 
 test('a custom user-level statusLine is named, with the project precedence that still fills the panel', () => {
   const html = text(renderLimitsWith(empty({ claudeChannel: 'custom' }))['u-lim-claude'].innerHTML);
-  assert.match(html, /user-level statusLine runs a custom script/);
+  assert.match(html, /effective statusLine runs a custom script/);
   assert.match(html, /does not report limits to ak/);
-  assert.match(html, /project’s own statusLine takes precedence over your user-level one/);
+  assert.match(html, /local or managed settings may override the project and user settings/);
   assert.match(html, /ak setup --project/);
   assert.doesNotMatch(html, /Run one session, then revisit/,
     'running more sessions is not the fix when the effective statusline cannot tee');
 });
 
-test('no user-level statusLine says only footer-carrying projects report limits', () => {
+test('no effective statusLine says only footer-carrying projects report limits', () => {
   const html = text(renderLimitsWith(empty({ claudeChannel: 'none' }))['u-lim-claude'].innerHTML);
-  assert.match(html, /no user-level statusLine/);
+  assert.match(html, /no effective statusLine/);
   assert.match(html, /ak setup --project/);
 });
 
@@ -117,7 +117,7 @@ test('a stale Codex answer served after a failed refresh says the refresh failed
   assert.doesNotMatch(fresh['u-lim-codex-note'].textContent, /refresh failed/);
 });
 
-// Fix round 1: a cached figure served under a presence-gated reason (no spawn
+// a cached figure served under a presence-gated reason (no spawn
 // was ever attempted) must say "not refreshed", never "last refresh failed" —
 // that phrase implies an attempt that did not happen.
 test('a cached Codex figure served under a presence-gated reason says "not refreshed", never "failed"', () => {

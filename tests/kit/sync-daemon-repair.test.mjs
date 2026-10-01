@@ -1,4 +1,4 @@
-// final-review fix: sync's 'daemons' step must re-record daemon-sweep
+// sync's 'daemons' step must re-record daemon-sweep
 // evidence after a successful reap. The Important finding: listDaemons()
 // records the PRE-reap process list; without a re-list after reap() kills
 // something, that stale list is the last thing written — a later `ak
@@ -16,6 +16,7 @@ import { sandboxHome, rmrf } from './helpers/home-sandbox.mjs';
 const SANDBOX_HOME = sandboxHome('ak-sync-daemon-repair');
 after(() => rmrf(SANDBOX_HOME));
 const sync = await import('../../src/commands/sync.mjs');
+const { applyRufloDaemon } = await import('../../src/lib/ruflo-daemon-config.mjs');
 
 const daemonsStep = sync.SYNC_STEPS.find((s) => s.id === 'daemons');
 
@@ -73,5 +74,51 @@ test('a reap attempt that fails to kill anything is not re-recorded either', asy
       },
     });
     assert.equal(listCalls.length, 1, 'a failed reap (pid already gone/reused) leaves the process list unchanged; no re-record is needed');
+  } finally { rmrf(cwd); }
+});
+
+test('daemon step uses injected version, apply and save seams after its sweep', async () => {
+  const cwd = freshCwd();
+  const calls = [];
+  try {
+    await daemonsStep.run({
+      cwd, cfg: {},
+      daemonLifecycle: { list: async () => [], reap: () => [] },
+      daemonVersion: () => { calls.push('version'); return '3.48.0'; },
+      daemonApply: async (_cwd, options) => {
+        calls.push(['apply', options.rufloVersion]);
+        return { result: { config: 'converged', autostart: 'converged', changed: false, held: null }, restarted: false };
+      },
+      saveConfig: () => calls.push('save'),
+    });
+    assert.deepEqual(calls, ['version', ['apply', '3.48.0'], 'save']);
+  } finally { rmrf(cwd); }
+});
+
+test('versions-triggered daemon step applies only fixture settings with no external processes', async () => {
+  const cwd = freshCwd();
+  const calls = [];
+  try {
+    fs.mkdirSync(path.join(cwd, '.git'));
+    fs.mkdirSync(path.join(cwd, '.claude-flow'));
+    fs.mkdirSync(path.join(cwd, '.swarm'));
+    fs.writeFileSync(path.join(cwd, '.swarm', 'memory.db'), '');
+    const cfg = { rufloDaemon: { receipts: {} } };
+    assert.ok(sync.activeSteps(new Set(['versions']), {}, cfg).includes('daemons'));
+    await daemonsStep.run({
+      cwd, cfg,
+      daemonLifecycle: { list: async () => { calls.push('list'); return []; }, reap: () => [] },
+      daemonVersion: () => '3.45.0',
+      daemonApply: (root, options) => applyRufloDaemon(root, {
+        ...options, platform: 'darwin', alive: () => { calls.push('alive'); return true; },
+        runner: async (_tool, args) => { calls.push(args.join(' ')); return { code: 0 }; },
+      }),
+      saveConfig: () => calls.push('save'),
+    });
+    assert.deepEqual(calls, ['list', 'alive', 'daemon stop', 'daemon start', 'save']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(cwd, '.claude-flow', 'config.json'), 'utf8')),
+      { 'daemon.idleSecs': 0, 'daemon.resourceThresholds.minFreeMemoryPercent': 0 });
+    assert.deepEqual(cfg.rufloDaemon.receipts[path.resolve(cwd)].configKeys,
+      { 'daemon.idleSecs': 0, 'daemon.resourceThresholds.minFreeMemoryPercent': 0 });
   } finally { rmrf(cwd); }
 });

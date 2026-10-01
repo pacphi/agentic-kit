@@ -588,7 +588,7 @@ test('v2 inventory projection keeps the nine inspector sections and the page env
   assert.equal(page.groups.length, 1);
   assert.deepEqual(Object.keys(page.groups[0].placements[0]).sort(), [
     'breadcrumb', 'carrier', 'consumerHosts', 'displayName', 'guidanceLane', 'kind', 'placementId', 'projectId', 'projectKind',
-    'repositoryEvidence', 'repositoryId', 'repositoryLabel', 'repositoryObservedAt', 'rowAction', 'scope', 'sessionOrigins', 'versions',
+    'repositoryEvidence', 'repositoryId', 'repositoryLabel', 'repositoryObservedAt', 'rowAction', 'scope', 'sessionOrigins', 'sessionSurfaces', 'versions',
   ]);
   const inspector = publicInspector(inspectorFor(inventory, PLACEMENT));
   assert.deepEqual(Object.keys(inspector).sort(), [
@@ -748,26 +748,18 @@ test('v2 inventory projection carries row kind and opaque-id facet labels over e
   assert.doesNotMatch(JSON.stringify(hostile), /Users\/alice|leak/);
 });
 
-test('report({ refresh:true }) fires afterScan once after a successful provider scan and never lets it fail the response', async () => {
+test('report reads persisted evidence and ignores retired refresh arguments', async () => {
   const events = [];
-  const service = { async report() { return {}; }, async scan() { events.push('scan'); return {}; }, async plan() { return {}; } };
+  const service = { async report() { events.push('report'); return {}; }, async scan() { events.push('scan'); return {}; }, async plan() { return {}; } };
   const api = createMaintenanceDashboardApi({
     service, sessionToken: SESSION, afterScan: () => { events.push('afterScan'); throw new Error('rebuild failed'); },
   });
   const plain = fakeRes();
   await api.report({}, plain, { refresh: false });
-  assert.deepEqual([plain.out.status, events], [200, []]);
+  assert.deepEqual([plain.out.status, events], [200, ['report']]);
   const refreshed = fakeRes();
   await api.report({}, refreshed, { refresh: true });
-  assert.deepEqual([refreshed.out.status, events], [200, ['scan', 'afterScan']]);
-  const failing = createMaintenanceDashboardApi({
-    service: { ...service, async scan() { throw new Error('provider check failed'); } }, sessionToken: SESSION,
-    afterScan: () => { events.push('never'); },
-  });
-  const failed = fakeRes();
-  await failing.report({}, failed, { refresh: true });
-  assert.equal(failed.out.status, 503);
-  assert.equal(events.includes('never'), false, 'afterScan only follows a successful scan');
+  assert.deepEqual([refreshed.out.status, events], [200, ['report', 'report']]);
 });
 
 test('lastRefresh is allowlisted on the report, inventory, and guidance envelopes with a guarded, label-safe message (QE D6b)', async () => {
@@ -893,6 +885,31 @@ test('public activity retains historical scans as well as latest source summarie
   const payload = publicActivity({ scans, scanHistory: history });
   assert.equal(payload.scans.length, 1);
   assert.equal(payload.scanHistory.length, 2);
+});
+
+test('public activity allows a bounded pause time while omitting invalid timestamps and private metadata', () => {
+  const scan = { sourceId: SOURCE, state: 'paused', recordedAt: '2026-09-09T12:00:00.000Z', completedAt: null, privatePath: PRIVATE_PATH };
+  const payload = publicActivity({ scans: [scan], scanHistory: [scan, { ...scan, recordedAt: PRIVATE_PATH }, { ...scan, recordedAt: '1' }] });
+  assert.equal(payload.scans[0].recordedAt, scan.recordedAt);
+  assert.equal(payload.scans[0].completedAt, null);
+  assert.equal(payload.scanHistory[1].recordedAt, undefined);
+  assert.equal(payload.scanHistory[2].recordedAt, undefined);
+  assert.equal(JSON.stringify(payload).includes(PRIVATE_PATH), false);
+});
+
+test('public activity rejects impossible pause dates and retains valid leap-day offset stamps', () => {
+  const base = { sourceId: SOURCE, state: 'paused', completedAt: null };
+  const valid = '2024-02-29T23:59:59.125+05:30';
+  const payload = publicActivity({ scans: [{ ...base, recordedAt: valid }], scanHistory: [
+    { ...base, recordedAt: '2026-09-31T12:00:00Z', completedAt: '2026-09-30T12:00:00Z' },
+    { ...base, recordedAt: '2025-02-29T12:00:00Z' },
+    { ...base, recordedAt: valid },
+  ] });
+  assert.equal(payload.scans[0].recordedAt, valid);
+  assert.equal(payload.scanHistory[0].recordedAt, undefined);
+  assert.equal(payload.scanHistory[0].completedAt, '2026-09-30T12:00:00Z');
+  assert.equal(payload.scanHistory[1].recordedAt, undefined);
+  assert.equal(payload.scanHistory[2].recordedAt, valid);
 });
 
 test('v2 reports native persistence refusal without suggesting an action started', async () => {

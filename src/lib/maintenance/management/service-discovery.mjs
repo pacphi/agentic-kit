@@ -391,7 +391,7 @@ export function scanProgress(ctx) {
       coverage,
       progress: ctx.orchestrator().progress(),
       narrative: progressNarrative(filesystemCoverage, { totalSources: filesystemCoverage.length }),
-      evidenceChecks: coverage.filter((entry) => entry.filesystem === false).map((entry) => ({ sourceId: entry.sourceId, label: entry.label, method: 'Refresh evidence' })),
+      evidenceChecks: coverage.filter((entry) => entry.filesystem === false).map((entry) => ({ sourceId: entry.sourceId, label: entry.label, method: 'Refresh' })),
       forbiddenClaims: claimsAllowed(filesystemCoverage),
     };
   };

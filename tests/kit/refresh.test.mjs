@@ -163,7 +163,7 @@ test('runRefresh refuses an unknown strength or a missing stage', async () => {
 test('the refresh operation never references the paid connection check', () => {
   // Every module that runs refresh stages belongs in this list, including any
   // future server-side refresh module.
-  for (const file of [REFRESH_SOURCE]) {
+  for (const file of [REFRESH_SOURCE, path.join(PKG_ROOT, 'src/lib/dashboard/refresh-api.mjs')]) {
     const source = fs.readFileSync(file, 'utf8');
     assert.doesNotMatch(source, /checkConnection|host-health-connected/, file);
   }

@@ -2,7 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-03
-- **Updated:** 2026-09-28 — the CLI verb for the explicit scan this ADR's v1 `ak maintain scan`
+- **Updated:** 2026-09-29 — the dashboard explicit scan starts with `POST /api/refresh`;
+  the retired `GET /api/maintenance?refresh=scan` is rejected. See ADR-0063.
+- **Earlier update:** 2026-09-28 — the CLI verb for the explicit scan this ADR's v1 `ak maintain scan`
   contract describes is now `ak maintain --refresh[=machine]` (the exact `?refresh=scan` dashboard
   route below is unaffected — that half of the vocabulary belongs to a later remediation program's
   dashboard work; see [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
@@ -232,9 +234,9 @@ a body no larger than 64 KiB. The SSE query-token exception does not apply. The 
 read-only interruption audit and separately confirmed single-receipt reconciliation.
 
 Plain <code>GET /api/maintenance</code> reads the latest persisted scan report and never polls a
-provider. The exact <code>?refresh=scan</code> query performs and atomically persists a provider scan;
-other or duplicate query parameters are rejected. The global browser poll remains passive. A
-successful persisted System deep rescan chains exactly one Maintenance scan. See ADR-0045.
+provider. An explicit `POST /api/refresh` runs the provider scan as its Maintenance stage and persists
+the report; `GET /api/maintenance?refresh=scan` is rejected. The global browser poll remains
+passive. A successful machine measurement precedes one Maintenance scan. See ADR-0045.
 
 The view groups **Updates ready**, **Safe cleanup**, **Needs review**, **Unsupported or blocked**,
 and **Recent changes / Undo**. Every row exposes a direct imperative; the selected finding adds its

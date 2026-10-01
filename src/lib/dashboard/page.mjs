@@ -17,11 +17,12 @@ const INTEL_CSS = `
 .mw-group-scroll{max-height:212px;overflow:auto;overscroll-behavior:contain}
 .mw-table:focus-visible,.mw-group-scroll:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .mw-row{display:grid; grid-template-columns:minmax(140px,1.6fr) minmax(110px,1fr) repeat(3,minmax(96px,1fr)); gap:10px; align-items:center; padding:8px 14px; background:var(--panel); font-size:12.5px}
-.mw-data-row{height:34px;box-sizing:border-box;border-top:1px solid var(--line)}
+.mw-data-row{min-height:34px;box-sizing:border-box;border-top:1px solid var(--line)}
 .mw-data-row .mw-val{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mw-row.mw-head{height:42px;box-sizing:border-box;position:sticky;top:0;z-index:1;background:var(--panel-2); color:var(--ink-dim); font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em;line-height:12px}
 .mw-row:not(.mw-head):hover{background:var(--panel-2)}
 .mw-name{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.session-surface-detail{white-space:normal;font-size:11px;line-height:1.5}.session-surface-detail summary{cursor:pointer}.session-surface-detail div{overflow-wrap:anywhere}
 .mw-designation{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mw-filter-pills{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px}.mw-filter-pill{border:1px solid var(--line-2);border-radius:999px;background:var(--panel);color:var(--ink-2);padding:5px 9px;cursor:pointer}.mw-filter-pill[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel))}
 /* Which learning stores a project carries — three tiny dots, one per store,
@@ -114,7 +115,14 @@ export function renderPage({ name, version }) {
     <div class="poll">
       <button class="play on" id="poll-play" type="button" title="polling on — click to pause" aria-label="pause polling">&#9208;</button>
       <button class="ivl mono" id="poll-ivl" type="button" title="polling interval" aria-haspopup="true" aria-expanded="false">30s <span class="caret" aria-hidden="true">&#9662;</span></button>
-      <button class="refresh" id="poll-now" type="button" title="refresh now" aria-label="refresh now">&#8635;</button>
+      <button class="refresh" id="poll-now" type="button" title="Reload — re-read this view; runs no checks" aria-label="Reload — re-read this view; runs no checks">&#8635; Reload</button>
+    </div>
+    <div class="refresh-control">
+      <button type="button" id="refresh-run">Refresh</button>
+      <label class="sr-only" for="refresh-strength">Refresh strength</label>
+      <select id="refresh-strength"><option value="local">Refresh</option><option value="live">Refresh live</option><option value="machine">Refresh machine</option></select>
+      <label class="refresh-trees"><input type="checkbox" id="refresh-project-trees" disabled> Include project trees</label>
+      <span id="refresh-status" role="status" aria-live="polite"></span>
     </div>
     <button class="toggle" id="theme-toggle" type="button" aria-label="toggle theme" title="toggle theme">
       <span class="icon" id="theme-icon" aria-hidden="true"></span>
@@ -160,7 +168,7 @@ export function renderPage({ name, version }) {
   <p id="host-health-eligibility"></p>
   <p class="health-disclosure">${escapeHtml(CONNECTION_CHECK_DISCLOSURE)}</p>
   <label class="health-consent"><input type="checkbox" id="host-health-consent"> Run one connection check with these settings.</label>
-  <div class="health-actions"><button type="button" id="host-health-refresh">Check again</button><button type="button" id="host-health-connect" disabled>Check connection</button></div>
+  <div class="health-actions"><button type="button" id="host-health-run-refresh">Refresh</button><button type="button" id="host-health-connect" disabled>Check connection</button></div>
   <p id="host-health-message" role="status" aria-live="polite"></p>
 </dialog>
 
@@ -219,8 +227,7 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" data-system-view="maintenance" aria-selected="false" aria-controls="panel-sys-maintenance" type="button">Maintenance</button>
       </div>
       <div class="secondary-actions sy-freshness" id="system-freshness">
-        <span class="sy-asof" id="sys-asof" role="status" aria-live="polite" aria-atomic="true">full scan &mdash; not run yet</span>
-        <button class="chipf" type="button" id="sys-rescan" title="re-measure installs, storage, catalog, and projects">&#8635; Full scan</button>
+        <span class="sy-asof" id="sys-asof" role="status" aria-live="polite" aria-atomic="true">machine measurement &mdash; not run yet</span>
       </div>
     </div>
     <div class="secondary-group" id="secondary-observability" hidden>
@@ -750,7 +757,7 @@ ${LIVE_HTML}
             <div class="sy-ctl" id="sys-cons-ctl">
               <button class="chipf on" type="button" data-cons-mode="ranked">Ranked</button>
               <button class="chipf" type="button" data-cons-mode="ecosystem">By ecosystem</button>
-              <button class="chipf" type="button" id="sys-cons-trees" aria-pressed="false">Project trees</button>
+              <span class="chipf" id="sys-cons-trees">Project trees excluded</span>
             </div>
           </div>
           <div class="sy-liner" id="sys-consumers-note"></div>
@@ -916,10 +923,6 @@ ${LIVE_HTML}
           </div>
           <p class="mnt-status sr-only" id="mnt-status" role="status" aria-live="polite" aria-atomic="true"></p>
           <div class="mnt-providers-bar">
-            <button type="button" class="chipf" id="mnt-check-providers" aria-describedby="mnt-refresh-help" title="Executable provider probes are never automatic; this is the explicit control that runs them">&#8635; Refresh evidence</button>
-            <span class="mnt-providers-help sr-only" id="mnt-refresh-help">Runs provider probes on the saved measurement and rebuilds the inventory. Seconds.</span>
-            <button type="button" class="chipf" id="mnt-remeasure" aria-describedby="mnt-remeasure-help" title="Walks the filesystem to re-measure installs, storage, projects, and discovery sources, then refreshes evidence">&#8635; Re-measure machine</button>
-            <span class="mnt-providers-help sr-only" id="mnt-remeasure-help">Walks the filesystem, then refreshes evidence. Minutes.</span>
             <span class="mnt-providers-status" id="mnt-check-providers-status" role="status" aria-live="polite" aria-atomic="true"></span>
             <span class="mnt-operation-elapsed" id="mnt-operation-elapsed" aria-hidden="true" hidden></span>
           </div>

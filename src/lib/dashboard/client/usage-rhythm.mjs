@@ -3,7 +3,7 @@
 // override comment for why this directory isn't run through the node lib.
 
 // Pure string-building chart primitives for the Usage tab's rhythm/mode
-// panels (Task 9 wires these exports into usage.mjs). No DOM access, no
+// panels (usage.mjs wires these exports). No DOM access, no
 // fetch, no module-level state — every function takes plain data in and
 // returns markup out. `esc` is copied from ./groups.mjs's real implementation
 // rather than imported: bootstrap.mjs's own `esc` is only a build-time

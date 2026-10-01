@@ -59,7 +59,7 @@ test('the versions step verifies host CLIs it upgrades', () => {
   assert.deepEqual(sync.hostUpgradeOptions('ruflo'), {});
 });
 
-// ── final-review fix: re-record evidence after a repair succeeds ───────────
+// ── re-record evidence after a repair succeeds ───────────
 // The Important finding: `installState()` at the top of the loop records the
 // PRE-repair evidence; without a re-probe after `install()` succeeds, that
 // stale row is the last thing written — a later `ak status`/this sync's own

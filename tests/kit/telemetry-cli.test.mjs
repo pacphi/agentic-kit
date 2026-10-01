@@ -66,6 +66,15 @@ test('should_keepErrorsGeneric_when_malformedFilesContainSecrets', t => {
   const result = cli(['validate', file]);
   assert.equal(result.status, 2);
   assert.doesNotMatch(result.stdout + result.stderr, /SECRET/);
+  assert.deepEqual(Object.keys(JSON.parse(result.stdout)), ['error', 'exitCode']);
+  assert.equal(JSON.parse(result.stdout).exitCode, 2);
+});
+test('telemetry parser rejection remains private and machine-readable', () => {
+  const result = cli(['schema', '--private-path=/secret/SECRET']);
+  assert.equal(result.status, 2);
+  assert.deepEqual(Object.keys(JSON.parse(result.stdout)), ['error', 'exitCode']);
+  assert.equal(JSON.parse(result.stdout).exitCode, 2);
+  assert.doesNotMatch(result.stdout + result.stderr, /SECRET|\/secret/);
 });
 test('should_degradeSourcesIndependently_when_usageReaderFails', async () => {
   const { collectSnapshot } = await import('../../src/lib/telemetry/collect.mjs');

@@ -4,9 +4,60 @@
 
 ## Status
 
-Active, not yet started. The §1 decision batch is awaiting the maintainer's answers. D-2's first
-release (`4.0.0-alpha.60`, carrying #263's breaking changes) is being cut ahead of branch V1, per
-D-2 option A.
+Active under the maintainer-confirmed [develop execution plan](2026-09-28-remediation-v2-develop-execution.md)
+(2026-09-28). V1 #267 and V2 #264/#266/#269 are delivered; #262 still needs residual
+Windows timing evidence. #251 is done, and the alpha.60 release commit is on `main`.
+Publication and global installation were not verified in the execution-plan baseline.
+The historical decision batch and schedule below remain as scope/evidence references;
+the approved execution section governs wherever their authority or timing differs.
+At the 2026-09-29 closeout checkpoint, reviewed V1–V6 and main watcher reconciliation
+are integrated through `develop@88ce597f444d487a34d9871a447cf8942f76f760` with all
+13 develop CI checks passing. V7 guard and evidence units are independently accepted;
+V7 shared integration, independent reviews and all nine local gates passed at
+`795a0f7266de0bf6a04358359b75a1ad1b609e1d`; closeout PR CI and integration remain pending.
+The [246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md),
+[integration receipt](../archive/2026-09-29-remediation-v2-integration-evidence.md),
+[ordered rulings](../archive/2026-09-29-remediation-v2-rulings.md),
+[Windows evidence](../archive/2026-09-29-windows-ci-evidence.md) and
+[AQE proof](../archive/2026-09-29-aqe-released-artifact-receipt.md) retain the limits.
+The dated 19:20 UTC three-PR timing snapshot includes a 358-second Windows leg;
+refresh this separate gate after closeout PR CI.
+The final develop → main PR and human approval remain pending. This plan stays
+active; no release, installation, real-store mutation, deletion or personal-memory
+write follows from documentation completion. Attended time was not instrumented.
+
+### Approved execution and precedence
+
+The [confirmed execution plan](2026-09-28-remediation-v2-develop-execution.md) governs
+branch sources, integration, releases, operations and completion. All Appendix A and B
+rows remain in scope. In particular:
+
+- V1 and both V2 taxonomy PRs are already delivered; use their evidence and do not
+  replay their implementation. #262 remains open until its ten-run before/after
+  evidence is recovered or the missing evidence is explicitly reported.
+- Bootstrap establishes `develop` from a verified current `main`. Every new feature
+  branch starts from current `develop`; every feature PR targets `develop`. The
+  controller may squash-merge only after required CI, including Windows, and
+  independent review pass. The aggregate `develop` → `main` PR is opened for human
+  review and left unmerged. References below to cutting branches from, merging into,
+  or fast-forwarding `main` for intermediate work mean `develop` for new work.
+- D-1's cleanup language grants no automatic deletion. Preserve existing work and
+  unit-commit/evidence records. Real store operations, upstream submissions, paid
+  runs, and destructive cleanup retain their explicit approval gates.
+- The alpha.60 commit is already on `main`; verify its actual published state before
+  any release decision. D-2's intermediate and close-out release schedule, including
+  alpha.61, and §2's install prerequisite are deferred until after human approval of
+  the final main PR and an independent release gate. Do not publish, install or sync
+  a new artifact merely to satisfy the historical schedule.
+- D-3 through D-19 follow the confirmed execution plan's dispositions and current
+  evidence. D-3 and D-8 have landed. Execution uses bounded concurrency and exact
+  worktree ownership, rather than the original five-way Wave 2 schedule.
+- For review readiness, reconcile every Appendix row to delivered evidence, an
+  approved disposition, a named open issue or a separately gated operation. Keep
+  the final main PR open. DoD §6's publication, global install, live-store work,
+  machine cleanup, future release dispatch and archive/memory operations are
+  operational completion gates after human review, not prerequisites to opening
+  that PR. Codex personal-memory updates require a direct user request.
 
 **Goal:** Finish everything left over from [remediation program v1](2026-09-26-remediation-program.md) in seven branches. The maintainer's attention goes into one decision sitting up front and a short list of named interrupts. v1 took about 28 attended hours; v2 aims for under 4 (§4 adds it up).
 
@@ -272,7 +323,7 @@ One unit commit per line, test-first. The source text is the Branch 9 plan where
 
 1. A relative `XDG_*` value is ignored (Branch 9 Task 6; B6a-6, B2-6).
 2. Re-record seams for `x/daemon-gc.mjs` and `setup.mjs` (Task 8), plus the one for `x/host.mjs` `pick` (deferred 13a) (B6a-3).
-3. `rufloMemoryLocation` names both reasons when the root and the folder are both unsuitable (deferred item 11). `inside()` stops treating equality as "inside", so a `TMPDIR` set to a tool folder is read correctly (B9-12, B0-15).
+3. `rufloMemoryLocation` names both reasons when the root and the folder are both unsuitable (deferred item 11). `inside()` stops treating equality as "inside", so a `TMPDIR` set to a tool folder is read correctly (B9-12, B0-15). Implemented in V4 B3; isolated-branch review pending (`.superpowers/sdd/2026-09-28-follow-ups-v2/b3-report.md`).
 4. N4, as D-4 decides (B9-3).
 5. The stray scan walks dot folders below the root (B5-9, D-7). The real `~/.agentic-qe` home store is listed (B5-11). The `codex-mcp` hint stops suggesting AQE's broken Codex platform setup (agentic-qe#757) (B5-10).
 6. `ruflo-components`: the applied-but-unverified row stops repeating the restart instruction (B0-21). The rows reading "partial — missing: Codex hooks" get a fix line once ruvnet/ruflo#3419 answers; if it is still unanswered at the pre-PR check, this part waits (LQ-2).

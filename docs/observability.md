@@ -23,8 +23,9 @@ ak dashboard \
 > OpenCode process presence is observed. What you don't get: ruflo and agentic-qe activity, which are never
 > auto-discovered and only appear once you register their event file
 > explicitly (see [Evidence and limitations](#evidence-and-limitations)).
-> `--live-source` reads a file that something else already writes. It does not make Ruflo or
-> agentic-qe produce events.
+> `--live-source` is **experimental**. Its schema and parser have fixture coverage, but no
+> verified Ruflo or agentic-qe producer currently writes a structured live-events file.
+> Registering a path reads that file; it does not start a producer or establish runtime coverage.
 
 Open `#observability/live` or `#observability/history`, for example
 `http://127.0.0.1:7431/#observability/live` — once the dashboard's per-session token is already in
@@ -36,6 +37,14 @@ tab closes that browser's event stream. After the last snapshot/SSE client
 leaves, collectors stop after 30 seconds by default. The next request resumes each file where it
 stopped, so work written while nobody was watching still appears. Stopping the dashboard closes
 the live service and all clients.
+
+When a native transcript leaves the newest-file window, the service keeps a bounded in-memory
+reader state. A file that returns while that state is retained resumes at its prior byte offset;
+its accepted-record count does not rise from replay alone. The retained state is limited to twice
+the configured file bound, with a minimum of two readers. Once evicted, a returning file is read
+from its start. A new dashboard process has no saved native offset; its first scan bootstraps
+metadata and begins following existing files at their ends. The live view does not provide a
+durable, exactly-once event archive.
 
 Model lifecycle is a separate read model under **Usage → Models**. It may consume bounded model ids
 already derived by the historical usage index, but it never consumes live transcript content
@@ -358,7 +367,8 @@ paths remain absolute. The parser rejects an unsupported/missing surface or an
 empty path, but registration does not prove that the file exists, is a regular
 file, is inside the current project, or is produced by the named subsystem.
 Registration also does not turn on event output: `--live-source` observes a file an
-existing producer writes. Unreadable/malformed sources degrade their adapter rather than
+external producer may write. No real Ruflo or agentic-qe producer has been verified for this
+structured format. Unreadable/malformed sources degrade their adapter rather than
 crashing the dashboard. Only register a local file you trust the dashboard process to read.
 The structured adapter still constructs allowlisted events, so arbitrary JSON
 fields do not pass through to the browser.

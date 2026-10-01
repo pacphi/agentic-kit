@@ -1,3 +1,4 @@
+import { SESSION_SURFACE_LABELS } from '../session-surface.mjs';
 import { sendJson } from '../loopback-server.mjs';
 import {
   ACTION_VERBS, ADMINISTRATIVE_SCOPES, AUDIT_RESULTS, AUDIT_RESULT_LABELS, CARRIER_KINDS, CONFLICT_KINDS,
@@ -9,6 +10,7 @@ import {
   SHELLS, SORT_ORDERS, SOURCE_COVERAGE_STATES, SOURCE_TYPES, isOpaqueId, isProhibitedLabel,
 } from '../maintenance/management/model.mjs';
 import { maintenanceReceiptPresentation } from '../maintenance/receipt-presentation.mjs';
+import { validScanTime } from '../maintenance/management/activity.mjs';
 import {
   MAINTENANCE_LOCAL_PATH, createMaintenanceCapabilityStore, matchMaintenanceV2Route, readMaintenanceJson,
   validateMaintenanceBody, validateMaintenanceV2Body, validateMaintenanceV2Query,
@@ -386,7 +388,7 @@ const T = Object.freeze({
   idDict: (prefix, value, max = 500) => ({ kind: 'dict', value, max, keyPrefix: prefix }),
   either: (...options) => ({ kind: 'either', options }),
   /** ISO timestamp, bounded machine token, and a user-facing label that refuses PROHIBITED_LABELS. */
-  iso: Object.freeze({ kind: 'iso' }), token: (max = 64) => ({ kind: 'token', max }), label: (max = 200) => ({ kind: 'label', max }),
+  iso: Object.freeze({ kind: 'iso' }), scanStamp: Object.freeze({ kind: 'scanStamp' }), token: (max = 64) => ({ kind: 'token', max }), label: (max = 200) => ({ kind: 'label', max }),
 });
 const [DICT_KEY, MAX_PAGE_ROWS, TOKEN] = [/^[A-Za-z0-9._:-]{1,120}$/, 200, /^[A-Za-z0-9._:-]+$/];
 
@@ -430,6 +432,7 @@ const SCALARS = Object.freeze({
   label: (node, value) => { const safe = evidenceText(value, node.max); return safe && !isProhibitedLabel(safe) ? safe : undefined; },
   token: (node, value) => (typeof value === 'string' && value.length <= node.max && TOKEN.test(value) ? value : undefined),
   iso: (_node, value) => (typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value)) ? value : undefined),
+  scanStamp: (_node, value) => validScanTime(value) ?? undefined,
   owner: (node, value) => text(value, node.max) ?? undefined,
   bool: (_node, value) => (typeof value === 'boolean' ? value : undefined),
   int: (_node, value) => (Number.isInteger(value) ? value : undefined),
@@ -450,10 +453,18 @@ function projectNode(node, value) {
 
 const [ID, LABEL, STAMP] = [T.text(128), T.text(200), T.text(40)];
 const PROJECT_PRESENTATION = {
+  sessionSurfaces: T.list(T.obj({ host: T.oneOf(['claude', 'codex', 'opencode', 'unknown']),
+    surface: T.oneOf(Object.keys(SESSION_SURFACE_LABELS)), initiator: T.oneOf(['person', 'automation', 'agent', 'imported-copy', 'unknown']),
+    sessions: T.int, countBasis: T.oneOf(['declared-session-ids', 'transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations']),
+    rawEvidence: T.obj(Object.fromEntries(['entrypoint', 'originator', 'source', 'threadSource', 'sessionKind'].map((key) => [key, T.list(T.text(80), 16)]))),
+    rawEvidenceComplete: T.bool,
+    attributes: T.list(T.oneOf(['on 3P', 'started from Claude Desktop', 'started from mobile', 'started from a project', 'started from web']), 5),
+    thirdPartyProvider: T.oneOf(['amazon-bedrock', 'google-vertex-ai']), thirdPartyProviderBasis: T.oneOf(['assistant-model-id']),
+  }), 512),
   repositoryId: ID, repositoryLabel: LABEL, repositoryEvidence: T.oneOf(['git-directory', 'git-pointer', 'git-common-directory-and-backlink', 'project-discovery']),
   repositoryObservedAt: T.int,
   sessionOrigins: T.list(T.obj({ origin: T.oneOf(['claude-desktop', 'codex-desktop', 'unknown']), sessions: T.int,
-    countBasis: T.oneOf(['transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations']) }), 3),
+    countBasis: T.oneOf(['declared-session-ids', 'transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations']) }), 3),
 };
 const PROVIDER = T.obj({ id: T.text(80), version: T.text(40) });
 const COVERAGE = T.obj({
@@ -585,7 +596,7 @@ const CONFIGURED_SOURCE = T.obj({
   sourceId: ID, kind: T.oneOf(SOURCE_TYPES), root: T.owner(1024), label: LABEL, maxDepth: T.int, includeNetwork: T.bool, present: T.bool,
 });
 const SCAN_SUMMARY = T.obj({
-  scanId: ID, sourceId: ID, environmentId: ID, state: T.oneOf(SCAN_STATES), startedAt: STAMP, completedAt: STAMP, visited: T.int,
+  scanId: ID, sourceId: ID, environmentId: ID, state: T.oneOf(SCAN_STATES), startedAt: STAMP, recordedAt: T.scanStamp, completedAt: STAMP, visited: T.int,
   limitingReason: T.oneOf(LIMITING_REASONS), ceiling: T.oneOf(SAFETY_CEILINGS), label: LABEL,
 });
 const DISCOVERY = T.obj({
@@ -837,12 +848,10 @@ function reconcileConfirmation({ receiptId, outcome, audit, now }) {
  *   now?: () => number,
  *   capabilities?: ReturnType<typeof createMaintenanceCapabilityStore>,
  *   scanAckMs?: number,
- *   afterScan?: () => any,
- * }} options `afterScan` runs (never awaited) after a successful `?refresh=scan`
- *   provider scan so the server can chain the inventory rebuild.
+ * }} options
  */
 export function createMaintenanceDashboardApi({
-  service, management = null, sessionToken, now = Date.now, capabilities, scanAckMs = 250, afterScan = null,
+  service, management = null, sessionToken, now = Date.now, capabilities, scanAckMs = 250,
 } = {}) {
   if (!service || typeof service.report !== 'function' || typeof service.scan !== 'function'
       || typeof service.plan !== 'function') {
@@ -860,11 +869,9 @@ export function createMaintenanceDashboardApi({
 
   const withActivity = (model) => ({ ...model, activity: typeof service.scanState === 'function' ? service.scanState() : null });
 
-  async function report(_req, res, { refresh = false } = {}) {
+  async function report(_req, res) {
     try {
-      const model = await (refresh ? service.scan() : service.report());
-      // The chained inventory rebuild is fire-and-forget: the scan response stands on its own.
-      if (refresh && typeof afterScan === 'function') { try { Promise.resolve(afterScan()).catch(() => {}); } catch { /* ignored */ } }
+      const model = await service.report();
       sendJson(res, 200, publicMaintenanceModel(withActivity(model)));
     }
     catch (error) {

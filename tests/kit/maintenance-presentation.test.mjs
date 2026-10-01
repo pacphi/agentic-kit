@@ -63,59 +63,37 @@ test('a project filter never strips context from a user placement', () => {
   const html = cards(state).renderMntGroups([group('r1', [row('p1')])], { value: 0 });
   assert.match(html, /User · Codex › Skills/);
 });
-function operation(get) {
-  const state = {};
-  const nodes = Object.fromEntries(['mnt-check-providers', 'mnt-remeasure', 'mnt-check-providers-status', 'mnt-operation-elapsed'].map((id) => [id, { textContent: '', dataset: {} }]));
-  const api = client('maintenance-operation', { MNT: state, mntGet: get, mntRefreshActiveDestination() {}, loadSystem: async () => {}, SYSTEM: {}, systemBusy: false, document: { getElementById: (id) => nodes[id], addEventListener() {} }, setInterval: () => 1, clearInterval() {}, setTimeout: (fn) => queueMicrotask(fn) }, ['mntCheckProviders', 'mntBuildStatusOf', 'mntAwaitInventoryBuild']);
-  return { state, nodes, ...api };
-}
+test('Maintenance writes are blocked during the shared Refresh operation', () => {
+  const api = client('maintenance-operation', {
+    MNT: { externalScanBusy: false }, refreshRunning: () => true,
+  }, ['mntWritesBlocked']);
+  assert.equal(api.mntWritesBlocked(), true);
+});
+test('Maintenance hash synchronization adopts an externally changed destination', () => {
+  const location = { hash: '#system/maintenance/inventory?scope=across' };
+  const history = { replaceState(_state, _title, hash) { location.hash = hash; } };
+  const api = client('maintenance-workspace', { location, history, localStorage: { setItem() {} } }, ['MNT', 'mntSyncHash']);
+  api.mntSyncHash();
+  location.hash = '#system/maintenance/guidance?scope=project';
+  api.mntSyncHash();
+  assert.equal(api.MNT.destination, 'guidance');
+  assert.equal(api.MNT.scope, 'project');
+  assert.match(location.hash, /^#system\/maintenance\/guidance\?scope=project/);
+  location.hash = '#usage/score';
+  api.mntSyncHash();
+  assert.equal(location.hash, '#usage/score');
+});
 test('an existing inventory does not mask a running or failed refresh', () => {
-  const api = operation(() => {});
+  const api = client('maintenance-operation', {}, ['mntBuildStatusOf']);
   assert.equal(api.mntBuildStatusOf({ scanRequired: false, lastRefresh: { status: 'running' } }), 'running');
   assert.equal(api.mntBuildStatusOf({ scanRequired: false, lastRefresh: { status: 'failed' } }), 'failed');
-});
-test('refresh keeps both buttons disabled until a fresh inventory is published', async () => {
-  let inventoryCalls = 0, providerCalls = 0, release;
-  const publication = new Promise((resolve) => { release = resolve; });
-  let signalWaiting;
-  const waiting = new Promise((resolve) => { signalWaiting = resolve; });
-  const api = operation(async (url) => {
-    if (url.includes('/v2/inventory')) {
-      inventoryCalls++;
-      if (inventoryCalls === 1) return { scanRequired: false, lastRefresh: { at: 'old', status: 'ok' } };
-      signalWaiting();return publication;
-    }
-    if (url.includes('?refresh=scan')) return {};
-    providerCalls++;
-    return { activity: { status: 'idle' }, scan: { status: 'complete', checkedAt: providerCalls === 1 ? 'old' : 'new', coverage: 'complete' } };
-  });
-  const run = api.mntCheckProviders();
-  await waiting;
-  assert.equal(api.nodes['mnt-check-providers'].disabled, true);
-  assert.equal(api.nodes['mnt-remeasure'].disabled, true);
-  assert.match(api.state.operation.message, /Updating inventory/);
-  release({ scanRequired: false, lastRefresh: { at: 'new', status: 'ok' }, partialSources: { total: 1 } });
-  await run;
-  assert.equal(api.nodes['mnt-remeasure'].disabled, false);
-  assert.match(api.state.operation.message, /coverage gaps/);
-});
-test('provider failure is visible and releases the busy state', async () => {
-  const api = operation(async (url) => {
-    if (url.includes('/v2/inventory')) return { lastRefresh: { at: 'old' } };
-    if (url.includes('?refresh=scan')) throw new Error('Evidence request failed.');
-    return { scan: { checkedAt: 'old' } };
-  });
-  await api.mntCheckProviders();
-  assert.equal(api.state.operation.failed, true);
-  assert.match(api.state.operation.message, /Evidence request failed/);
-  assert.equal(api.nodes['mnt-remeasure'].disabled, false);
 });
 test('filesystem completion excludes provider checks without inventing their success', () => {
   const ctx = { state: {}, orchestrator: () => ({ coverage: () => [{ sourceId: 'files', state: 'complete', visited: 4 }], progress: () => [] }), lastGoodDiscoveryStore: { current: () => [] }, listSources: () => [{ sourceId: 'files', filesystem: true }, { sourceId: 'providers', filesystem: false, label: 'Providers' }] };
   const result = scanProgress(ctx)();
   assert.match(result.narrative, /1 of 1/);
   assert.equal(result.coverage.find((c) => c.sourceId === 'providers').state, 'not-scanned');
-  assert.equal(result.evidenceChecks[0].method, 'Refresh evidence');
+  assert.equal(result.evidenceChecks[0].method, 'Refresh');
 });
 test('Hermes path honors HERMES_HOME and otherwise resolves the user configuration', () => {
   const previous = process.env.HERMES_HOME;
@@ -306,20 +284,6 @@ test('public inventory uses the measured project location instead of guessing fr
   assert.equal(page.facetLabels.project[skill.projectId], 'ampel');
   assert.doesNotMatch(JSON.stringify(page), /\/private\/repo/);
 });
-test('a completed refresh over stale machine evidence waits for publication and asks for remeasurement', async () => {
-  let inventoryCalls=0, providerCalls=0;
-  const api=operation(async url=>{
-    if(url.includes('/v2/inventory'))return {scanRequired:false,lastRefresh:{at:++inventoryCalls===1?'old':'new',status:'ok'}};
-    if(url.includes('?refresh=scan'))return {scan:{status:'complete',checkedAt:'new'}};
-    return {activity:{status:'complete'},scan:{status:'stale',checkedAt:++providerCalls===1?'old':'new',coverage:'partial'}};
-  });
-  await api.mntCheckProviders();
-  assert.equal(api.state.operation.failed,false);
-  assert.equal(inventoryCalls,2);
-  assert.match(api.state.operation.message,/Evidence refreshed.*Re-measure machine/);
-  assert.equal(api.nodes['mnt-check-providers'].disabled,false);
-});
-
 test('version inspector localizes measured and checked instants without interpreting version identifiers', () => {
   const api = client('maintenance-inspector', {
     esc, mntKindLabel: (value) => value,

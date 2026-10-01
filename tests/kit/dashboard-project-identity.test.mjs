@@ -80,9 +80,10 @@ test('should_canonicalize_symlink_aliases_without_merging_same_named_repositorie
   assert.notEqual(inspectProjectIdentity(first).repositoryId, inspectProjectIdentity(second).repositoryId);
 });
 test('should_attribute_only_explicit_desktop_metadata_and_ignore_names_and_ambiguous_sources', () => {
-  for (const entrypoint of ['claude-desktop', 'claude-desktop-3p', 'remote_desktop']) {
+  for (const entrypoint of ['claude-desktop', 'claude-desktop-3p']) {
     assert.equal(transcriptSessionOrigin(lines({ entrypoint }), 'claude').origin, 'claude-desktop');
   }
+  assert.equal(transcriptSessionOrigin(lines({ entrypoint: 'remote_desktop' }), 'claude').surface, 'cloud-session');
   for (const originator of ['Codex Desktop', 'codex_work_desktop']) {
     assert.equal(transcriptSessionOrigin(lines({ type: 'session_meta', payload: { originator } }), 'codex').origin, 'codex-desktop');
   }
@@ -150,5 +151,5 @@ test('should_qualify_encoded_directory_recovery_as_a_sighting_instead_of_a_verif
   }), scanOpencode: () => ({ complete: true, sightings: [] }) });
   assert.deepEqual({ sessions: result.projects[0].sessions, origin: result.projects[0].sessionOrigins[0].origin,
     countBasis: result.projects[0].sessionOrigins[0].countBasis },
-  { sessions: 1, origin: 'unknown', countBasis: 'recovered-project-sighting' });
+  { sessions: 0, origin: 'unknown', countBasis: 'recovered-project-sighting' });
 });
