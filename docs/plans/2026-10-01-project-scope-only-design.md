@@ -892,7 +892,12 @@ which this release closes:
 | Provider env (`ENABLE_*`, `AQE_LLM_PROVIDER`, `AQE_MAX_BUDGET_USD`) and the AQE router | Removed by ownership receipt |
 | AQE embedding settings in user Codex and OpenCode config; the Ollama alias | Removed by receipt; the alias after a confirmation |
 | Brain user plugin, shim and LaunchAgent (today only a printed notice) | Removed after a confirmation. The knowledge base is kept by default so the new version can reuse it |
-| `~/.local/state/agentic-kit/` and the rest of `~/.config/agentic-kit/` | Removed after teardown succeeds |
+| `~/.local/state/agentic-kit/` and the rest of `~/.config/agentic-kit/` | Removed after teardown succeeds, except the user data in the next row |
+| AQE store-merge archives and whole-store backups in `~/.local/state/agentic-kit/aqe-store-merge/` (ADR-0062) | **Kept by default.** These are the user's data, not ak configuration. The purge lists them and asks before deleting them |
+| The user-level Ruflo memory store `~/.claude-flow/memory`, used by sessions outside a project | **Kept by default.** It holds the user's memories. The purge names it and asks before deleting it |
+| A standalone global `agentdb` installed by an older ak (retired with no ownership receipt) | Removed only after confirming the package is the one older ak installed; otherwise the purge prints the command to remove it |
+| Three edits an older ak made inside Ruflo's install before it kept receipts | Cannot be restored. `--purge --dry-run` says so for anyone keeping their own Ruflo, and points to reinstalling Ruflo |
+| The user-scope `claude-flow` MCP entry in `~/.claude.json` | Removed. It is also what the new version's single check looks for, so leaving it would block `ak init` |
 | deja-vu | Wiring removed. Package and index each confirmed separately, defaulting to keep |
 
 It ends by printing the new version's opt-in command. A sandboxed-`HOME` regression test proves it:
@@ -900,9 +905,12 @@ run setup, then `uninstall --purge`, and `HOME` matches its pre-setup fingerprin
 user chose to keep.
 
 Order matters. An older prerelease `ak sync` self-updates by following both the `latest` and `next`
-tags (`src/lib/versions.mjs:209`). Once the new line is on `next`, an old `ak sync` will install it.
-So the exit release ships first, and the instructions always run it by exact version through `npx`,
-whatever happens to be installed globally.
+tags (`src/lib/versions.mjs:209`). The project-scoped betas ship on their own `beta` tag (master plan
+Decision 1), so no older installation jumps to them. The exit release itself must also never
+self-update: the release candidates will later go on `next`, and an exit-release `ak sync` would
+otherwise install one. In the exit release, `ak sync` skips self-update entirely and prints the
+upgrade steps instead. The instructions always run it by exact version through `npx`, whatever
+happens to be installed globally.
 
 ### The instructions
 
