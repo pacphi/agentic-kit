@@ -62,7 +62,11 @@ unverified. Do not fabricate a completion, rerun or paid trigger.
 AQE #240 retains four obligations: published fixing artifact, verified selected managed
 version, actual MCP-holder plus current packaged-kit command, and retired narrow exception
 with independent storage errors still failing. Use `ak status --refresh=live --only aqe`;
-no retired aliases or invented universal floor. Native Windows and combined proof remain open.
+no retired aliases or invented universal floor. Native Windows and installed-target proof remain open.
+The [local 3.14.6 receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) now supplies
+qualified macOS real-MCP/packed-kit startup and preservation proof. Its full gate failed
+on omitted MCP shutdown cleanup; a private source proposal control passes, while normal
+rebuilt bundle and supported-platform proof remain unverified.
 Brain #271 local recovery units are committed; full gates and delivery remain pending.
 Brain #335/#331 and Ruflo #213 strict upstream criteria retain separate owners and triggers.
 M2/M3 successors below do not block unrelated completed M1 rows.

@@ -155,6 +155,12 @@ package passes; no retirement or automatic dispatch was performed here.
 
 ### Prepared acquisition and proof request
 
+**Executed with Option A approval:** acquisition and named rebuild passed; stock native
+macOS proof established busy startup/preservation but failed its shutdown-marker gate.
+The [dated receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) distinguishes released
+artifact results from a passing matched source-module proposal control. No installed
+artifact was patched, and no release/platform-wide fix or issue closure is claimed.
+
 Selected candidate: published agentic-qe 3.14.6, rechecked at npm on 2026-09-30.
 Expected tarball integrity:
 `sha512-ObNw+nFHj4Kz7JYulAdBSJ5/QP5lmFeRTvwBRalUXeQSQZu5PoN4Xp3ZTug3q5EoHWXVd3+xdBdlbtgqq+8+bg==`.
