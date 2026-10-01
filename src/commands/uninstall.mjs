@@ -10,6 +10,9 @@ import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
+import { undoProviders, undoCodexMcp, undoRufloMcpInCodex } from '../lib/providers.mjs';
+import { undoAqeRouter } from '../lib/aqe-router.mjs';
+import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { releaseRufloComponents } from '../lib/ruflo-components/teardown.mjs';
 import { releaseAqePins } from '../lib/aqe-project-pin.mjs';
@@ -68,8 +71,10 @@ Options:
   --remove-agent-browser  uninstall only a receipt-owned agent-browser package
   --remove-deja-vu uninstall the Kit-owned deja-vu package (confirmed)
   --purge-deja-vu-data delete only the derived deja-vu index (confirmed)
-  --purge          remove Kit footprint + ruflo/aqe and receipt-owned agent-browser;
-                   preserve all browser/session/profile data and deja-vu package/data
+  --purge          remove Kit footprint + ruflo/aqe and receipt-owned agent-browser, and
+                   undo what \`ak host off\` undoes: provider env, the AQE router, the
+                   Codex MCP entries ak registered and the AQE embedding settings, each
+                   by receipt; preserve all browser/session/profile data and deja-vu package/data
   --yes            skip confirmation prompts
   --dry-run        print what would be removed; change nothing
 
@@ -463,6 +468,52 @@ function stepAqePin(ctx) {
   saveKitConfig(ctx.cfg);
 }
 
+// #310 (exit release): the teardown `ak host off` runs, which --purge used to skip.
+// Each undo restores only values whose receipts show ak wrote them, so a user's own
+// provider env, router config or Codex MCP entry is preserved. It runs under --purge
+// only, and before purge-kit-config, so the receipts in kit.json are still readable.
+// `deps.undo` replaces the real calls in tests.
+const REAL_UNDO = {
+  providers: undoProviders,
+  aqeRouter: undoAqeRouter,
+  codexMcp: undoCodexMcp,
+  rufloMcpInCodex: undoRufloMcpInCodex,
+  aqeEmbedding: reconcileAqeEmbeddingProjections,
+};
+
+async function stepHostOffTeardown(ctx) {
+  const { cfg, dry } = ctx;
+  if (dry) {
+    info('[dry-run] restore ak-owned provider env (ENABLE_*, AQE_LLM_PROVIDER, AQE_MAX_BUDGET_USD) by receipt');
+    info('[dry-run] restore or remove the ak-managed AQE router config by receipt');
+    info('[dry-run] remove the Codex MCP entries ak registered (Codex MCP, ruflo MCP in Codex)');
+    info('[dry-run] release ak-owned AQE embedding projections in Codex and OpenCode config by receipt');
+    return;
+  }
+  const undo = { ...REAL_UNDO, ...(ctx.deps?.undo ?? {}) };
+  const cwd = process.cwd();
+  const codexOwn = cfg.integrations?.ownership?.codex ?? {};
+  const results = [
+    undo.providers(cwd),
+    undo.aqeRouter(cwd),
+    await undo.codexMcp(cwd, { managed: codexOwn.mcp === 'ak' }),
+    await undo.rufloMcpInCodex(cwd, { managed: codexOwn.reverseMcp === 'ak' }),
+    // unmanaged mode makes the projection remove only the keys its receipts show ak wrote
+    undo.aqeEmbedding({ ...cfg, aqeEmbedding: { mode: 'unmanaged' } }, cwd),
+  ];
+  const [, , codex, rufloCodex] = results;
+  for (const r of results) (r.ok ? ok : warn)(r.detail);
+  if (results.some((r) => !r.ok)) ctx.state.ownershipTeardownOk = false;
+  // A removed entry no longer needs its receipt; a failed removal keeps it for a retry.
+  cfg.integrations.ownership ??= {};
+  cfg.integrations.ownership.codex = {
+    ...codexOwn,
+    ...(codex.ok ? { mcp: null } : {}),
+    ...(rufloCodex.ok ? { reverseMcp: null } : {}),
+  };
+  saveKitConfig(cfg);
+}
+
 function stepPurgeArtifacts(ctx) {
   for (const [label, file] of [
     ['model inventory cache', modelInventoryPath()], ['model scope key', modelScopeKeyPath()],
@@ -623,6 +674,7 @@ export const UNINSTALL_STEPS = [
   { id: 'agent-browser', when: () => true, run: stepAgentBrowser },
   { id: 'aqe-pin', when: () => true, run: stepAqePin },
   { id: 'ruflo-components', when: () => true, run: stepRufloComponents },
+  { id: 'host-off-teardown', when: (ctx) => ctx.flags.purge, run: stepHostOffTeardown },
   { id: 'purge-artifacts', when: (ctx) => ctx.flags.purge, run: stepPurgeArtifacts },
   {
     id: 'purge-kit-config',
