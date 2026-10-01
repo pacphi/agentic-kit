@@ -5,8 +5,9 @@
 **Active: issues created.** Decisions 1–8 are made, with amendments 3a and 3b and the design gaps
 G1, G6, G10, G12 and G13. On 2026-10-01 the [card inventory](#card-inventory) became GitHub issues:
 the 13 epics are #294–#306, the 107 new cards are #307–#413, and seven cards adopted existing
-issues. The `issue` column of `.github/program/v4-ga-cards.csv` records each number. The held
-PRs #291, #292 and #293 get `Closes #N` once the dependency sync has run.
+issues. The `issue` column of `.github/program/v4-ga-cards.csv` records each number. The first
+dependency sync ran the same day: it added 193 links, and a second run found nothing left to add.
+The held PRs #291, #292 and #293 were then linked to their cards.
 
 ## Boards
 
