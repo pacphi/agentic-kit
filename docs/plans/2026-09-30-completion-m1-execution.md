@@ -8,7 +8,7 @@ Existing worktree: agentic-kit-completion-plan; implementation branch: fix/compl
 The maintainer confirmed one branch per milestone: finish M1 here, then provide the
 new-session handoff prompt before beginning the next milestone. Related repository issue
 closeout is authorized only after its criteria pass; exact upstream contributions remain gated.
-The [completion program](2026-09-29-completion-program.md) governs the full milestone;
+The [completion program](https://github.com/pacphi/agentic-kit/blob/9c352baecb38371835571e2e491c740d43ae7b6f/docs/plans/2026-09-29-completion-program.md) governs the full milestone;
 this document defines the first locally authorized slice, not a waiver of other M1 gates.
 
 ## Authority and ownership receipt
