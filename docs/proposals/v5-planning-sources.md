@@ -7,7 +7,7 @@ accepted architecture, and every mockup uses illustrative data.
 Read the sources against two later facts:
 
 1. **Project-scoped management.** The
-   [project-scoped management design](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md) (accepted
+   [project-scoped management design](../plans/2026-10-01-project-scope-only-design.md) (accepted
    2026-10-01) postdates all of these sources. The v5 mockups assume machine-wide management:
    machine scope, nightly updates, user-level registration. Each idea has to be re-read against
    project-only management with all work observed.
@@ -115,7 +115,7 @@ why a demonstration report is not a reproduced defect.
 ## 5. Host adapter work set aside from v4
 
 v4 retires the experimental external host-adapter contract and its Hermes integration
-([design Decision 10](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md#setting-host-adapters-aside-for-v5)).
+([design Decision 10](../plans/2026-10-01-project-scope-only-design.md#setting-host-adapters-aside-for-v5)).
 v5 plans first-class support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai, Desktop)
 and ChatGPT/Codex. It should start from this work rather than from nothing.
 

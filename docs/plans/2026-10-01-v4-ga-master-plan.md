@@ -124,9 +124,10 @@ committed.
 
 With the 13 epics, that makes 127 cards.
 
-**Existing issues the cards adopt.** These keep their numbers and titles. Each gets its routing
-label, milestone, size and workstream labels, and a comment in card format, instead of a rewritten
-body.
+**Existing issues the cards adopt.** These keep their numbers, titles and text. Each gets its
+routing label, milestone, size and workstream labels, its issue type and its epic. The card's
+sections are appended below the existing text, which stays unchanged. They go in the body rather
+than a comment because the dependency sync reads only issue bodies.
 
 | Card | Issue | PR |
 | --- | --- | --- |
@@ -265,13 +266,10 @@ Exit codes: `0` means success, `1` an error (the message says which), `2` a usag
 
 ## Sources
 
-- [Project-scoped management only](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md), and its prerequisites:
-  - [A: the dangling Ruflo reference pointer](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-ruflo-reference-pointer.md);
-  - [B: Intelligence writes into projects](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-intelligence-no-project-writes.md);
-  - [C: hook scope in the Maintenance inventory](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-maintenance-hook-scope.md).
-
-  Until that design's pull request merges, these documents live on the branch
-  `docs/project-scope-only-design`.
+- [Project-scoped management only](2026-10-01-project-scope-only-design.md), and its prerequisites:
+  - [A: the dangling Ruflo reference pointer](2026-10-01-prereq-ruflo-reference-pointer.md);
+  - [B: Intelligence writes into projects](2026-10-01-prereq-intelligence-no-project-writes.md);
+  - [C: hook scope in the Maintenance inventory](2026-10-01-prereq-maintenance-hook-scope.md).
 - [Remediation program v2](2026-09-28-remediation-program-v2.md), its
   [develop execution plan](2026-09-28-remediation-v2-develop-execution.md), and the
   [issues 237–239 decision log](2026-09-26-issues-237-238-239-verification-and-decisions.md).
