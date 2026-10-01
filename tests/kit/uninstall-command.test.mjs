@@ -706,3 +706,13 @@ test('a plain uninstall touches none of the extras', async () => {
   await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls) } }));
   assert.deepEqual(ran(calls), []);
 });
+
+test('--purge does not ask about the deja-vu index when deja-vu was never installed', async () => {
+  seedHome();
+  const calls = [];
+  const { result } = await captureLog(() => uninstall.run({
+    flags: { purge: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls, { confirmKeep: true, brain: false }) },
+  }));
+  assert.equal(result, 0);
+  assert.ok(!calls.some((c) => c[0] === 'confirmKeep' && /deja-vu/.test(c[1])));
+});

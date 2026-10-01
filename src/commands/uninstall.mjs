@@ -304,7 +304,8 @@ async function computeDejaVuPlan(ctx) {
     removePackageApproved = flags['remove-deja-vu'] ? await confirm(q, flags.yes) : await ask(q);
     if (!removePackageApproved) info('kept deja-vu package');
   }
-  if (!dry && (flags['purge-deja-vu-data'] || flags.purge)) {
+  // Under --purge alone, ask about the index only when deja-vu is actually installed.
+  if (!dry && (flags['purge-deja-vu-data'] || (flags.purge && ownsDeja))) {
     const q = 'Delete the derived deja-vu index? Notes, policy, peers, config, and source transcripts stay.';
     purgeDataApproved = flags['purge-deja-vu-data'] ? await confirm(q, flags.yes) : await ask(q);
     if (!purgeDataApproved) info('kept deja-vu derived index');
