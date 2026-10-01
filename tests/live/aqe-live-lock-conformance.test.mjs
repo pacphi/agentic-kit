@@ -42,7 +42,7 @@ function check(label, result, owner, before, store) {
   assert.equal(owner.child.signalCode, null, `native holder signaled during ${label}`);
   assert.ifError(owner.error);
   assert.match(output, /is locked by a live process/, `${label} missed live-lock warning`);
-  assert.match(output, /LockHeld|0x0300/, `${label} missed LockHeld fallback`);
+  assert.match(output, /not breaking the lock; degrading to SQLite/, `${label} missed live-owner fallback`);
   assert.doesNotMatch(output, /FsyncFailed|0x0303/, `${label} emitted FsyncFailed`);
   assert.deepEqual(snapshot(store), before, `${label} changed RVF bytes`);
   assert.ok(!fs.readdirSync(store).some((n) => n.includes('.corrupt-')), `${label} quarantined RVF`);
@@ -79,8 +79,8 @@ test('installed AQE degrades under a live native RVF lock without changing the s
     const ready = path.join(root, 'ready');
     const holderFile = path.join(root, 'holder.mjs');
     const moduleUrl = pathToFileURL(adapter).href;
-    fs.writeFileSync(holderFile, `import { createRequire } from 'node:module'; import fs from 'node:fs';\nglobalThis.require=createRequire(${JSON.stringify(adapter)});\nconst {getSharedRvfAdapter}=await import(${JSON.stringify(moduleUrl)});\nglobalThis.hold=getSharedRvfAdapter(${JSON.stringify(store)},384);\nif(!globalThis.hold)process.exit(2);\nfs.writeFileSync(${JSON.stringify(ready)},String(process.pid));\nconst timer=setInterval(()=>{if(!globalThis.hold)process.exit(3)},1000);\nprocess.on('SIGTERM',()=>{clearInterval(timer);globalThis.hold.close();process.exit(0)});\n`);
-    const owner = scope.launch(process.execPath, [holderFile], options);
+    fs.writeFileSync(holderFile, `import { createRequire } from 'node:module'; import fs from 'node:fs';\nglobalThis.require=createRequire(${JSON.stringify(adapter)});\nconst {getSharedRvfAdapter}=await import(${JSON.stringify(moduleUrl)});\nglobalThis.hold=getSharedRvfAdapter(${JSON.stringify(store)},384);\nif(!globalThis.hold)process.exit(2);\nfs.writeFileSync(${JSON.stringify(ready)},String(process.pid));\nconst timer=setInterval(()=>{if(!globalThis.hold)process.exit(3)},1000);\nconst close=()=>{clearInterval(timer);globalThis.hold.close();process.exit(0)};process.stdin.resume();process.stdin.once('end',close);process.on('SIGTERM',close);\n`);
+    const owner = scope.launch(process.execPath, [holderFile], options, { pipeInput: true });
     try {
       const deadline = Date.now() + 30_000;
       while (!fs.existsSync(ready) && !owner.closed && !owner.error && owner.child.exitCode === null
@@ -102,13 +102,17 @@ test('installed AQE degrades under a live native RVF lock without changing the s
       assert.match(challenger.stdout, /"fallback":true/, 'adapter did not fall back');
       console.log(JSON.stringify({ aqeVersion: pkg.version, platform: process.platform,
         node: process.version, sourceHashes, ownerPid: owner.child.pid,
-        status: { exit: status.code, liveLock: true, lockHeld: true, fsyncFailed: false },
-        adapter: { exit: challenger.code, fallback: true, liveLock: true, lockHeld: true, fsyncFailed: false },
+        status: { exit: status.code, liveLock: true, liveOwnerFallback: true, fsyncFailed: false },
+        adapter: { exit: challenger.code, fallback: true, liveLock: true, liveOwnerFallback: true, fsyncFailed: false },
         before, after: snapshot(store) }));
     } finally {
-      const closed = await scope.stop(owner, 10_000);
+      const closed = await scope.stop(owner, 10_000, { closeInput: true });
       if (!t.signal.aborted) {
+        assert.equal(closed.stopMethod, 'stdin-eof');
+        assert.equal(closed.signal, null);
         assert.equal(closed.code, 0, `holder failed to close: ${closed.stderr.slice(-1000)}`);
+        assert.equal(fs.existsSync(path.join(store, 'patterns.rvf.lock')), false, 'explicit adapter close left its lock marker');
+        t.diagnostic('explicit adapter close removed its owned lock marker');
       }
     }
   });
