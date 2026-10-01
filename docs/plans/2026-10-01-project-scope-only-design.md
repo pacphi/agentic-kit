@@ -28,9 +28,10 @@ Inside an opted-in project, everything the kit adds is:
 - layered on top of what is already there;
 - recorded, and removable with one command.
 
-The dashboard reports facts about the whole account where they really are account-wide, and
-reports what ak manages project by project. Viewing the dashboard writes nothing outside the
-kit's cache. The user never has to finish a setup by hand.
+The dashboard observes all agent work on the machine: every session on every host it can read,
+in git repositories and anywhere else on the filesystem. It reports what ak manages place by
+place. Viewing the dashboard writes nothing outside the kit's cache. The user never has to finish
+a setup by hand.
 
 ## The rule
 
@@ -79,6 +80,7 @@ write is out of scope. In particular, ak never:
 | 6 | Codex settings with no project-level home | ak manages them under a declared exception, so the user never has to edit Codex config by hand. |
 | 7 | Moving existing users over | **No migration code.** One final release of the current line makes `ak uninstall --purge` remove everything, and the new version tells people to run it first. See [Upgrading from the user-level versions](#upgrading-from-the-user-level-versions). |
 | 8 | Command surface | **Kept trim.** Four lifecycle verbs: `init`, `status`, `sync`, `uninstall`. See [Commands](#commands). |
+| 9 | What the dashboard covers | **All work, every host, every place.** Observation covers every readable host and every folder where sessions ran, git repository or not. Management stays opt-in per project. The dashboard launches anywhere and defaults to all work. See [Dashboard and metrics](#dashboard-and-metrics). |
 
 Smaller calls made in this revision (flag any you disagree with):
 
@@ -561,37 +563,57 @@ aggregates stay current without the dashboard re-running anything.
 
 ## Dashboard and metrics
 
-The dashboard is where a user sees which projects agentic-kit manages and how they are doing. It
-can be launched from any folder (`ak dashboard`, or `npx @pacphi/agentic-kit dashboard` with
-nothing installed). It finds every managed project, shows summary and aggregate metrics across
-them, and narrows any view to a single project.
+The dashboard is where a user sees all the agent work done on their machine. It shows which of
+those places agentic-kit manages, and how each one is doing.
 
-Today it assumes one machine-wide installation. Four reviews (About and Overview, System,
-Maintenance, Usage and Observability) found the principles and per-area changes below.
+- **Launch anywhere.** It starts from any folder: `ak dashboard`, or
+  `npx @pacphi/agentic-kit dashboard` with nothing installed.
+- **Every host.** It reads sessions from every host it can read, whether or not ak manages that
+  host anywhere.
+- **Every place.** It covers work in git repositories and everywhere else on the filesystem.
+- **Managed status.** It finds every managed project and shows its health.
+- **Totals and one place.** It shows totals across all of that, and narrows any view to a single
+  place.
+
+**Observation and management are separate.** Management stays opt-in per project, as the rest of
+this design describes. Observation is reading, so the rule allows it everywhere: every session on
+every readable host, in every folder.
+
+Today the dashboard assumes one machine-wide installation. It also breaks work down only by git
+repository. Four reviews (About and Overview, System, Maintenance, Usage and Observability) found
+the principles and per-area changes below.
 
 ### Principles
 
 1. **Launch anywhere; one scope filter for the whole dashboard.** A header filter has three
-   levels:
+   levels, plus a host facet:
 
    | Level | Shows | When it is selected |
    | --- | --- | --- |
-   | **All managed projects** | Aggregates across every opted-in project | **The default** |
-   | **One project** | Everything narrowed to that project | Preselected when the dashboard is launched inside an opted-in project; otherwise chosen from the projects view or the filter |
-   | **Whole account** | Data that is account-wide by nature: spend and tokens, transcripts, machine footprint, user-level placements in Maintenance | Offered only on panels that have such data |
+   | **All work** | Everything: every session on every readable host, in every [place](#every-place-work-happens) | **The default** |
+   | **Managed projects** | Only places that have opted in | Chosen from the filter or the work view |
+   | **One place** | Everything narrowed to one repository, folder or grouped place | Preselected when the dashboard is launched inside a known place; otherwise chosen from the work view or the filter |
 
+   The **host facet** (All hosts, Claude Code, Codex, OpenCode, Hermes and any other adapter) narrows
+   any level to one host.
+
+   How the levels apply to panels:
    - Launching outside any project (in the home folder, say) is not a reduced mode. It opens on
-     All managed projects.
-   - Every panel declares which levels it supports. When the current level doesn't apply, the panel
-     shows a one-line note instead of an empty card.
-   - Panels with an account-wide view show the managed share beside it, for example "managed
-     projects: $41 of $63 this week".
+     All work.
+   - Every panel declares which levels it supports. Some panels only exist for managed projects:
+     status, versions, Codex exceptions and managed files. At **All work** those panels show the
+     managed projects and say so. A panel with nothing to show at the selected level gives a
+     one-line note instead of an empty card.
+   - Activity figures show the managed share beside the total, for example "managed projects: $41
+     of $63 this week".
    - **Plan limits are always account-wide**, whatever the filter, and are labelled that way.
+
+   How it is built:
    - The filter is the `?project=` key the server already understands, reusing
      `resolveSelectedProject` and `keyForProject` (`src/lib/dashboard-server.mjs:206-238`), plus
      two reserved values for the aggregate levels.
    - It drives every reader: status rows, host health, Ruflo components, Intelligence,
-     improvement, Usage, System and Maintenance.
+     improvement, Usage, Observability, System and Maintenance.
    - Today only some readers follow the launch folder (`cachedHostFacts` ignores it,
      `src/lib/dashboard-server.mjs:491`), and Intelligence deliberately has no current project.
 2. **Viewing never writes outside the cache.** Today:
@@ -650,52 +672,121 @@ one. Finding the markers uses these sources, from most to least reliable:
 **Worktrees** are grouped under their repository (ADR-0050). In personal mode `.agentic-kit/` is
 untracked, so each worktree has its own set-up state, and the dashboard shows it per worktree.
 
-### The managed projects view
+### Every host
 
-This view replaces today's machine-wide Overview Summary as the dashboard's landing page.
+Today ak reads every Claude Code, Codex and OpenCode session on the account, whether or not any
+project enables that host. Reading is not gated on enablement. The census covers exactly those
+three hosts (`PROJECT_SOURCE_HOSTS`, `src/lib/footprint/project-sources.mjs:44`). That stays true,
+and three additions close the gaps:
 
-At **All managed projects**, it shows the aggregate:
+1. **`ak run` records what it supervises.** Every worker run is recorded in the cache, on any host:
+   host, working folder, start and end, outcome, and the model when known. A host ak drives is then
+   counted even if it keeps no readable history of its own.
+2. **External adapters can declare a read-only session source.**
+   - **The gap today.** An external adapter can only name built-in observability sources
+     (`src/lib/adapters/registries.mjs:77-79`, `src/lib/adapters/manifest.mjs:145`). The Hermes
+     adapter declares `transcripts: false` and `observability: []`
+     (`docs/authoring-host-adapters.md:40-63`), so Hermes sessions are invisible.
+   - **The contract.** A declared parser hook, which ak runs with no network and no write access.
+     It emits normalized session records: host, session id, working folder, start and end, model,
+     and token counts when known.
+   - **Conformance** checks that the hook writes nothing and that its output is bounded and
+     well-formed.
+   - **Hermes** gets one if it keeps local session history (to verify).
+3. **A coverage card.** It lists every host ak knows: the three built-ins and every admitted
+   adapter. For each, it shows whether the host is installed, whether its sessions can be read, and
+   from what date. A host whose history ak cannot read shows as a visible gap, not a silent zero.
+
+Hosts ak has no reader or adapter for are outside what it can observe. The coverage card says so
+instead of guessing.
+
+### Every place work happens
+
+Every session belongs to exactly one **place**. That way the per-place rows always add up to the
+account total.
+
+| Place kind | What counts | How it is identified |
+| --- | --- | --- |
+| **Repository** | A git repository. Worktrees are grouped beneath it, and a session started in a subfolder counts for the repository, with the subfolder kept as detail | Repository identity (ADR-0050) |
+| **Folder** | A folder with no git repository above it, such as `~/notes` or `~/Downloads/spike` | Its canonical path. Folders sharing a parent are grouped in the tree |
+| **Home** | Sessions started in the home folder itself | One place |
+| **Temporary** | Sessions in system temporary folders | One grouped place, because the folders are short-lived |
+| **Tool folders** | Sessions started inside `~/.claude`, `~/.codex` or other host and config folders | One grouped place |
+| **No longer on disk** | Places whose folder has gone | Kept with their last label, so history and totals stay intact |
+
+**Managed** is an attribute of a repository or a folder, not a kind of place.
+
+- `ak init` works in a plain folder as well as a repository. In a folder there is nothing to
+  git-ignore, so the personal files simply live there.
+- Home, temporary and tool folders cannot be managed. `ak init` refuses there, as project setup
+  does today.
+
+These views count only git repositories today, and change as follows:
+
+| View | Today | Change |
+| --- | --- | --- |
+| Usage project ranking | Keeps only git repositories and worktrees (`src/lib/usage-project-groups.mjs:61-64`) | Ranks places of every kind |
+| System measurement | Covers only repositories with an HTTPS remote (`src/lib/footprint/projects.mjs:741-773`) | Measures managed places, every git repository (local-only ones included), and plain folders on request with the existing bounded walk |
+| Census and Intelligence | Group non-git and user-level rows as "other/unclassified" | Use the place kinds above |
+
+Home, temporary and tool folders are never measured as projects, because Storage already measures
+them as storage roots. Paths stay on this machine: places are shown by label locally, and
+telemetry exports never carry them.
+
+### The work view
+
+This view replaces today's machine-wide Overview Summary as the dashboard's landing page. It answers
+two questions together: where agent work is happening, and which of those places ak manages.
+
+At **All work**, it shows:
 
 | Card | Shows |
 | --- | --- |
-| Projects | N managed (personal and team), M seen but not managed, team projects not set up on this machine |
-| Health | Healthy, needs attention, and not checked for 7 days or more, from the snapshots |
-| Needs attention | Every project's attention rows in one list, each tagged with its project and the command to run there |
+| Activity | Sessions, tokens and spend across every host and place, with the managed share |
+| Hosts | Sessions per host, and the coverage card |
+| Places | Places with work in the window, by kind; how many are managed (personal and team); team projects not set up on this machine |
+| Most active unmanaged places | Where work happens without ak. This is information only: ak never opts a place in by itself |
+| Health | Managed projects that are healthy, need attention, or have not been checked for 7 days or more, from the snapshots |
+| Needs attention | Every managed project's attention rows in one list, each tagged with its project and the command to run there |
 | Versions in use | Each tool's pinned versions and how many projects use each one; projects pinned to an older `kitVersion` |
-| Hosts | How many projects enable Claude Code, Codex and OpenCode |
 | Codex exceptions | Register entries in effect and the projects holding each one |
 | Cache | Cached tool versions, their size, what `ak sync` would prune, and the Brain knowledge base |
-| Activity | Sessions, tokens and spend in managed projects, beside the account total |
-| Learning | Patterns learned across managed projects (Intelligence rollup) |
-| Footprint | ak tool calls, skills and hooks inside managed projects, and the zero that should hold outside them |
+| Learning | Patterns learned, across every place with learning state |
+| Footprint | ak tool calls, skills and hooks per place: present in managed projects, and zero everywhere else |
 
-It also has a table with one row per managed project: name, mode, health, last checked, hosts,
-pins, and sessions and spend in the selected window. Clicking a row narrows the whole dashboard to
-that project.
+Below the cards is a table with one row per place that had work in the window. It shows the
+place's name and kind, the hosts used, sessions, tokens and spend, whether it is managed, and,
+for managed places, its health and when it was last checked. Quick filters narrow it to managed,
+unmanaged or one kind. Clicking a row narrows the whole dashboard to that place.
 
-At **One project**, the same view becomes that project's page. It shows:
+**Managed projects** shows the same view, limited to opted-in places.
 
-- the full status rows (This project, Prerequisites);
-- its hosts and routes;
-- its pins and whether they are cached;
-- its Codex exception entries;
-- its activity and learning;
-- a **Managed files** panel, built from the project's receipts. It lists every file and record ak
-  wrote there, and whether each is unchanged or edited since. This answers "what exactly is ak
-  doing in this project?"
+At **One place**, the view becomes that place's page:
 
-The dashboard stays read-only for project files. Running `ak sync` or `ak uninstall` remains a
-command, which the view shows ready to copy.
+- **For every place:** its activity by host and model, its sessions, its learning, and its ak
+  footprint.
+- **For a managed place, also:**
+  - the full status rows (This project, Prerequisites);
+  - its hosts and routes;
+  - its pins and whether they are cached;
+  - its Codex exception entries;
+  - a **Managed files** panel, built from the project's receipts. It lists every file and record
+    ak wrote there, and whether each is unchanged or edited since. This answers "what exactly is
+    ak doing in this project?"
+- **For an unmanaged place:** the `ak init` command to opt it in, where the place kind allows.
+
+The dashboard stays read-only for project files. Running `ak init`, `ak sync` or `ak uninstall`
+remains a command, which the view shows ready to copy.
 
 ### About and Overview
 
 | Panel | Today | Change |
 | --- | --- | --- |
 | About cards | Version chips read the npm global root (`src/lib/versions.mjs:9-17`). Host "Managed by ak" comes from `kit.json`. The configured-surface copy describes user-level MCP and guidance (`src/lib/dashboard/about-directory.mjs:278-302`). There is a deja-vu card | Chip shows the pinned version and whether it is cached. Host chip reads "Enabled for this project". Configured cards are rewritten for project scope. The deja-vu card and its join/category keys are removed (`src/lib/dashboard/groups.mjs:46,55`). The update hint becomes `ak sync --upgrade` |
-| Summary and subsystem map | Most rows are machine-level: versions, natives, npx, user memory, user MCP, user blocks, daemons, deja-vu, hosts and routing from `kit.json` | Replaced by [the managed projects view](#the-managed-projects-view). At **One project** it shows the sections of `ak status` and the project's health-history regressions. Routing comes from `project.json` |
+| Summary and subsystem map | Most rows are machine-level: versions, natives, npx, user memory, user MCP, user blocks, daemons, deja-vu, hosts and routing from `kit.json` | Replaced by [the work view](#the-work-view). At **One place**, a managed place shows the sections of `ak status` and its health-history regressions. Routing comes from `project.json` |
 | Host badges and participation | `enabled` comes from `kit.json` (`src/lib/host-readiness.mjs:102`). The hint is `ak host pick`. Alignment reads user files | `enabled` comes from `project.json` and `local.json`. The hint is `ak init`. Codex register entries become project rows. Native probes stay read-only |
 | Ruflo components | `kit.json` intent, the global version, one machine evidence file, and a dry run against `~/.claude/settings.json` | Intent from `project.json`, version from pin plus cache, evidence in project state, a dry run against `settings.local.json`. The funnel card explains that the setting is account-wide |
-| Intelligence | Census-wide rollup; the selection defaults to the most recently active project; writes health history (see principle 2) | Follows the header filter. **All managed projects** shows the rollup over opted-in projects. **Whole account** shows today's census rollup, with seen-only rows labelled. **One project** shows the detail. `improvement` follows the selection |
+| Intelligence | Census-wide rollup; the selection defaults to the most recently active project; writes health history (see principle 2) | Follows the header filter. **All work** shows the rollup over every place with learning state, grouped by place kind. **Managed projects** limits it to opted-in places. **One place** shows the detail. `improvement` follows the selection |
 | Models | Store and key in `~/.config/agentic-kit` (`src/lib/model-inventory/store.mjs:13-14`) | Cache. Routes from `project.json` |
 | Refresh | `local` and `live` read `kit.json` and write user-level evidence. Live checks run `ruflo` in temp folders, so upstream state lands in `~/.claude-flow` | Takes a project and writes evidence to project state. Live checks run with a sandboxed `HOME`. The deja-vu check is removed. Machine, maintenance and inventory snapshots persist in the cache |
 
@@ -709,7 +800,7 @@ command, which the view shows ready to copy.
 | Storage reclaim (advisory) | The npx "version-stale" reason compares against global installs, with an `ak sync` hint (`src/lib/footprint/storage-reclaim.mjs:242-257`) | Add a "tool cache: versions no project pins, unused for 30 days" candidate, which `ak sync` prunes. Rebase the Brain and browser detectors onto the cache. Drop the npx global-baseline reason |
 | Largest consumers | No `~/.cache/agentic-kit` row | Add `ak-cache` with breakdowns. Mark the old config folder as an older installation |
 | Catalog | Does not see local-scope MCP, `.opencode/opencode.json`, `.claude/rules` or `settings.local.json` hooks. Expects user guidance blocks | Add those surfaces, a `local` scope, and a `user-exception` scope for register keys. Owner comes from project receipts. Expected user blocks become zero. Skill pressure defaults to opted-in projects |
-| Projects | Only measures repositories with an HTTPS remote and a recorded session (`src/lib/footprint/projects.mjs:741-773`) | Always measure opted-in projects. Columns for mode, `kitVersion`, components and pins. KPI reads "N opted in · M seen". The table follows the header filter. Reuse the unused `project-group-controls.mjs` for a "show seen-only folders too" toggle inside it. Add `.agentic-kit` to `EXCLUDED_DIRS` in `stack-detect.mjs` |
+| Projects | Only measures repositories with an HTTPS remote and a recorded session (`src/lib/footprint/projects.mjs:741-773`) | Measure managed places and every git repository, local-only ones included. Measure plain folders on request. Columns for kind, managed, mode, `kitVersion`, components and pins. KPI reads "N places · M managed". The table follows the header filter. Reuse the unused `project-group-controls.mjs` for its kind and managed filters. Add `.agentic-kit` to `EXCLUDED_DIRS` in `stack-detect.mjs` |
 | Snapshot file | `~/.config/agentic-kit/footprint-snapshot.json` (`src/lib/footprint/snapshot.mjs:47-49`) | Cache |
 
 ### Maintenance
@@ -759,13 +850,13 @@ stay, and user placements are labelled "Yours: ak reads, never changes".
 
 | Panel | Today | Change |
 | --- | --- | --- |
-| Scorecard, Limits, Prompts, Models | Whole account; `handleUsage` takes only `days` | Follows the header filter (default All managed projects), with **Whole account** available and the managed share shown beside the figures. Add `scope=managed\|account\|<project key>` to `handleUsage`, `scanKey` and `aggregate`. Plan limits are always account-wide and labelled so. Limits: classify each opted-in project's statusLine, and report a kit footer still at user level as an older installation. Extra hosts come from `local.json` |
+| Scorecard, Limits, Prompts, Models | Whole account; `handleUsage` takes only `days` | Follows the header filter and host facet (default All work), with the managed share shown beside the figures. Add `scope=all\|managed\|<place key>` and `host` to `handleUsage`, `scanKey` and `aggregate`. Plan limits are always account-wide and labelled so. Limits: classify each opted-in project's statusLine, and report a kit footer still at user level as an older installation. Extra hosts come from `local.json` |
 | Tool mix | Raw MCP names | Keep `claude-flow` as the server name so history doesn't split. Add a server-to-family tag (ruflo, aqe, brain, and deja-vu as retired) through `classifyToolName` (`src/lib/live/tool-classify.mjs:5`) |
-| Projects | Top Git repositories by spend | Opted-in badge and filter. Opt-in status is read once per root at index read time and passed into `aggregate`, never stored in the parse cache, because a project can opt in after its transcripts were indexed |
-| Context and the context-tax finding | Advice points at user-level guidance blocks. Claude window size is measured only where the footer runs | Follows the header filter, and says that Claude pressure is measured only where the footer runs, so **Whole account** shows input-only figures for other sessions. Split the context-tax finding into opted-in and not. Advice points at the project rule, skills and `ak audit context` |
+| Projects | Top Git repositories by spend; plain folders and user-level locations are left out (`src/lib/usage-project-groups.mjs:61-64`) | Becomes **Places**: every kind, with a kind column and a managed badge, and rows that add up to the total. Opt-in status is read once per root at index read time and passed into `aggregate`, never stored in the parse cache, because a project can opt in after its transcripts were indexed |
+| Context and the context-tax finding | Advice points at user-level guidance blocks. Claude window size is measured only where the footer runs | Follows the header filter, and says that Claude pressure is measured only where the footer runs, so **All work** shows input-only figures for sessions outside managed projects. Split the context-tax finding into opted-in and not. Advice points at the project rule, skills and `ak audit context` |
 | `ak audit context` | Reads machine guidance files, top-level `mcpServers` in `~/.claude.json`, and the Superpowers plugin cache (`src/lib/context-audit-sources.mjs:216-275`) | Project rule target (about 1.5 KB budget), frontmatter of ak's own skills, local-scope, `.mcp.json` and project Codex MCP reported by scope, and project Superpowers evidence. Machine blocks show as an older installation |
 | Observability | Reads every transcript. Workspace store in `~/.config/agentic-kit` | Reads stay. Workspace store moves to the cache. `resolveProjectIdentity` gets an `optedIn` flag for a badge and filter (`src/lib/live/project-label.mjs:70-93`) |
-| Telemetry | Contract v1 fixes `selection.scope`. Inventory and maintenance come from user-level stores. Identity sits next to `kit.json` | Contract v2: `selection.scope` is `account\|managed`, matching the dashboard filter; optional per-session `akScope`; inventory and maintenance come from project state or read `unavailable`. Identity moves to the cache |
+| Telemetry | Contract v1 fixes `selection.scope`. Inventory and maintenance come from user-level stores. Identity sits next to `kit.json` | Contract v2: `selection.scope` is `all\|managed`, matching the dashboard filter; optional per-session `akScope`; inventory and maintenance come from project state or read `unavailable`. Identity moves to the cache |
 | Admin | npm download trends include automatic self-update installs | Annotate the release on the sparkline. The trend breaks there, because there are no more self-update installs and `npx … init` runs count instead |
 | Derived state | `usage-index.json`, `observability-workspaces.json`, `claude-context-windows/`, rate-limit files, `openrouter-activity.json` and host-setup evidence live under `~/.config` or `~/.local/state` | All move to the cache, with a one-release read fallback from the old paths. The statusline footer reads the Brain version from the cache, not `kit.json` |
 
@@ -864,6 +955,10 @@ need nothing special, because `init` uses existing setups instead of duplicating
      `~/.codex/config.toml`.
    - A second test serves every dashboard GET and SSE route from a folder that has not opted in,
      and asserts that nothing outside the cache changed.
+   - A third test builds a fixture account with sessions on several hosts. The sessions are spread
+     across a repository with a worktree, a plain folder, the home folder, a temporary folder and
+     a deleted folder. The test asserts that each session lands in exactly one place, and that the
+     per-place rows add up to the All work totals for every host.
 4. **Upstream watch.** Staged initializers and sandboxed live checks report user-level writes made
    by upstream tools, and each one becomes an upstream thread.
 
@@ -878,10 +973,10 @@ dashboard work.
 | P0 | The exit release, which includes the prerequisites on the current line: a complete `uninstall --purge` and its regression test. Then, on the new line: remove deja-vu, the ADR, the write gate in report-only mode, and contract tests recording today's violations as the baseline |
 | P1 | The `.agentic-kit/` layout and `ak init` in personal mode for Claude: rules, skills, `settings.local.json`, local-scope MCP launchers. Staged initializers that use existing setups. The legacy check. User-level guidance writes stop |
 | P2 | Tool cache and launchers. Global npm installs, self-update and host-CLI installs removed. Daemon handling scoped to the project |
-| P3 | Codex project settings and the exception register; OpenCode project settings; write scopes for external adapters |
+| P3 | Codex project settings and the exception register; OpenCode project settings; write scopes and read-only session sources for external adapters |
 | P4 | Brain knowledge-base-only mode, agent-browser, embeddings consent, Superpowers evidence. Upstream requests filed |
 | P5 | `sync`, `status` and `uninstall` on project state; team mode; the command removals and folds |
-| P6 | Dashboard: launch-anywhere with the three-level scope filter, the project index and `optedIn` census scope, status snapshots, the managed projects view and Managed files panel, read-only views, the System, Maintenance and Usage changes, telemetry v2, and the Footprint card |
+| P6 | Dashboard: launch-anywhere with the scope filter and host facet, places of every kind, the host coverage card and `ak run` records, the project index and `optedIn` census scope, status snapshots, the work view and Managed files panel, read-only views, the System, Maintenance and Usage changes, telemetry v2, and the Footprint card |
 | P7 | Write gate enforcing; the machine-reconciliation code paths deleted |
 
 ## Trade-offs
@@ -894,9 +989,11 @@ dashboard work.
   reference-counted and reversible.
 - **Upgrading costs the user one manual sequence.** In exchange there is no migration code to
   maintain. The exit release makes that sequence complete, and the new version points to it.
-- **One filter, with exceptions.** The dashboard defaults to All managed projects. Plan limits stay
-  account-wide whatever the filter, and a panel without data at the selected level says so instead
-  of showing an empty card.
+- **One filter, with exceptions.** The dashboard defaults to All work. Plan limits stay
+  account-wide whatever the filter. A panel that only exists for managed projects says so at All
+  work, and a panel without data at the selected level says so instead of showing an empty card.
+- **Observation reach.** ak sees only hosts it has a reader or adapter for. The coverage card
+  shows any gap rather than hiding it.
 - **Snapshot freshness.** Aggregates are only as fresh as each project's last `ak status` or
   `ak sync`. The dashboard shows each snapshot's age and offers an explicit refresh, rather than
   re-collecting every project when it opens.
