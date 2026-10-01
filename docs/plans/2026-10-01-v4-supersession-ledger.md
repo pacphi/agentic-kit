@@ -2,8 +2,9 @@
 
 ## Status
 
-**Active.** Compiled on 2026-10-01 from three read-only reviews, as master plan Decision 4
-requires. It feeds the card inventory, and it serves as remediation v2's final Appendix A/B
+**Active.** Compiled on 2026-10-01 from four read-only reviews, as master plan Decision 4
+requires. The fourth covered the completion program that existed only on the maintainer's Mac
+until 2026-10-01 (section H). It feeds the card inventory, and it serves as remediation v2's final Appendix A/B
 reconciliation (V7 step 2). It is archived with the program.
 
 ## How to read it
@@ -46,6 +47,20 @@ Each entry has a source citation, a state, the redesign's impact on it, and one 
 - **WP** and **WD** are the [CI Windows plan](2026-09-28-ci-windows-test-speed.md) and its [design](2026-09-28-ci-windows-test-speed-design.md).
 - **DL** is the [issues 237–239 decision log](2026-09-26-issues-237-238-239-verification-and-decisions.md).
 - **SM** is the remediation v2 scope matrix, `docs/archive/2026-09-29-remediation-v2-scope-matrix.md`.
+- The completion program (section H), cited as `KEY:line`:
+  - on branch `docs/completion-program-plan`: **PRG**, `docs/plans/2026-09-29-completion-program.md`;
+    **ACC**, `2026-09-29-completion-acceptance-ledger.md`; **SES**,
+    `2026-09-30-session-organization-and-activity-design.md`; **TAX**,
+    `2026-09-30-conversation-activity-and-topic-taxonomy-design.md`;
+  - on branch `fix/completion-m1`: **M1X**, `docs/plans/2026-09-30-completion-m1-execution.md`;
+    **M1L**, `2026-09-30-completion-m1-closeout-ledger.md`; **SHC**,
+    `2026-09-30-aqe-mcp-shutdown-contribution.md`; **RCP**,
+    `docs/archive/2026-09-30-aqe-m1-mcp-lock-proof.md`; **WFL**,
+    `.github/workflows/aqe-m1-conformance.yml`; **REG**,
+    `src/lib/hook-audit/agentic-dependency-constraints.json`;
+  - on branch `wip/local-inventory-2026-10-01`: **CL**,
+    `docs/plans/2026-09-29-issue-239-closure-and-v5-foundation.md`; **EV**,
+    `2026-09-29-execution-evidence-and-upgrade-acceptance.md`.
 
 **Excluded:** issues labelled `needs-review` (#95, #109, #115, #116, #117, #167) and every item
 about them. That covers v2's D-12 to D-14, the matching decision-gate rows DG-3 to DG-5, and the
@@ -58,10 +73,11 @@ same items in v1.
 | Remediation plans (v2, EX, v1, WP/WD) | 58 | 14 | 27 | 11 | 6 |
 | Decision log for #237–#239 | 57 | 12 | 27 | 5 | 13 |
 | ADRs, shipped features, docs, proposals, issues | 108 | 6 | 61 | 37 | 4 |
+| Completion program, `fix/completion-m1`, the 2026-09-29 plans | 69 | 24 | 11 | 22 | 11 |
 
 The entries overlap: the same item can appear in several sources. The combined, de-duplicated
-work lists are the next three sections. The counts are as the three reviews found them; decisions G1
-and G6 later added three superseded entries in sections C and D.
+work lists are the next three sections. The counts are as the reviews found them; decisions G1
+and G6 later added three superseded entries in sections C and D. Section H also has 1 entry waiting on a decision (**G10**).
 
 ## Exit-critical work for `alpha.61`
 
@@ -88,20 +104,34 @@ These are de-duplicated across all sources. Each becomes an `alpha.61` card.
    ADR-0061 rows.
 3. **`alpha.61` never updates itself.** Its `ak sync` prints the upgrade steps instead (DL
    cross-cutting; DSN "The exit release").
-4. **#271**, the Brain held refresh that never clears. Add a time limit or a retry, or document the
-   workaround. The issue is superseded on the new line at P4.
-5. **#240.** Close it with the AQE 3.14.4 evidence, or rescope it (v2 V4 C.1; DL U3k).
-6. **#262.** Refresh the strict Windows gate or record a waiver, then close it. Measure again after
-   P0 (v2 V1; WP Task 4; WD acceptance).
+4. **#271**, the Brain held refresh that never clears. The fix already exists on
+   `fix/completion-m1`:
+   - `b535975`: a held refresh expires after the version-check TTL (24 hours by default);
+   - `fb48cb3`: a missing knowledge base is reported as missing, not as the cached release;
+   - `dfb5609`: `ak sync --retry-brain`, a guarded one-shot retry.
+
+   They apply cleanly to `main`, and their focused tests pass. Land them as one PR, with the stale
+   comment at `src/lib/heal.mjs:330-338` fixed and `--retry-brain` added to the README.
+   `--retry-brain` exists only on `alpha.61`. The issue is superseded on the new line at P4.
+5. **#240.** Close it with the AQE 3.14.4 evidence its registry entry names, plus the 3.14.6 macOS
+   receipt (RCP) and the ADR-0055 and ADR-0062 lines from `248b1b6`. Criterion 3 is reworded to
+   `ak status --refresh=live --only aqe` (v2 V4 C.1; DL U3k; CL D-25). See **G13**.
+6. **#262.** Meet the rule approved on 2026-09-29 (PRG:60): a ten-run median under 5 minutes, plus
+   three consecutive PR runs with every Windows leg under 300 seconds. Measure `6ab1c5e` first.
+   Otherwise record a waiver, then close it. Measure again after P0 (v2 V1; WP Task 4; WD
+   acceptance; M1L:35).
 7. **Remediation v2 close-out:**
    - this ledger serves as the Appendix A/B re-check (V7.2);
    - add the v2 summary entry to the decision log (V7.3, DL close-out);
-   - record the first dispatch (DoD-3);
+   - record the first dispatch (DoD-3), citing the read-back at M1L:51-60;
+   - M1L is the row-by-row map of the 246-row matrix; this ledger holds the dispositions (**G11**);
    - after the master-plan PR, archive v1, v2, EX, WP, WD and the decision log, rewriting the
      links that point at them;
-   - refresh their stale Status sections;
+   - archive the completion program (PRG, ACC, M1X, M1L, SHC) and the two 2026-09-29 plans (CL,
+     EV); move SES and TAX to `docs/proposals/v5/`;
+   - refresh their stale Status sections, adopting the v2 and EX refreshes from `456ff58`;
    - record attended time as "not instrumented";
-   - drop the global-match criterion from DoD-5.
+   - drop the global-match criterion (v2 §6.5).
 8. **Jobs on the maintainer's machine, done before the purge or waived:**
    - merge the stray AQE store, keeping a copy of the receipt (v2 D-7);
    - delete the reviewed temp backlog (v2 §2 step 7, B9-14);
@@ -110,6 +140,8 @@ These are de-duplicated across all sources. Each becomes an `alpha.61` card.
    The footprint snapshot refresh is dropped (superseded).
 9. **Publish `alpha.61`** and check it with `npx @pacphi/agentic-kit@4.0.0-alpha.61 --version`
    (v2 D-2, §6.5; EX Phase E, reshaped into the exit regression test).
+10. **Register agentic-qe#801** (from `f19f84c`) in the same PR that lands the files its entry
+    names. The registry test requires every named file to exist.
 
 ## Gaps in the design that the reviews found
 
@@ -122,6 +154,13 @@ These are de-duplicated across all sources. Each becomes an `alpha.61` card.
 | G5 | The companion registry is used only by deja-vu. MetaHarness (ADR-0022) does not use it | Delete it in P0 with deja-vu |
 | G6 | `ak x harvest` is missing from the command fold table | **Decided (A), 2026-10-01.** Removed in P5 (design Decision 11) |
 | G7 | The exit release would have deleted user data and self-updated into the new line | **Fixed** in the design at `505786e` |
+| G9 | The completion program (M1–M3) and `fix/completion-m1` planned the same work as this program and were never reviewed | Triaged in section H. M1 → `alpha.61`; M2 → v5.0.0 and v4.1.0; M3 → v5.0.0 or P6. Archived in the close-out |
+| G10 | CL D-20 (2026-09-29) pulled four #239 items out of v5; master plan Decision 3 (2026-10-01) puts #239 on v5.0.0 | **Needs a decision.** Recommended: Decision 3 supersedes D-20, and EV E1's fields shape the P6 `ak run` records card |
+| G11 | Two documents claim to succeed the 246-row matrix: M1L (M1L:5-10) and this ledger | M1L is archived as the dated row map; this ledger decides dispositions |
+| G12 | The design's fold table has no row for `ak x aqe-store` (stray-store merge, used by exit job D-7) or `ak x skills` (skill maintenance plan) | **Needs a decision** before P5 |
+| G13 | M1L adds Windows and installed-target proof to #240 (M1L:62-65); the master plan and the registry entry on `main` close it on the 3.14.4 evidence | **Needs confirming.** Recommended: close on #240's own criteria (exit item 5); Windows proof moves to the beta.1 conformance card |
+| G14 | The unapproved upstream drafts (replies to agentic-qe #528, #532 and #535; the #801 source fix) promise work the redesign moves | v4.1.0 under Decision 3a; redraft before approval |
+| G15 | PRG P06 and SES assume ADR-0029 host admission, which P0 removes (PRG:272; SES:49, 94, 130); CL cites the retired `ak x verify` (CL:76, 327) | Rewritten in the v5 cards |
 | G8 | Items the v5 review sent to v4 (see the [v5 impact review](../proposals/v5-impact-of-v4.md#items-that-belong-on-the-v4-board)): D01 and D10 triage; an advised-commands test; "all healthy" while warnings are open; splitting `/api/system`; showing where limits were sampled; Codex per-profile configs; the not-OTLP wording; complexity limits for P6; the "[BLOCKED]" exit-code finding | Cards in the phases named there |
 
 ## A. Remediation program documents
@@ -388,13 +427,114 @@ All are finished work. Sizes are line counts.
 
 | Issue | Impact | Disposition |
 | --- | --- | --- |
-| #271 Brain held refresh | Obsolete on the new line; a live defect for anyone staying on `alpha.61` | Exit-critical |
+| #271 Brain held refresh | Obsolete on the new line; a live defect for anyone staying on `alpha.61`. Fixed on `fix/completion-m1`, unmerged | Exit-critical (land the fix) |
 | #262 Windows CI | Unaffected; P0's contract tests add Windows load | Exit-critical (the gate or a waiver); measure again after P0 |
 | #257 Cowork discovery | Partly subsumed by the coverage card and session sources | Still needed (P6) |
 | #255 worker monitor | Unaffected | Still needed (v4.1.0 design card) |
 | #240 AQE busy rule | Unaffected; the rule is already retired | Exit-critical (close or rescope) |
 | #239 v5 readiness | Partly met by the design. Add a comment mapping the items it meets | Still needed (v5.0.0) |
 | #213 Ruflo memory path | The integration point moves to the project launcher | Upstream-dependent (v4.0.0 until rc.1, then v4.1.0) |
+
+## H. The completion program (2026-09-29 and 2026-09-30)
+
+Planned and partly executed on the maintainer's Mac. It reached GitHub on 2026-10-01. None of it
+has been through review or CI. Items about `needs-review` issues are excluded: PRG P12–P17, the
+ACC rows for those issues, the companion and Route Intelligence decisions (PRG:71-72), and the
+part of P10 about #109.
+
+### Code and evidence on `fix/completion-m1`
+
+| ID | Source | Item | State | Impact | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| `b535975` | `src/lib/ruvnet-brain.mjs:255-267`; `tests/kit/brain-held-refresh-recovery.test.mjs` | #271: a held refresh expires after the TTL | Finished, unmerged | Brain user mode is superseded at P4 | **Exit-critical** |
+| `fb48cb3` | `src/lib/ruvnet-brain.mjs:131-141,331-345` | #271: missing knowledge base versus cached state | Finished, unmerged | Same | **Exit-critical** |
+| `dfb5609` | `src/commands/sync.mjs:188-191`; `src/commands/sync/brain-retry.mjs` | #271: `ak sync --retry-brain` | Finished, unmerged | The new `sync` has no such flag | **Exit-critical** (`alpha.61` only) |
+| `heal.mjs` comment | `src/lib/heal.mjs:330-338`; CL:106 | Says the reinstall path "isn't blocked" | Not started | Same | **Exit-critical** (in the #271 PR) |
+| I271-N04 | ACC:250; M1X:65-66 | Re-verify recovery against the current Brain installer | Not started | P4 stops using the installer's user mode | **Superseded** at P4 |
+| `6ab1c5e` | `tests/kit/aqe-store-merge-fixture.test.mjs:14-25`; M1X:94-102 | One transaction for the migration oracle's schema (a #262 speed candidate) | Finished, not measured | Unaffected | **Exit-critical** (inside #262; keep only if timing improves) |
+| Live-lock and MCP harness | `03bb230`, `40c2707` (tests), `16ccdd6`; RCP:12 | Opt-in proof that AQE startup reports "busy" and leaves the store intact | Finished | Seeds `kit.json` and runs `aqe init` in place | **Exit-critical** (#240 evidence); rewritten at beta.1 |
+| WFL | `40c2707`, `0e42d02` | Dispatch-only AQE conformance job for Linux, macOS and Windows | Finished, never dispatched | Not replaced by staging: P1 changes how `aqe init` runs, not AQE's lock behaviour | **Still needed** → beta.1, rewritten for `ak init` and the tool cache; the shutdown leg waits on #801 |
+| `248b1b6` | RCP; ADR-0055:6; ADR-0062:5 | 3.14.6 macOS receipt and ADR lines | Finished | Unaffected | **Exit-critical** (#240 evidence) |
+| `f19f84c` | REG:2779-2797 | Registers agentic-qe#801 | Finished | Unaffected | **Upstream-dependent**; register it in `alpha.61` (exit item 10) |
+| `456ff58` | v2:7-11; EX:9-13, 236-241 | v2 and EX Status refreshes after #285 | Finished | Unaffected | **Exit-critical** (exit item 7) |
+| M1-G01 | M1L:33 | Regression run, review and CI for all of the above | Not started | — | **Exit-critical** (a gate on each PR) |
+
+### Program, milestones and work packages (PRG, ACC)
+
+| ID | Source | Item | State | Impact | Disposition |
+| --- | --- | --- | --- | --- | --- |
+| M1 | PRG:42-44 | Close the older remediation plans | Started | The same scope as the v2 close-out | **Exit-critical** (exit items 5–9) |
+| M2 | PRG:45-46 | Execution evidence, monitor, upgrade proof, provenance; close #239 | Planned | #239 is on v5.0.0, #255 on v4.1.0; no migration code | **Still needed** → v5.0.0 and v4.1.0 |
+| M3 | PRG:47-50 | Companions, routing, Cowork, Sessions, ADR-0048 | Planned | The companion registry goes in P0 | **Still needed** → P6 (Cowork) and v5.0.0 (Sessions, ADR-0048) |
+| PRG §3, §9 | PRG:84-110, 471-478 | ADR reconciliation; start with P06's fake-worker receipt | Planned | Section C covers the ADRs; #239 is on v5.0.0 | **Superseded** |
+| P00 / M1-G02 | PRG:185-195; M1L:34, 115-362 | One closure ledger mapping all 246 rows | Started | Overlaps this ledger | **Exit-critical** (**G11**) |
+| P01 | PRG:197-207 | Upstream triage and replies | Started | Decision 3a | **Upstream-dependent** |
+| P02 / M1-G03 | PRG:209-218; M1L:35 | #262 | Started | Unaffected | **Exit-critical** |
+| P03 (init) | PRG:225; M1L:183, 195 | Repeated `aqe init` convergence; Codex guidance modes | Planned | Staged initializers (P1) | **Superseded** at P1 |
+| P03 (#240) | PRG:220-230; M1L:62-73 | Close #240 | Started | Unaffected | **Exit-critical** (**G13**) |
+| P03 (Windows) | M1X:111-122 | Windows shutdown proof and Windows run | Started | P1 and P2 change setup | **Still needed** → beta.1 |
+| P03 (store) | PRG:227; M1L:185 | Repair old audit-chain forks | Planned | Unaffected | **Upstream-dependent** |
+| P04 | PRG:232-241 | #271 | Finished, unmerged | P4 | **Exit-critical** |
+| P05, P05b | PRG:243-263 | #213; the upstream contribution lane | Planned | Decision 3a | **Upstream-dependent** |
+| P06 | PRG:265-274 | Execution evidence ADR; "preserve existing host admission" | Planned | Admission goes in P0; `ak run` records arrive in P6 | **Still needed** → v5.0.0 (#239), without the admission clause (**G15**) |
+| P07, P10 | PRG:276-285, 309-317 | Cancellation and fault matrix; per-invocation provenance | Planned | — | **Still needed** → v5.0.0 |
+| P08 | PRG:287-296 | #255 monitor | Planned | — | **Still needed** → v4.1.0 |
+| P09 | PRG:298-307 | Clean versus upgraded matrix; setup and sync run twice | Planned | No migration code | **Superseded**; fixtures go to the P0 and P1 contract tests |
+| P11 | PRG:319-328 | #257 Cowork | Planned | Coverage card | **Still needed** → P6 |
+| P11S | PRG:329-331; ACC:305-339 | Sessions, titles, Activity | Decided, deferred | See SES below | **Still needed** → v5.0.0 intake |
+| P18 | PRG:402-411 | Freeze the release candidate | Planned | Becomes the `alpha.61` release card | **Exit-critical** |
+| P19 (release) | PRG:417; M1L:37 | Publish; global `ak` matches | Planned | Checked through `npx` | **Exit-critical**; the global match is superseded |
+| P19 (jobs) / M1-G04 | PRG:419-420; M1L:36 | Pin, footprint, stray store, temp backlog | Planned | — | **Exit-critical** or waived (exit item 8); the footprint is superseded |
+| P19 (upgrade check) | PRG:417-421 | Upgrade, restart, sync twice | Planned | The sandboxed-`HOME` exit test replaces it | **Superseded** |
+| P20 / M1-G08 | PRG:425-434; M1L:40 | Close the issues and archive the plans | Planned | — | **Exit-critical** (exit item 7) |
+| M1-G06 | M1L:38, 51-60 | Dispatch evidence read back | Started | — | **Exit-critical** (DoD-3) |
+| M1-G07 | M1L:39 | Branch and worktree cleanup | Planned | — | **Superseded** (v2 DoD item 7 already is) |
+| v1 steps, AB-row-21 | M1L:78-98, 362 | 14 unchecked v1 steps mapped; a conditional pin check | Finished / planned | — | **Exit-critical** (evidence for archiving v1; with B5-8) |
+| I239-01–05, 13, 22, 25 | ACC:203-227 | Validation, identity, monitor, cancellation, provenance, faults, alerts | Planned | `ak run` records are the base | **Still needed** → v5.0.0 |
+| I239-06, 08–12, 14 | ACC:208-216 | Owners, predicates, sync scope, host states, causes, services, executables | Partly shipped | P1 and P5 rebuild them on project state | **Still needed** → beta.1 and beta.3 acceptance |
+| I239-15–19 | ACC:217-221 | Ingestion states, clipping, lazy payloads | Partly shipped | P6 | **Still needed** → P6 |
+| I239-07, 20 | ACC:209, 222 | Memory route proof; upstream owner and first fixed version | Partly shipped | #213; the registry | **Upstream-dependent** |
+| I239-21, 23, 24 | ACC:223-226 | Upgrade matrix, upgrade run, sync twice | Planned | No migration code | **Superseded** |
+| I255, I257 | ACC:257-262 | Narrative criteria | Planned | — | **Still needed** → v4.1.0 and P6 |
+| I262 | ACC:251-256 | Narrative criteria | Started | — | **Exit-critical** |
+| #756 | M1X:153-157 | Fix confirmed in AQE 3.14.5's history | Finished | — | **Upstream-dependent** |
+
+### Upstream text
+
+| ID | Source | Item | State | Disposition |
+| --- | --- | --- | --- | --- |
+| agentic-qe#801 issue | SHC:5-72; REG:2793 | MCP shutdown leaves the `patterns.rvf` lock marker | Posted 2026-10-01 under the maintainer's approval, according to SHC (not checked against GitHub) | **Upstream-dependent**: adoption in v4.1.0 |
+| agentic-qe#801 fix | SHC:74-90 | Reset the shared adapter after the server drains | Private; not approved | **Upstream-dependent** (**G14**) |
+| Replies to agentic-qe #528, #532, #535 | M1X:130-151 | Three drafts | Not approved, not posted | **Upstream-dependent**; redraft first (**G14**) |
+| D-32 | CL:259-271 | Four Ruflo task-ledger defects | Not reproduced | **Upstream-dependent** |
+| CL §2.2 | CL:69-80 | Snapshot of upstream-blocked threads | Snapshot | **Upstream-dependent** (the registry is current) |
+
+### The two 2026-09-29 plans (CL, EV)
+
+| ID | Source | Item | State | Disposition |
+| --- | --- | --- | --- | --- |
+| Status gates | CL:10-15; EV:11-13 | Wait for the develop → main PR | That happened (#285) | **Superseded** |
+| D-20 | CL:114-125 | Move four #239 items out of v5 | Decided 2026-09-29 | **Decision pending** (**G10**) |
+| D-21, E3 | EV:84-106, 52-54 | Monitor only what `ak run` launches; monitor and alert store | Decided / planned | **Still needed** → v4.1.0 (#255) |
+| D-22, D-23, E1, E2 | EV:33-50, 108-138 | Cancellation states and fencing; fake executors; evidence contract; fault-injection worker | Decided / planned | **Still needed** → v5.0.0 (#239); E1's fields shape the P6 `ak run` records card |
+| D-24 | CL:132-145 | A hold with an expiry trial and a retry flag | Implemented, except "check the blocking condition first" | **Exit-critical** (#271) |
+| D-25 | CL:147-160; PRG:65 | How #240 closes | Recorded twice, differently | **Exit-critical** (**G13**) |
+| D-26, W8 (#254, #256) | CL:162-174, 311 | Diagnostics for issues now closed | Closed | **Superseded** |
+| D-27 | CL:176-190 | Windows AQE job | Built as WFL | **Still needed** → beta.1 |
+| D-28, W5 | CL:192-208 | Declared provider versus observed model | Decided | **Still needed** → v5.0.0 |
+| D-29, W9 | CL:210-223 | Cowork spike | Decided | **Still needed** → P6 |
+| D-31, W0 | CL:242-257, 342-370 | Archive a plan only when every open row maps to a card | Decided | **Exit-critical** (exit item 7) |
+| D-33 | CL:273-282 | Ten green runs in a row for #262 | Replaced by the PRG:60 rule | **Superseded** |
+| CL §6 | CL:319-340 | #239 closure map | Planned | **Still needed** → v5.0.0; reused as the #239 mapping comment |
+| CL §8 | CL:376-381 | Probes not yet run | Not run | **Still needed** → v4.1.0, beta.1 and P6 |
+| W6, E4, EV §5 | CL:297; EV:56-59, 150-163 | Release-level upgrade proof and its gate; upgraded-install matrix | Planned | **Superseded**; fixtures go to beta.1 |
+
+### Session designs (SES, TAX)
+
+| ID | Source | Item | State | Disposition |
+| --- | --- | --- | --- | --- |
+| SES | SES:3-21, 138-150, 447-476 | One Sessions catalog, meaningful titles, Activity classification, its accuracy gates | Decided, deferred | **Still needed** → v5.0.0 intake. Builds on P6: multiple workspace associations sit on top of each session's single place, the naming rebases on P6's "Places", and the retention decision waits on X4. Its "admitted external host" vocabulary is rewritten (**G15**) |
+| TAX | TAX:3-18, 49-165 | Activity families plus a separate Topic hierarchy, including consumer chats | Decided, deferred | **Still needed** → v5.0.0 intake, alongside v5's claude.ai and ChatGPT support |
 
 ## Finished and unaffected
 
@@ -404,6 +544,8 @@ These were checked and need no card:
 - **v2 branches:** V1 Tasks 1–3; V2 PRs A and B; V3 B0-23, B6a-9 and B6a-12; most of V4; most of
   V5; V6's core items; V7.1.
 - **Appendices A and B:** every remaining DONE, DECLINED and SUPERSEDED row.
+- **Completion program:** CL D-30 (trunk-based branching, which the master plan follows); the CL §3
+  read-only probes, kept as evidence for the #239 card; the M1 local gate run (M1X:216-222).
 - **Decision log:** verdicts L2–L6, M1, M1b, M2, M4, P4, N2, N4, N5, U1 and U2. Decisions 2, 11,
   12, C, 14 and 15. Stage 4 items 4.1–4.7, and items 0b–0e. Branch 2 hermeticity. Branch 9
   Tasks 6, 7 and 9–12. The defects already fixed on `main`.

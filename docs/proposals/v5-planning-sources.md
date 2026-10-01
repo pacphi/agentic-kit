@@ -148,15 +148,33 @@ and ChatGPT/Codex. It should start from this work rather than from nothing.
 - the plug-in contract itself;
 - the consent and grant stores in `~/.config/agentic-kit`.
 
-## 6. Gaps
+## 6. Plans recovered from the maintainer's Mac
+
+A read-only inventory of the maintainer's Mac on 2026-10-01 (master plan Decision 8) found plans
+that had never reached GitHub. They are now on branches, and section H of the
+[supersession ledger](../plans/2026-10-01-v4-supersession-ledger.md) triages them.
+
+| Plan | Where | What v5 should take from it |
+| --- | --- | --- |
+| Issue #239 closure and the v5 foundation | `docs/plans/2026-09-29-issue-239-closure-and-v5-foundation.md` on branch `wip/local-inventory-2026-10-01` | The #239 acceptance map (§6), reused as the mapping comment on #239; the read-only probe results (§3); declared provider versus observed model (D-28). Its D-20, which moved four #239 items out of v5, waits on a decision |
+| Execution evidence and upgrade acceptance | `docs/plans/2026-09-29-execution-evidence-and-upgrade-acceptance.md` on the same branch | The execution evidence contract (E1), the fault-injection worker (E2), and cancellation states and fencing (D-22, D-23). The upgraded-install matrix is superseded |
+| Session organization, meaningful titles and Activity classification | `docs/plans/2026-09-30-session-organization-and-activity-design.md` on branch `docs/completion-program-plan` | One Sessions catalog, titles, and Activity gates (unknown Activity under 10%, accuracy of at least 95%). It must sit on the v4 dashboard's places and rebase on its "Places" naming. Its retention choice waits on conflict X4, and its "admitted external host" wording predates the v4 adapter retirement |
+| Conversation Activity and Topic taxonomy | `docs/plans/2026-09-30-conversation-activity-and-topic-taxonomy-design.md` on the same branch | Broad Activity families plus a separate Topic hierarchy, including consumer chats. It depends on v5's claude.ai and ChatGPT support |
+
+The inventory also found two maintenance-overhaul files from 2026-09-06 to 09-09
+(`progressive-inventory.html` and `option-a-validation.md`) that were never committed and no
+longer exist anywhere.
+
+## 7. Gaps
 
 These sources could not be reached on 2026-10-01:
 
 - **ChatGPT conversations**, including any HTML or SVG mockups that exist only in ChatGPT. They are
   not reachable from a Claude session.
-- **Local Codex and Claude Code session transcripts** on your Mac. No session on that machine was
-  reachable.
 - **Google Drive** returned nothing relevant.
+
+Local Codex and Claude Code session transcripts on the Mac were searched on 2026-10-01 (section 6).
+Their v5 mockups are earlier drafts of what is on `codex/v5-experience-research`.
 
 The `codex/v5-experience-research` branch holds the Codex-produced research and mockups that were
 committed. Anything that exists only in ChatGPT or in local transcripts needs to be exported and
