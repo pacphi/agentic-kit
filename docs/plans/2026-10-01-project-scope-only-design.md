@@ -331,8 +331,11 @@ the profile.
 
 - `kit.json` retires. Its per-project receipts, today keyed by absolute root inside a user file,
   move into each project's `state/`.
-- `ak sync --all` and the dashboard find opted-in projects through the `optedIn` census scope (see
-  [Dashboard and metrics](#dashboard-and-metrics)). There is no user-level registry.
+- `ak sync --all` and the dashboard find opted-in projects through a rebuildable project index in
+  the cache and the `optedIn` census scope (see
+  [Finding every managed project](#finding-every-managed-project)). The marker in the project is
+  the only authority; there is no registry that must be kept in step.
+- `state/status.json` holds the project's latest status snapshot, which the dashboard aggregates.
 - A team's `project.json` pins `kitVersion`. An older `ak` says so instead of acting.
 
 ## Tools without global installs
@@ -530,7 +533,9 @@ project pays about 1.5 KB, plus skill descriptions.
 - Re-renders projections whose receipts show they are unchanged. Edited files are reported instead
   of overwritten.
 - Re-checks this project's Codex exception entries.
-- Verifies, then appends health history to `state/`.
+- Verifies, then appends health history to `state/` and writes the status snapshot
+  `state/status.json`.
+- Adds the project to the cache's project index, if it is missing.
 
 It never self-updates and never touches another project. `--upgrade` is the only thing that moves
 pins. In team mode it leaves `project.json` modified for the user to commit.
@@ -542,31 +547,53 @@ pins. In team mode it leaves `project.json` modified for the user to commit.
 - **Older installation:** a single row, shown only when an older agentic-kit is detected (see
   [The new version's single check](#the-new-versions-single-check)).
 
+In an opted-in project, `ak status` also refreshes `state/status.json`, so the dashboard's
+aggregates stay current without the dashboard re-running anything.
+
 **`ak uninstall`**
 
 - Removes receipted files that are unchanged, and restores edited ones from the pre-init snapshot.
 - Removes the local-scope MCP names ak added, drops this project's Codex references, removes the ak
   block from `.git/info/exclude`, and stops this project's daemon.
+- Removes the project from the cache's project index.
 - Asks before removing data in `.swarm/` and `.agentic-qe/`; the default is to keep it.
 - Removing everything (`rm -rf ~/.cache/agentic-kit`) is always safe.
 
 ## Dashboard and metrics
 
-The dashboard currently assumes one machine-wide installation. Four reviews (About and Overview,
-System, Maintenance, Usage and Observability) found it needs four principles and a set of changes
-in each area.
+The dashboard is where a user sees which projects agentic-kit manages and how they are doing. It
+can be launched from any folder (`ak dashboard`, or `npx @pacphi/agentic-kit dashboard` with
+nothing installed). It finds every managed project, shows summary and aggregate metrics across
+them, and narrows any view to a single project.
+
+Today it assumes one machine-wide installation. Four reviews (About and Overview, System,
+Maintenance, Usage and Observability) found the principles and per-area changes below.
 
 ### Principles
 
-1. **One project selector.**
-   - The server resolves the current project by walking up from where `ak dashboard` started to
-     `.agentic-kit/project.json`. A header `?project=` selector, reusing `resolveSelectedProject`
-     and `keyForProject` (`src/lib/dashboard-server.mjs:206-238`), then drives the status rows,
-     host health, Ruflo components, intelligence detail, improvement and refresh.
-   - Today only some readers use the launch directory. `cachedHostFacts` ignores it
-     (`src/lib/dashboard-server.mjs:491`), and Intelligence deliberately has no current project.
-   - Outside an opted-in project, the dashboard opens in "no project" mode: prerequisites, a picker
-     of opted-in projects, and the `ak init` hint.
+1. **Launch anywhere; one scope filter for the whole dashboard.** A header filter has three
+   levels:
+
+   | Level | Shows | When it is selected |
+   | --- | --- | --- |
+   | **All managed projects** | Aggregates across every opted-in project | **The default** |
+   | **One project** | Everything narrowed to that project | Preselected when the dashboard is launched inside an opted-in project; otherwise chosen from the projects view or the filter |
+   | **Whole account** | Data that is account-wide by nature: spend and tokens, transcripts, machine footprint, user-level placements in Maintenance | Offered only on panels that have such data |
+
+   - Launching outside any project (in the home folder, say) is not a reduced mode. It opens on
+     All managed projects.
+   - Every panel declares which levels it supports. When the current level doesn't apply, the panel
+     shows a one-line note instead of an empty card.
+   - Panels with an account-wide view show the managed share beside it, for example "managed
+     projects: $41 of $63 this week".
+   - **Plan limits are always account-wide**, whatever the filter, and are labelled that way.
+   - The filter is the `?project=` key the server already understands, reusing
+     `resolveSelectedProject` and `keyForProject` (`src/lib/dashboard-server.mjs:206-238`), plus
+     two reserved values for the aggregate levels.
+   - It drives every reader: status rows, host health, Ruflo components, Intelligence,
+     improvement, Usage, System and Maintenance.
+   - Today only some readers follow the launch folder (`cachedHostFacts` ignores it,
+     `src/lib/dashboard-server.mjs:491`), and Intelligence deliberately has no current project.
 2. **Viewing never writes outside the cache.** Today:
    - a GET of `/api/status` writes `kit.json` version checks (`src/lib/versions.mjs:85,184`) and
      evidence files (`src/commands/status.mjs:155`, `src/lib/dashboard-server.mjs:486-494`);
@@ -586,23 +613,89 @@ in each area.
      identity-merged scope. Each row reads a capped `<repository root>/.agentic-kit/project.json`.
      An unreadable marker is `unknown`, never `false` (ADR-0023).
    - Add a derived `seenOnly` scope.
-   - Discovery needs no registry. Besides the transcript census it reads these read-only sources:
-     project keys in `~/.claude.json` that hold ak local-scope entries, the roots listed in the
-     Codex register's sidecar, and paths passed explicitly.
+   - Discovery is described in [Finding every managed project](#finding-every-managed-project).
    - `sync --all`, cache pruning and every project filter below use this scope.
-4. **Account-wide facts stay account-wide; ak's management is per project.** Spend, plan limits,
-   transcripts and plugins belong to the account, and reading them stays allowed. What ak manages
-   is shown project by project.
+4. **Aggregates come from what each project recorded.** The dashboard never re-runs status for
+   every project when it opens.
+   - Each opted-in project keeps its latest status snapshot in `.agentic-kit/state/status.json`.
+     The snapshot holds the rows, the verdict, the pinned and cached versions, the `kitVersion` and
+     the time it was collected. `ak status` and `ak sync` write it in that project.
+   - Aggregates read those snapshots and show each one's age.
+   - **Refresh this project** re-collects one project, which is an explicit action. **Refresh all**
+     works through the managed projects two at a time.
+   - Both refreshes write only that project's ignored state and the cache. That is allowed,
+     because the project opted in and the user asked.
+
+### Finding every managed project
+
+The marker `.agentic-kit/project.json` is the authority: a folder is managed if and only if it has
+one. Finding the markers uses these sources, from most to least reliable:
+
+1. **A project index in the cache** (`cacheDir()/projects.json`).
+   - `ak init` and `ak sync` add the project root, and `ak uninstall` removes it.
+   - It is a hint, not a registry. The dashboard checks each listed root's marker on every read.
+     A root whose marker is gone shows as "moved or deleted", with a **Forget** button that edits
+     only the index.
+   - Because the index is cache data, deleting it is safe. It is rebuilt from the sources below and
+     from the next `ak sync` in each project, and the dashboard says when it was rebuilt.
+   - A project opted in a minute ago appears straight away, before any agent session has run in it.
+2. **The transcript census** (ADR-0027). It catches projects whose index entry is missing.
+   - It also finds team-mode projects. A teammate's clone carries a committed `project.json`, so it
+     appears as "team project, not set up on this machine", with `ak sync` as the next step.
+3. **Read-only host records.** Project keys in `~/.claude.json` that hold ak local-scope entries,
+   and the roots listed in the Codex register's sidecar.
+4. **Paths given explicitly** with `ak dashboard --project <path>`. These are read only, never
+   saved.
+
+**Worktrees** are grouped under their repository (ADR-0050). In personal mode `.agentic-kit/` is
+untracked, so each worktree has its own set-up state, and the dashboard shows it per worktree.
+
+### The managed projects view
+
+This view replaces today's machine-wide Overview Summary as the dashboard's landing page.
+
+At **All managed projects**, it shows the aggregate:
+
+| Card | Shows |
+| --- | --- |
+| Projects | N managed (personal and team), M seen but not managed, team projects not set up on this machine |
+| Health | Healthy, needs attention, and not checked for 7 days or more, from the snapshots |
+| Needs attention | Every project's attention rows in one list, each tagged with its project and the command to run there |
+| Versions in use | Each tool's pinned versions and how many projects use each one; projects pinned to an older `kitVersion` |
+| Hosts | How many projects enable Claude Code, Codex and OpenCode |
+| Codex exceptions | Register entries in effect and the projects holding each one |
+| Cache | Cached tool versions, their size, what `ak sync` would prune, and the Brain knowledge base |
+| Activity | Sessions, tokens and spend in managed projects, beside the account total |
+| Learning | Patterns learned across managed projects (Intelligence rollup) |
+| Footprint | ak tool calls, skills and hooks inside managed projects, and the zero that should hold outside them |
+
+It also has a table with one row per managed project: name, mode, health, last checked, hosts,
+pins, and sessions and spend in the selected window. Clicking a row narrows the whole dashboard to
+that project.
+
+At **One project**, the same view becomes that project's page. It shows:
+
+- the full status rows (This project, Prerequisites);
+- its hosts and routes;
+- its pins and whether they are cached;
+- its Codex exception entries;
+- its activity and learning;
+- a **Managed files** panel, built from the project's receipts. It lists every file and record ak
+  wrote there, and whether each is unchanged or edited since. This answers "what exactly is ak
+  doing in this project?"
+
+The dashboard stays read-only for project files. Running `ak sync` or `ak uninstall` remains a
+command, which the view shows ready to copy.
 
 ### About and Overview
 
 | Panel | Today | Change |
 | --- | --- | --- |
 | About cards | Version chips read the npm global root (`src/lib/versions.mjs:9-17`). Host "Managed by ak" comes from `kit.json`. The configured-surface copy describes user-level MCP and guidance (`src/lib/dashboard/about-directory.mjs:278-302`). There is a deja-vu card | Chip shows the pinned version and whether it is cached. Host chip reads "Enabled for this project". Configured cards are rewritten for project scope. The deja-vu card and its join/category keys are removed (`src/lib/dashboard/groups.mjs:46,55`). The update hint becomes `ak sync --upgrade` |
-| Summary and subsystem map | Most rows are machine-level: versions, natives, npx, user memory, user MCP, user blocks, daemons, deja-vu, hosts and routing from `kit.json` | Three sections matching `ak status`. Routing comes from `project.json`. The project's health-history regressions appear in Summary |
+| Summary and subsystem map | Most rows are machine-level: versions, natives, npx, user memory, user MCP, user blocks, daemons, deja-vu, hosts and routing from `kit.json` | Replaced by [the managed projects view](#the-managed-projects-view). At **One project** it shows the sections of `ak status` and the project's health-history regressions. Routing comes from `project.json` |
 | Host badges and participation | `enabled` comes from `kit.json` (`src/lib/host-readiness.mjs:102`). The hint is `ak host pick`. Alignment reads user files | `enabled` comes from `project.json` and `local.json`. The hint is `ak init`. Codex register entries become project rows. Native probes stay read-only |
 | Ruflo components | `kit.json` intent, the global version, one machine evidence file, and a dry run against `~/.claude/settings.json` | Intent from `project.json`, version from pin plus cache, evidence in project state, a dry run against `settings.local.json`. The funnel card explains that the setting is account-wide |
-| Intelligence | Census-wide rollup; the selection defaults to the most recently active project; writes health history (see principle 2) | Keep the rollup, labelling rows as opted in or not. Default the selection to the current project when it is opted in. `improvement` follows the selection |
+| Intelligence | Census-wide rollup; the selection defaults to the most recently active project; writes health history (see principle 2) | Follows the header filter. **All managed projects** shows the rollup over opted-in projects. **Whole account** shows today's census rollup, with seen-only rows labelled. **One project** shows the detail. `improvement` follows the selection |
 | Models | Store and key in `~/.config/agentic-kit` (`src/lib/model-inventory/store.mjs:13-14`) | Cache. Routes from `project.json` |
 | Refresh | `local` and `live` read `kit.json` and write user-level evidence. Live checks run `ruflo` in temp folders, so upstream state lands in `~/.claude-flow` | Takes a project and writes evidence to project state. Live checks run with a sandboxed `HOME`. The deja-vu check is removed. Machine, maintenance and inventory snapshots persist in the cache |
 
@@ -616,7 +709,7 @@ in each area.
 | Storage reclaim (advisory) | The npx "version-stale" reason compares against global installs, with an `ak sync` hint (`src/lib/footprint/storage-reclaim.mjs:242-257`) | Add a "tool cache: versions no project pins, unused for 30 days" candidate, which `ak sync` prunes. Rebase the Brain and browser detectors onto the cache. Drop the npx global-baseline reason |
 | Largest consumers | No `~/.cache/agentic-kit` row | Add `ak-cache` with breakdowns. Mark the old config folder as an older installation |
 | Catalog | Does not see local-scope MCP, `.opencode/opencode.json`, `.claude/rules` or `settings.local.json` hooks. Expects user guidance blocks | Add those surfaces, a `local` scope, and a `user-exception` scope for register keys. Owner comes from project receipts. Expected user blocks become zero. Skill pressure defaults to opted-in projects |
-| Projects | Only measures repositories with an HTTPS remote and a recorded session (`src/lib/footprint/projects.mjs:741-773`) | Always measure opted-in projects. Columns for mode, `kitVersion`, components and pins. KPI reads "N opted in · M seen". Reuse the unused `project-group-controls.mjs` as an opted-in, seen-only or all filter. Add `.agentic-kit` to `EXCLUDED_DIRS` in `stack-detect.mjs` |
+| Projects | Only measures repositories with an HTTPS remote and a recorded session (`src/lib/footprint/projects.mjs:741-773`) | Always measure opted-in projects. Columns for mode, `kitVersion`, components and pins. KPI reads "N opted in · M seen". The table follows the header filter. Reuse the unused `project-group-controls.mjs` for a "show seen-only folders too" toggle inside it. Add `.agentic-kit` to `EXCLUDED_DIRS` in `stack-detect.mjs` |
 | Snapshot file | `~/.config/agentic-kit/footprint-snapshot.json` (`src/lib/footprint/snapshot.mjs:47-49`) | Cache |
 
 ### Maintenance
@@ -666,13 +759,13 @@ stay, and user placements are labelled "Yours: ak reads, never changes".
 
 | Panel | Today | Change |
 | --- | --- | --- |
-| Scorecard, Limits, Prompts, Models | Whole account; `handleUsage` takes only `days` | Stays account-wide by default, because spend and limits are. Add `scope=all\|opted-in` to `handleUsage`, `scanKey` and `aggregate`, and a strip reading "opted-in: N projects, X% of spend". Limits: classify each opted-in project's statusLine, and report a kit footer still at user level as an older installation. Extra hosts come from `local.json` |
+| Scorecard, Limits, Prompts, Models | Whole account; `handleUsage` takes only `days` | Follows the header filter (default All managed projects), with **Whole account** available and the managed share shown beside the figures. Add `scope=managed\|account\|<project key>` to `handleUsage`, `scanKey` and `aggregate`. Plan limits are always account-wide and labelled so. Limits: classify each opted-in project's statusLine, and report a kit footer still at user level as an older installation. Extra hosts come from `local.json` |
 | Tool mix | Raw MCP names | Keep `claude-flow` as the server name so history doesn't split. Add a server-to-family tag (ruflo, aqe, brain, and deja-vu as retired) through `classifyToolName` (`src/lib/live/tool-classify.mjs:5`) |
 | Projects | Top Git repositories by spend | Opted-in badge and filter. Opt-in status is read once per root at index read time and passed into `aggregate`, never stored in the parse cache, because a project can opt in after its transcripts were indexed |
-| Context and the context-tax finding | Advice points at user-level guidance blocks. Claude window size is measured only where the footer runs | Default to opted-in projects, with an "all sessions" toggle, and say that Claude pressure is measured only where the footer runs. Split the context-tax finding into opted-in and not. Advice points at the project rule, skills and `ak audit context` |
+| Context and the context-tax finding | Advice points at user-level guidance blocks. Claude window size is measured only where the footer runs | Follows the header filter, and says that Claude pressure is measured only where the footer runs, so **Whole account** shows input-only figures for other sessions. Split the context-tax finding into opted-in and not. Advice points at the project rule, skills and `ak audit context` |
 | `ak audit context` | Reads machine guidance files, top-level `mcpServers` in `~/.claude.json`, and the Superpowers plugin cache (`src/lib/context-audit-sources.mjs:216-275`) | Project rule target (about 1.5 KB budget), frontmatter of ak's own skills, local-scope, `.mcp.json` and project Codex MCP reported by scope, and project Superpowers evidence. Machine blocks show as an older installation |
 | Observability | Reads every transcript. Workspace store in `~/.config/agentic-kit` | Reads stay. Workspace store moves to the cache. `resolveProjectIdentity` gets an `optedIn` flag for a badge and filter (`src/lib/live/project-label.mjs:70-93`) |
-| Telemetry | Contract v1 fixes `selection.scope`. Inventory and maintenance come from user-level stores. Identity sits next to `kit.json` | Contract v2: `selection.scope` is `all\|opted-in`; optional per-session `akScope`; inventory and maintenance come from project state or read `unavailable`. Identity moves to the cache |
+| Telemetry | Contract v1 fixes `selection.scope`. Inventory and maintenance come from user-level stores. Identity sits next to `kit.json` | Contract v2: `selection.scope` is `account\|managed`, matching the dashboard filter; optional per-session `akScope`; inventory and maintenance come from project state or read `unavailable`. Identity moves to the cache |
 | Admin | npm download trends include automatic self-update installs | Annotate the release on the sparkline. The trend breaks there, because there are no more self-update installs and `npx … init` runs count instead |
 | Derived state | `usage-index.json`, `observability-workspaces.json`, `claude-context-windows/`, rate-limit files, `openrouter-activity.json` and host-setup evidence live under `~/.config` or `~/.local/state` | All move to the cache, with a one-release read fallback from the old paths. The statusline footer reads the Brain version from the cache, not `kit.json` |
 
@@ -788,7 +881,7 @@ dashboard work.
 | P3 | Codex project settings and the exception register; OpenCode project settings; write scopes for external adapters |
 | P4 | Brain knowledge-base-only mode, agent-browser, embeddings consent, Superpowers evidence. Upstream requests filed |
 | P5 | `sync`, `status` and `uninstall` on project state; team mode; the command removals and folds |
-| P6 | Dashboard: the project selector, read-only views, the `optedIn` census scope, the System, Maintenance and Usage changes, telemetry v2, and the Footprint card |
+| P6 | Dashboard: launch-anywhere with the three-level scope filter, the project index and `optedIn` census scope, status snapshots, the managed projects view and Managed files panel, read-only views, the System, Maintenance and Usage changes, telemetry v2, and the Footprint card |
 | P7 | Write gate enforcing; the machine-reconciliation code paths deleted |
 
 ## Trade-offs
@@ -801,8 +894,12 @@ dashboard work.
   reference-counted and reversible.
 - **Upgrading costs the user one manual sequence.** In exchange there is no migration code to
   maintain. The exit release makes that sequence complete, and the new version points to it.
-- **Usage scope differs by panel.** Spend and limits stay account-wide, while Context and Footprint
-  default to opted-in projects. Each panel says which scope it shows.
+- **One filter, with exceptions.** The dashboard defaults to All managed projects. Plan limits stay
+  account-wide whatever the filter, and a panel without data at the selected level says so instead
+  of showing an empty card.
+- **Snapshot freshness.** Aggregates are only as fresh as each project's last `ak status` or
+  `ak sync`. The dashboard shows each snapshot's age and offers an explicit refresh, rather than
+  re-collecting every project when it opens.
 - **Upstream behaviour ak can't control.** Ruflo's `~/.claude-flow/` and upstream installers may
   still write user-level state. Staging and sandboxed live checks contain that during ak's own runs.
 
