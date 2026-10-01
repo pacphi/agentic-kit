@@ -5,7 +5,8 @@
 **Direction accepted** (2026-10-01). The maintainer's decisions are recorded under
 [Decisions](#decisions). Nothing is implemented yet.
 
-The next step is P0: the exit release on the current line, then the removal of deja-vu.
+The next step is the three [prerequisites](#prerequisites), which land on `main` first. P0
+follows: the exit release on the current line, then the removal of deja-vu.
 
 This plan becomes an ADR that supersedes:
 
@@ -39,7 +40,7 @@ Judge by effect, not just by where a file sits. Only four kinds of write are all
 
 1. **Inside the project root.** By default this goes into a git-ignored layer.
 2. **A kit-owned cache that does nothing on its own.** It lives under
-   `$XDG_CACHE_HOME/agentic-kit/` (`%LOCALAPPDATA%` on Windows) and holds versioned tool
+   `$XDG_CACHE_HOME/agentic-kit/` (`%LOCALAPPDATA%\agentic-kit\cache` on Windows) and holds versioned tool
    installs, the Brain knowledge base, and derived data such as scan snapshots, usage indexes and
    evidence. Nothing in it is on `PATH`, registered with a host, or run unless an opted-in project
    points at it. Deleting it is always safe; the next command rebuilds what it needs.
@@ -131,10 +132,26 @@ Already project-scoped and kept:
 Two defects surfaced on the way:
 
 - **A dangling reference.** `claude/ruflo-reference.md` points at
-  `~/.config/ruflo/ruflo-reference-full.md`, which nothing deploys any more.
+  `~/.config/ruflo/ruflo-reference-full.md`, which nothing deploys any more. Fixed by
+  [Prerequisite A](2026-10-01-prereq-ruflo-reference-pointer.md).
 - **Forced initialization in the user's tree.** Project setup runs `ruflo init --full --force`
   directly in the project. That can drop the user's own MCP entries and regenerate their
   settings. [Staging](#upstream-initializers-are-staged-never-forced) fixes this.
+
+## Prerequisites
+
+The dashboard review found three defects on the current line. They are bugs today, whatever
+happens to this design, and later phases build on them being fixed. Each has its own write-up.
+They land on `main` before P0, so they also ship in the exit release and carry over to the new
+line.
+
+| | Write-up | What it fixes | Why the design needs it |
+| --- | --- | --- | --- |
+| A | [Remove the dangling full Ruflo reference pointer](2026-10-01-prereq-ruflo-reference-pointer.md) | Every Claude session on an installed machine is pointed at a file the kit never installs | The `ak-ruflo` skill later takes this content over; until then the current line should not mislead agents |
+| B | [Stop the Intelligence view writing into projects](2026-10-01-prereq-intelligence-no-project-writes.md) | Opening Overview → Intelligence appends `.claude-flow/health-history.json` in whichever project is selected, including the home folder | Establishes dashboard principle 2 (viewing writes only to the cache) and introduces `paths.cacheDir()`, the cache folder the whole design uses |
+| C | [Give hooks their real scope in the Maintenance inventory](2026-10-01-prereq-maintenance-hook-scope.md) | Every hook is labelled user-level, and hooks never reach the production Inventory at all | The Maintenance write precondition and the "Yours: ak reads, never changes" labelling both depend on true scope and project |
+
+None of them depends on the others, so they can land in any order or in parallel.
 
 ## Commands
 
@@ -556,10 +573,14 @@ in each area.
    - the cheap System read writes `daemon-sweep` evidence about every minute
      (`src/lib/footprint/runtime.mjs:97-99`, `src/lib/daemons.mjs:98-102`);
    - the Intelligence stream appends `.claude-flow/health-history.json` in **any** selected
-     project, including `$HOME` (`src/lib/live/intelligence-watch.mjs:203-207`).
+     project, including `$HOME` (`src/lib/live/intelligence-watch.mjs:203-207`). This one is
+     fixed first, by [Prerequisite B](2026-10-01-prereq-intelligence-no-project-writes.md).
 
    Afterwards, version checks and evidence go to the cache. Reads that only need fresh data pass
-   `record:false`. Health history goes to `.agentic-kit/state/`, and only for opted-in projects.
+   `record:false`. The Intelligence sparkline ring stays in the cache, keyed by project, for any
+   census project, because it is derived observation data (Prerequisite B puts it there).
+   `ak sync`'s own health history is a different record: it goes to `.agentic-kit/state/`, and
+   only for opted-in projects.
 3. **"Opted in" is a census scope.**
    - Add `optedIn` next to `learning` in `src/lib/project-census.mjs:59`. It is a project-level,
      identity-merged scope. Each row reads a capped `<repository root>/.agentic-kit/project.json`.
@@ -625,8 +646,10 @@ stay, and user placements are labelled "Yours: ak reads, never changes".
 - **Codex user file.** Changes only through the register's capability. The recursive
   `codex mcp-server` matcher (`src/lib/host-alignment.mjs:32`) becomes the register's repair matcher,
   and it must prove ak wrote or caused the entry.
-- **Fix the hook scope.** The projection hard-codes hooks as `'user'` even when they come from a
-  project (`src/lib/maintenance/management/projection.mjs:427,444`).
+- **Fix the hook scope first.** The projection hard-codes hooks as `'user'` even when they come
+  from a project (`src/lib/maintenance/management/projection.mjs:418,427,444`). No production
+  caller passes hooks into the inventory at all. [Prerequisite C](2026-10-01-prereq-maintenance-hook-scope.md)
+  fixes both before any of the gating above.
 - **Guidance lanes.** Recipes for ak-managed tools emit `ak sync --upgrade`, not `npm -g`. Third-party
   tools keep copy-only advice. The context audit targets the project rule, and detects Superpowers
   from project evidence.
@@ -758,7 +781,8 @@ dashboard work.
 
 | Phase | Lands |
 | --- | --- |
-| P0 | The exit release on the current line: a complete `uninstall --purge` and its regression test. Then, on the new line: remove deja-vu, the ADR, the write gate in report-only mode, and contract tests recording today's violations as the baseline |
+| Prerequisites | On `main`, in any order: [A](2026-10-01-prereq-ruflo-reference-pointer.md) (dangling reference pointer), [B](2026-10-01-prereq-intelligence-no-project-writes.md) (Intelligence writes into projects; adds `paths.cacheDir()`), [C](2026-10-01-prereq-maintenance-hook-scope.md) (hook scope and inventory wiring) |
+| P0 | The exit release, which includes the prerequisites on the current line: a complete `uninstall --purge` and its regression test. Then, on the new line: remove deja-vu, the ADR, the write gate in report-only mode, and contract tests recording today's violations as the baseline |
 | P1 | The `.agentic-kit/` layout and `ak init` in personal mode for Claude: rules, skills, `settings.local.json`, local-scope MCP launchers. Staged initializers that use existing setups. The legacy check. User-level guidance writes stop |
 | P2 | Tool cache and launchers. Global npm installs, self-update and host-CLI installs removed. Daemon handling scoped to the project |
 | P3 | Codex project settings and the exception register; OpenCode project settings; write scopes for external adapters |
