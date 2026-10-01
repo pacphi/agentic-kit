@@ -73,11 +73,11 @@ same items in v1.
 | Remediation plans (v2, EX, v1, WP/WD) | 58 | 14 | 27 | 11 | 6 |
 | Decision log for #237–#239 | 57 | 12 | 27 | 5 | 13 |
 | ADRs, shipped features, docs, proposals, issues | 108 | 6 | 61 | 37 | 4 |
-| Completion program, `fix/completion-m1`, the 2026-09-29 plans | 69 | 24 | 11 | 22 | 11 |
+| Completion program, `fix/completion-m1`, the 2026-09-29 plans | 69 | 24 | 12 | 22 | 11 |
 
 The entries overlap: the same item can appear in several sources. The combined, de-duplicated
-work lists are the next three sections. The counts are as the reviews found them; decisions G1
-and G6 later added three superseded entries in sections C and D. Section H also has 1 entry waiting on a decision (**G10**).
+work lists are the next three sections. The counts are as the reviews found them; decisions G1,
+G6 and G12 later added four superseded entries in sections C and D.
 
 ## Exit-critical work for `alpha.61`
 
@@ -155,10 +155,10 @@ These are de-duplicated across all sources. Each becomes an `alpha.61` card.
 | G6 | `ak x harvest` is missing from the command fold table | **Decided (A), 2026-10-01.** Removed in P5 (design Decision 11) |
 | G7 | The exit release would have deleted user data and self-updated into the new line | **Fixed** in the design at `505786e` |
 | G9 | The completion program (M1–M3) and `fix/completion-m1` planned the same work as this program and were never reviewed | Triaged in section H. M1 → `alpha.61`; M2 → v5.0.0 and v4.1.0; M3 → v5.0.0 or P6. Archived in the close-out |
-| G10 | CL D-20 (2026-09-29) pulled four #239 items out of v5; master plan Decision 3 (2026-10-01) puts #239 on v5.0.0 | **Needs a decision.** Recommended: Decision 3 supersedes D-20, and EV E1's fields shape the P6 `ak run` records card |
+| G10 | CL D-20 (2026-09-29) pulled four #239 items out of v5; master plan Decision 3 (2026-10-01) puts #239 on v5.0.0 | **Decided (A), 2026-10-01.** Decision 3 supersedes D-20: all of #239 stays on v5.0.0. The P6 `ak run` records card leaves room in its schema for identity and outcome fields, shaped by EV E1 |
 | G11 | Two documents claim to succeed the 246-row matrix: M1L (M1L:5-10) and this ledger | M1L is archived as the dated row map; this ledger decides dispositions |
-| G12 | The design's fold table has no row for `ak x aqe-store` (stray-store merge, used by exit job D-7) or `ak x skills` (skill maintenance plan) | **Needs a decision** before P5 |
-| G13 | M1L adds Windows and installed-target proof to #240 (M1L:62-65); the master plan and the registry entry on `main` close it on the 3.14.4 evidence | **Needs confirming.** Recommended: close on #240's own criteria (exit item 5); Windows proof moves to the beta.1 conformance card |
+| G12 | The design's fold table has no row for `ak x aqe-store` (stray-store merge, used by exit job D-7) or `ak x skills` (skill maintenance plan) | **Decided (A), 2026-10-01.** Both fold into `maintain` in P5: the store merge becomes an action with an undo receipt, and the skills plan a read-only finding (design fold table) |
+| G13 | M1L adds Windows and installed-target proof to #240 (M1L:62-65); the master plan and the registry entry on `main` close it on the 3.14.4 evidence | **Decided (A), 2026-10-01.** Close #240 in `alpha.61` on its own criteria (exit item 5). Windows and installed-target proof move to the beta.1 conformance card |
 | G14 | The unapproved upstream drafts (replies to agentic-qe #528, #532 and #535; the #801 source fix) promise work the redesign moves | v4.1.0 under Decision 3a; redraft before approval |
 | G15 | PRG P06 and SES assume ADR-0029 host admission, which P0 removes (PRG:272; SES:49, 94, 130); CL cites the retired `ak x verify` (CL:76, 327) | Rewritten in the v5 cards |
 | G8 | Items the v5 review sent to v4 (see the [v5 impact review](../proposals/v5-impact-of-v4.md#items-that-belong-on-the-v4-board)): D01 and D10 triage; an advised-commands test; "all healthy" while warnings are open; splitting `/api/system`; showing where limits were sampled; Codex per-profile configs; the not-OTLP wording; complexity limits for P6; the "[BLOCKED]" exit-code finding | Cards in the phases named there |
@@ -363,6 +363,7 @@ All are finished work. Sizes are line counts.
 | `ak host pick`, `off`, `reset-routes`, `status`; `ak x host` | `src/commands/x/host.mjs` (1214) | P5 | Superseded. Binding and provider flags become `init` choices; `host status` becomes a section of `status` (**G1**) |
 | `ak host adapters`, `ak x aqe-provider`, adapter routing in `ak run` | `x/host-adapters.mjs` (525), `x/host-adapters-grants.mjs` (450), `x/aqe-provider.mjs`, ten `src/lib/adapters/` modules, `execution/admitted.mjs` (372), `execution/adapters.mjs` (53), `hook-audit/providers/external.mjs` (114): about 5,700 lines | P0 | Withdrawn from v4; tagged `archive/v4-host-adapters` for v5 (**G1**) |
 | `ak x harvest` | `x/harvest.mjs` (97), `harvest.mjs` (143), the `harvest` live check | P5 | Superseded (**G6**) |
+| `ak x aqe-store`, `ak x skills plan` | `x/aqe-store.mjs`, `x/skills.mjs` | P5 | Superseded: folded into `maintain` (**G12**) |
 | `ak host check-connection` | `x/host-connection.mjs` (100) | P5 | Superseded by `status --refresh=live` |
 | `ak host align`, `ak x host-align` | `x/host-align.mjs` (71), `lib/host-alignment.mjs` (255), Maintenance provider (92) | P3, P5, P7 | Superseded; the `:32` matcher survives as the register repair matcher |
 | `ak heal hooks` | `commands/heal.mjs` (168), `lib/hook-remediation/` (about 1,760) | P5, P6 | Partly superseded: project actions move to `maintain` |
@@ -514,7 +515,7 @@ part of P10 about #109.
 | ID | Source | Item | State | Disposition |
 | --- | --- | --- | --- | --- |
 | Status gates | CL:10-15; EV:11-13 | Wait for the develop → main PR | That happened (#285) | **Superseded** |
-| D-20 | CL:114-125 | Move four #239 items out of v5 | Decided 2026-09-29 | **Decision pending** (**G10**) |
+| D-20 | CL:114-125 | Move four #239 items out of v5 | Decided 2026-09-29 | **Superseded** by master plan Decision 3 (**G10**) |
 | D-21, E3 | EV:84-106, 52-54 | Monitor only what `ak run` launches; monitor and alert store | Decided / planned | **Still needed** → v4.1.0 (#255) |
 | D-22, D-23, E1, E2 | EV:33-50, 108-138 | Cancellation states and fencing; fake executors; evidence contract; fault-injection worker | Decided / planned | **Still needed** → v5.0.0 (#239); E1's fields shape the P6 `ak run` records card |
 | D-24 | CL:132-145 | A hold with an expiry trial and a retry flag | Implemented, except "check the blocking condition first" | **Exit-critical** (#271) |
