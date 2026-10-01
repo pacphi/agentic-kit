@@ -200,6 +200,8 @@ These are removed or folded in:
 | `host pick --primary-host`, `--aqe-provider`, `--aqe-fallback`, `--provider` | Choices in `init`, saved to `local.json` |
 | `host adapters` (list, trust, revoke, conformance, grant, gate, status, revoke-grant), `x aqe-provider` | Retired from v4 and set aside for v5. See [Setting host adapters aside for v5](#setting-host-adapters-aside-for-v5) |
 | `x harvest`, and the `harvest` live check | Removed. The `ak-ruflo` skill documents `ruflo hooks post-task` and `ruflo memory distill run`. The `learning` live check stays |
+| `x aqe-store` | A `maintain` action with an undo receipt. It still refuses while any AQE writer is open, and it is never a `sync` step (decision B5-D2) |
+| `x skills plan` | A read-only finding in `maintain` |
 
 Commands the first draft proposed and this revision drops:
 
