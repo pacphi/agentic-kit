@@ -75,6 +75,16 @@ test('divergedRoutes reports a seeded entry whose model no longer matches the de
   assert.equal(out[0].defaultModel, DEFAULT_ROUTES.architecture.model, 'and the default it diverges from');
 });
 
+test('a machine seeded with GPT-6 Sol is reported as diverged from GPT-6.1 Sol, not rewritten', () => {
+  const policy = { testing: { host: 'codex', model: 'gpt-6-sol', provenance: 'seeded' } };
+  const out = divergedRoutes(policy);
+  assert.equal(out.length, 1);
+  assert.deepEqual([out[0].activity, out[0].model, out[0].defaultModel], ['testing', 'gpt-6-sol', 'gpt-6.1-sol']);
+  assert.equal(policy.testing.model, 'gpt-6-sol', 'detection is read-only');
+  assert.equal(MODEL_CATALOG.codex.find((m) => m.id === 'gpt-6-sol').tier, 'prior');
+  assert.equal(MODEL_CATALOG.codex.find((m) => m.tier === 'balanced').id, 'gpt-6.1-sol', 'first balanced entry drives host swaps');
+});
+
 test('divergedRoutes NEVER reports a provenance:user entry, even pinned to an older model', () => {
   // A deliberate pin is intent, not drift. Reporting it would nag the user
   // about a choice they made on purpose.

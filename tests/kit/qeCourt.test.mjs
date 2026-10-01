@@ -10,6 +10,11 @@ import {
 
 // vendorOf — ported from qe-court's referee.ts
 
+test('vendorOf classifies GPT-6.1 Sol and GPT-6 Sol as the gpt vendor', () => {
+  assert.equal(vendorOf('gpt-6.1-sol'), 'gpt');
+  assert.equal(vendorOf('gpt-6-sol'), 'gpt');
+});
+
 test('vendorOf classifies claude-family provider ids', () => {
   assert.equal(vendorOf('claude-code'), 'claude');
   assert.equal(vendorOf('claude'), 'claude');

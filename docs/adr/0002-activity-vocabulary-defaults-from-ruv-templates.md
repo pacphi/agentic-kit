@@ -2,8 +2,9 @@
 
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
-- **Updated:** 2026-09-23 — default models moved to the current generation: `claude-opus-5-5`, `gpt-6-sol`, `gpt-6-luna`
-- **Previous update:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-29 — Codex balanced default moved from `gpt-6-sol` to `gpt-6.1-sol` (`gpt-6-sol` kept as a prior-tier pin)
+- **Previous update:** 2026-09-23 — default models moved to the current generation: `claude-opus-5-5`, `gpt-6-sol`, `gpt-6-luna`
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-07-30
 - **Update note:** Preserved the activity vocabulary and moved its runtime ownership to the
   in-repository host-neutral runner.
@@ -50,10 +51,10 @@ model for execution) and are treated as **soft defaults** — see the "open ques
 
 Tier is the pairing key, not the model id: `MODEL_CATALOG` spells `reasoning`/`balanced`/`fast`
 identically on both hosts so primary-host mirroring can map a route to its counterpart's equivalent.
-As of 2026-09-23 execution routes to `gpt-6-sol` (balanced) and mechanical work to `gpt-6-luna`
+As of 2026-09-29 execution routes to `gpt-6.1-sol` (balanced) and mechanical work to `gpt-6-luna`
 (fast), and deep reasoning routes to `claude-opus-5-5`. These are agentic-kit default preferences,
 following each vendor's recommended starting model, not evidence that earlier models were withdrawn.
-Cross-host tiers pair by role and per-token price: `gpt-6-sol` ↔ `claude-sonnet-5`,
+Cross-host tiers pair by role and per-token price: `gpt-6.1-sol` ↔ `claude-sonnet-5-5`,
 `gpt-6-astra` ↔ `claude-opus-5-5` (reasoning; Astra also pairs with `claude-fable-5-1`),
 `gpt-6-luna` ↔ Haiku. See [ADR-0006](0006-primary-host-and-ambidextrous-mirroring.md) for tier parity. Withdrawn ids are handled by the retirement
 mechanism in [ADR-0003](0003-auto-seed-dual-host-provenance.md), not by editing this table alone.
