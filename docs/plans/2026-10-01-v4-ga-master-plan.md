@@ -1,0 +1,74 @@
+# agentic-kit v4 GA program: master plan
+
+## Status
+
+**Active: decisions in progress.** Decisions 1–3 are made, and an amendment to Decision 3 is
+proposed. Decisions 4–8 are open. No GitHub issues have been created yet. When the decisions are
+complete, this file gains the card inventory (scope, acceptance criteria, size, release and
+dependencies for every card) for review before any issue is created.
+
+## Boards
+
+There are three GitHub Projects owned by `pacphi`. Each is linked to `pacphi/agentic-kit` and
+has the same columns: Backlog, Ready, In progress, In review and Done.
+
+| Board | Routing label | Milestones | Card depth |
+| --- | --- | --- | --- |
+| `v4.0.0` | `v4.0.0` | `4.0.0-alpha.61`, `4.0.0-beta.1` … `4.0.0-beta.4`, `4.0.0-rc.1`, `4.0.0` | Unit cards: scope, acceptance criteria, size, release, dependencies |
+| `v4.1.0` | `v4.1.0` | `4.1.0` (split into prereleases when v4.1 planning starts) | Intake: problem, outcome, size range, dependencies |
+| `v5.0.0` | `v5.0.0` | `5.0.0` | Intake |
+
+## Standing rules
+
+- **`needs-review` is excluded.** An issue labelled `needs-review` is out of the program entirely:
+  - It is never put on a board, routed, linked or used as a source for cards.
+  - The label is re-checked before every GitHub write.
+  - Removing the label brings the issue back for triage.
+- **One issue, one board.** Each issue carries exactly one routing label. Work that spans releases
+  is split into linked issues: sub-issues for hierarchy, and **Blocked by** / **Blocks** lines for
+  dependencies, which work across boards.
+- **Epics stay within one major version.** An epic lives on the board where most of its work
+  lands.
+- **Each card is one branch and one PR.** The PR says `Closes #N`. Execution follows
+  [remediation v2's standing rules](2026-09-28-remediation-program-v2.md#5-standing-rules-carried-from-v1).
+
+## Decisions
+
+| # | Decision | Choice (2026-10-01) |
+| --- | --- | --- |
+| 1 | Release train and version names | **A.** `4.0.0-alpha.61` is the last alpha and the exit release; `next` stays on it. The project-scoped line ships as `4.0.0-beta.1` … `beta.4` on a new **`beta`** npm tag, so older installations never update into it on their own. Then `4.0.0-rc.N` on `next`, and `4.0.0` on `latest`. The release workflow change is a `beta.1` card. |
+| 2 | What `beta.1` covers | **B.** Claude Code and Codex, including the Codex exception register. OpenCode and add-on hosts follow in `beta.2`. Acceptance criterion on every beta release card until all hosts are back: the release notes say which hosts are supported, which are not yet, the release each is planned for, and that users who rely on them should stay on `alpha.61`. |
+| 3 | What each board holds | **A, across three boards.** **v4.0.0:** the project-scope redesign (prerequisites A–C, then P0–P7), remediation v2 close-out and its surviving leftovers, #271, #262, #257, #240 and #213 (waiting on upstream), the gpt-6.1-sol model registry update, and GA readiness. **v4.1.0:** #255, starting with a design card. **v5.0.0:** #239, plus intake cards for the `codex/v5-experience-research` branch, the dashboard taxonomy proposal, and the Claude artifacts and meeting sources in the [v5 planning sources](../proposals/v5-planning-sources.md) register. |
+| 3a | Upstream integration (proposed amendment, awaiting confirmation) | v4.1.0 gains an **Upstream integration** epic. Its standing card runs the upstream report at the start of v4.1 planning and turns each released fix, or each workaround ak still carries, into a unit card through the existing dispatch flow. A second card raises the tested version range and the default pins. First cards: agentic-qe#655 and #753 (released, workaround still carried), plus an intake card for the three threads with no recorded ak change. **The rule:** upstream work belongs to v4.1.0, unless a fix ships before `4.0.0-rc.1` **and** either removes a workaround the redesign is already touching or affects GA quality. Items still waiting at rc.1 move to v4.1.0. |
+| 4 | How the remaining remediation is sequenced against the redesign | Open |
+| 5 | How release, size and workstream are recorded | Open |
+| 6 | How dependencies are recorded | Open |
+| 7 | Review flow: master-plan PR first, or straight to issues | Open |
+| 8 | Branches and worktrees not visible from the cloud session | Open |
+
+## Release train (v4.0.0)
+
+| Release | Line | Contents |
+| --- | --- | --- |
+| `4.0.0-alpha.61` | Current line, final release | Remediation v2 close-out (V7; #240 can close with the AQE 3.14.4 evidence its registry entry names), prerequisites A–C, and the exit release with a complete `uninstall --purge` |
+| `4.0.0-beta.1` | Project-scoped | P0–P2 and the Codex part of P3 |
+| `4.0.0-beta.2` | | OpenCode and add-on hosts (the rest of P3), and P4 |
+| `4.0.0-beta.3` | | P5, and the first half of P6 |
+| `4.0.0-beta.4` | | The rest of P6, and P7. The design is closed |
+| `4.0.0-rc.N`, then `4.0.0` | | GA readiness and any remaining remediation |
+
+## Sources
+
+- [Project-scoped management only](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md), and its prerequisites:
+  - [A: the dangling Ruflo reference pointer](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-ruflo-reference-pointer.md);
+  - [B: Intelligence writes into projects](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-intelligence-no-project-writes.md);
+  - [C: hook scope in the Maintenance inventory](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-prereq-maintenance-hook-scope.md).
+
+  Until that design's pull request merges, these documents live on the branch
+  `docs/project-scope-only-design`.
+- [Remediation program v2](2026-09-28-remediation-program-v2.md), its
+  [develop execution plan](2026-09-28-remediation-v2-develop-execution.md), and the
+  [issues 237–239 decision log](2026-09-26-issues-237-238-239-verification-and-decisions.md).
+- The upstream registry (`src/lib/hook-audit/agentic-dependency-constraints.json`) and its report
+  (`node scripts/upstream-watch.mjs report`).
+- [v5 planning sources](../proposals/v5-planning-sources.md).
