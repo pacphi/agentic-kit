@@ -2,9 +2,13 @@
 
 ## Status
 
-**Prepared, unpublished**, 2026-09-30. M1-only follow-up to the
+**Issue filed; source fix private.** M1-only follow-up prepared 2026-09-30 to the
 [native receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md).
-The maintainer must approve the exact public text and change before publication.
+The maintainer approved Option A, issue publication only. Published
+[AQE #801](https://github.com/proffesor-for-testing/agentic-qe/issues/801) at
+2026-10-01T00:22:49Z; remote title/body were read back and match the exact draft below.
+Approved body SHA-256: `275cbffec6cdfd1f152bc89d8781163dec5d612c2d661a5d0a98cac8077a949d`.
+The maintainer must approve any subsequent public text or source change before publication.
 This document does not authorize a fork push, PR, additional dependency installation or dispatch.
 
 Bounded GitHub searches for patterns.rvf shutdown, MCP shutdown and resetSharedRvfAdapter

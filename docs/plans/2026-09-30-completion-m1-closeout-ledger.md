@@ -67,6 +67,10 @@ The [local 3.14.6 receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) now s
 qualified macOS real-MCP/packed-kit startup and preservation proof. Its full gate failed
 on omitted MCP shutdown cleanup; a private source proposal control passes, while normal
 rebuilt bundle and supported-platform proof remain unverified.
+The separately approved shutdown finding is now filed as
+[AQE #801](https://github.com/proffesor-for-testing/agentic-qe/issues/801), with exact
+title/body verification. Watch for a fixing commit and first published artifact, then
+repeat the qualified native proof; retain #240's own startup and installed-target gates.
 Brain #271 local recovery units are committed; full gates and delivery remain pending.
 Brain #335/#331 and Ruflo #213 strict upstream criteria retain separate owners and triggers.
 M2/M3 successors below do not block unrelated completed M1 rows.

@@ -33,6 +33,9 @@ Exact writer claims for the initial slice:
 - AQE conformance preparation: tests/live/aqe-live-lock-process.mjs, shared lock fixtures,
   MCP session/lock conformance and their kit tests; .github/workflows/aqe-m1-conformance.yml
   is a dispatch-only proposal. Root alone owns workflow integration; no dispatch authorized.
+- Upstream registration handoff: root claims only the new AQE #801 watch entry in
+  src/lib/hook-audit/agentic-dependency-constraints.json and its M1 publication receipt.
+  Registration preserves the separate shutdown finding and grants no retirement authority.
 - Windows experiment: tests/kit/aqe-store-merge-fixture.test.mjs; original assertions stay.
 - Brain contract: ADR-0061, troubleshooting and current CLI guidance.
 - Controller-only integration: this plan, completion program/ledger and contribution drafts.
@@ -160,6 +163,9 @@ macOS proof established busy startup/preservation but failed its shutdown-marker
 The [dated receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) distinguishes released
 artifact results from a passing matched source-module proposal control. No installed
 artifact was patched, and no release/platform-wide fix or issue closure is claimed.
+The subsequent Option A approved issue publication only: AQE #801 was posted at
+2026-10-01T00:22:49Z with exact title/body read-back. The source patch remains private;
+normal rebuilt-package and supported-platform proof stay open.
 
 Selected candidate: published agentic-qe 3.14.6, rechecked at npm on 2026-09-30.
 Expected tarball integrity:

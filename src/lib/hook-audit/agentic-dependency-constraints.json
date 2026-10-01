@@ -2775,6 +2775,24 @@
         { "date": "2026-09-29", "event": "closed", "note": "upstream completed via PR #783; merge commit 63d3deb dated 13:05:19 UTC, after npm 3.14.5 publication at 10:08:33 UTC" },
         { "date": "2026-09-29", "event": "reviewed", "note": "Source-bound released 3.14.5 disposable public init still churns settings on each of three same-option runs, with backup and default changes on run 2. Subsequent release conformance unverified; global 3.14.4 metadata unchanged. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
       ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#801",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/801",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "fix: MCP EOF shutdown leaves the shared patterns.rvf lock marker",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["M1 MCP shutdown conformance; separate from #240's original busy-startup criteria"], "files": ["tests/live/aqe-mcp-lock-conformance.test.mjs", "docs/plans/2026-09-30-aqe-mcp-shutdown-contribution.md"] },
+      "adjustment": "After a fixing commit lands in a published AQE artifact, rerun real packaged-MCP EOF shutdown and packed-kit startup/preservation conformance on supported platforms. Keep stock-release failure separate from passing source-module controls; do not manually unlink locks, patch installed artifacts, retire unrelated constraints or claim a universal managed floor.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-10-01", "event": "filed", "note": "Maintainer approved exact issue text only; published at 00:22:49Z and remote title/body matched SHA-256 275cbffec6cdfd1f152bc89d8781163dec5d612c2d661a5d0a98cac8077a949d. Source fix remains private." },
+        { "date": "2026-10-01", "event": "registered", "note": "Published 3.14.6 macOS real-MCP/packed-kit busy startup and patterns.rvf preservation passed; EOF leaves dead-PID marker. Explicit adapter close and proposed matched source-module control remove it; normal rebuilt bundle, other platforms and broad fleet readiness unverified. Receipt: docs/archive/2026-09-30-aqe-m1-mcp-lock-proof.md." }
+      ]
     }
   ]
 }
