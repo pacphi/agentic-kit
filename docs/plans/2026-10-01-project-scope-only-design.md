@@ -13,6 +13,9 @@ This plan becomes an ADR that supersedes:
 - ADR-0035 in full (deja-vu);
 - the user-level parts of ADR-0008, ADR-0015, ADR-0017 and ADR-0058 §3.
 
+ADR-0029 and ADR-0031 (external host adapters) are withdrawn from v4 and carried to v5, not
+superseded. See [Setting host adapters aside for v5](#setting-host-adapters-aside-for-v5).
+
 It also amends ADR-0025, ADR-0027 and ADR-0048 for the dashboard. It must land before the 4.0
 GA surface freeze (ADR-0020).
 
@@ -81,6 +84,8 @@ write is out of scope. In particular, ak never:
 | 7 | Moving existing users over | **No migration code.** One final release of the current line makes `ak uninstall --purge` remove everything, and the new version tells people to run it first. See [Upgrading from the user-level versions](#upgrading-from-the-user-level-versions). |
 | 8 | Command surface | **Kept trim.** Four lifecycle verbs: `init`, `status`, `sync`, `uninstall`. See [Commands](#commands). |
 | 9 | What the dashboard covers | **All work, every host, every place.** Observation covers every readable host and every folder where sessions ran, git repository or not. Management stays opt-in per project. The dashboard launches anywhere and defaults to all work. See [Dashboard and metrics](#dashboard-and-metrics). |
+| 10 | External host adapters and Hermes | **Retired from v4 and set aside for v5.** v5 plans full support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai, Desktop) and ChatGPT/Codex as first-class hosts, so a plug-in adapter contract doesn't carry forward. The work is tagged and registered, not discarded. See [Setting host adapters aside for v5](#setting-host-adapters-aside-for-v5). |
+| 11 | `ak x harvest` | **Removed.** Ruflo's own hooks already record task outcomes, and Ruflo's daemon schedules distillation. The `ak-ruflo` skill documents the two Ruflo commands for anyone who wants to run them by hand. |
 
 Smaller calls made in this revision (flag any you disagree with):
 
@@ -119,6 +124,8 @@ The inventory was taken at `0511d57`. Paths are relative to the repository.
 | AQE embeddings | Pulls `all-minilm` into Ollama's store and aliases it (`src/lib/aqe-embedding-lifecycle.mjs:54-69`) | Default `unmanaged`; the pull and the alias each need their own yes |
 | agent-browser | `~/.config/agentic-kit/agent-browser.json`; Chrome for Testing in `~/.agent-browser/` | Config in project state; a system Chrome first, otherwise the cache |
 | deja-vu | Global install, user-level host wiring, plaintext index | Removed |
+| External host adapters | An experimental contract behind `AK_EXPERIMENTAL_HOST_ADAPTERS=1`: trust, conformance and grants, adapter routing in `ak run`, and an AQE provider bridge. Consent and grants live in `~/.config/agentic-kit` (`src/lib/adapters/consent.mjs:14`, `src/lib/adapters/grants.mjs:55`) | Retired from v4; set aside for v5 |
+| Learning write | `ak x harvest`, opted in through `kit.json` (`src/commands/x/harvest.mjs`) | Removed; Ruflo's hooks record outcomes |
 | Daemons | `ruflo daemon stop --all` before upgrades; a machine-wide `ps` sweep and reap (`src/commands/sync.mjs:315`, `src/lib/daemons.mjs:213-303`) | Only the current project's daemon, by receipt |
 | npx cache | Pruned under `~/.npm/_npx` (`src/lib/npx.mjs:39-76`) | npm's cache is left alone |
 | Kit config and state | `~/.config/agentic-kit/kit.json` (machine choices **and** per-project receipts keyed by absolute root); `~/.local/state/agentic-kit/` | `.agentic-kit/` in each project, plus the cache for derived data |
@@ -189,6 +196,10 @@ These are removed or folded in:
 | `x ruflo-mcp` | The project launcher `.agentic-kit/bin/ruflo-mcp` |
 | `x daemon-gc` | `sync` (this project's daemon only) |
 | `x dashboard`, `x admin` | Removed as duplicates of the top-level commands |
+| `host`, `host status` | The Hosts section of `status` |
+| `host pick --primary-host`, `--aqe-provider`, `--aqe-fallback`, `--provider` | Choices in `init`, saved to `local.json` |
+| `host adapters` (list, trust, revoke, conformance, grant, gate, status, revoke-grant), `x aqe-provider` | Retired from v4 and set aside for v5. See [Setting host adapters aside for v5](#setting-host-adapters-aside-for-v5) |
+| `x harvest`, and the `harvest` live check | Removed. The `ak-ruflo` skill documents `ruflo hooks post-task` and `ruflo memory distill run`. The `learning` live check stays |
 
 Commands the first draft proposed and this revision drops:
 
@@ -322,8 +333,9 @@ the profile.
 .agentic-kit/
   project.json        intent: components, allowed hosts, exact tool versions, profile,
                       routing policy, governance. Committed in team mode, ignored otherwise.
-  local.json          personal choices: hosts you use, providers, budgets, adapter consent
-                      and grants, remembered approvals, project-tied dispositions. Always ignored.
+  local.json          personal choices: hosts you use, the primary host, AQE and Ruflo
+                      providers, budgets, remembered approvals, project-tied dispositions.
+                      Always ignored.
   bin/                generated launchers (ruflo-mcp, aqe-mcp, brain-mcp)
   guidance/           rendered guidance sources that host files import or reference
   state/              receipts, project evidence, health history, snapshots, maintenance
@@ -393,19 +405,52 @@ used in the last 30 days. Anything pruned is downloaded again when needed.
   register.
 - **OpenCode.** ADR-0017 rejected `opencode mcp add`, not the project layer. The project config is
   merged over the global one, so the wildcard approvals become project-only.
-- **External adapters (Hermes and later ones).**
-  - Today their lifecycle hooks run as arbitrary subprocesses with `HOME` and no write scope
-    (`src/lib/adapters/lifecycle-registry.mjs:269-299`). Adapters must declare their write roots.
-  - ak runs them with the project as the working directory and a sandboxed `HOME`. Conformance
-    fails any adapter that writes elsewhere.
-  - Registry validation rejects `scope: 'user'` trust changes for every host
-    (`src/lib/adapters/registries.mjs:206-266`).
+- **Every host.** Registry validation rejects `scope: 'user'` trust changes
+  (`src/lib/adapters/registries.mjs:206-266`).
+- **Hermes and other hosts.** v4 supports Claude Code, Codex and OpenCode. The external adapter
+  contract is set aside for v5, as the next section describes.
+
+### Setting host adapters aside for v5
+
+v5 plans full support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai, Desktop) and
+ChatGPT/Codex as first-class hosts. A plug-in adapter contract doesn't fit that. Porting it to
+project scope would mean moving its consent and grant stores out of `~/.config/agentic-kit`,
+giving adapters write scopes, and adding adapter session sources: work that v5 replaces. So v4
+retires the contract instead, and keeps the work for v5 to refactor.
+
+- **What goes, in P0 alongside deja-vu:**
+  - `ak host adapters` and the `AK_EXPERIMENTAL_HOST_ADAPTERS` flag;
+  - adapter routing in `ak run` (`src/lib/execution/adapters.mjs`, `src/lib/execution/admitted.mjs`);
+  - the hidden `ak x aqe-provider` bridge, through which Agentic QE could use an adapter as its
+    model provider;
+  - the admission, admitted, consent, conformance, grants, hook-runner, integrity, manifest, source
+    and AQE-provider modules in `src/lib/adapters/`, and the external hook-audit provider. With the
+    two command files that is about 5,700 lines in 16 files, plus about 15 test files;
+  - external entries in the lifecycle registry;
+  - `docs/hermes-host-adapter.md`, `docs/authoring-host-adapters.md` and
+    `docs/host-adapter-freeze-checklist.md`.
+- **What stays:** the host registry, bindings, lifecycle for the built-in hosts, and the other
+  `src/lib/adapters/` modules the built-in hosts use. The read-only Maintenance discovery source
+  for Hermes configuration also stays.
+- **How the work is kept:**
+  - An annotated tag, `archive/v4-host-adapters`, marks the last `main` commit that has the code,
+    before the removal lands. Release builds start only from `v*` tags, so the tag starts none.
+  - `docs/proposals/v5-planning-sources.md` lists every file, ADR, doc and test it covers.
+  - ADR-0029 and ADR-0031 are marked "Withdrawn from v4; carried to v5".
+  - A v5.0.0 card reimagines host support for the named hosts, starting from the tag.
+- **Existing users.** The exit release still carries the contract, and its purge cleans up after
+  it (see [The exit release](#the-exit-release)). Anyone who depends on the Hermes adapter can stay
+  on the exit release until v5. The community adapter's maintainer
+  (`adrianco/ak-adapter-hermes`) gets a heads-up, posted only after the maintainer approves the
+  text.
+- **Unsupported hosts are still seen.** The [coverage card](#every-host) lists Hermes, Gemini CLI
+  and other known hosts when they are installed, as "sessions not read; support planned for v5".
 
 ## Codex exception register
 
 Codex keeps some behaviour only in `~/.codex/config.toml`. Leaving it to the user would mean
 manual steps, so ak manages it as a declared exception. The register is a constant in code (for
-example `CODEX_USER_EXCEPTIONS`). It is never read from configuration, and adapters cannot extend
+example `CODEX_USER_EXCEPTIONS`). It is never read from configuration, and nothing can extend
 it.
 
 | Entry | Why it cannot be per project | When ak applies it |
@@ -594,8 +639,7 @@ the principles and per-area changes below.
    | **Managed projects** | Only places that have opted in | Chosen from the filter or the work view |
    | **One place** | Everything narrowed to one repository, folder or grouped place | Preselected when the dashboard is launched inside a known place; otherwise chosen from the work view or the filter |
 
-   The **host facet** (All hosts, Claude Code, Codex, OpenCode, Hermes and any other adapter) narrows
-   any level to one host.
+   The **host facet** (All hosts, Claude Code, Codex, OpenCode) narrows any level to one host.
 
    How the levels apply to panels:
    - Launching outside any project (in the home folder, say) is not a reduced mode. It opens on
@@ -682,23 +726,17 @@ and three additions close the gaps:
 1. **`ak run` records what it supervises.** Every worker run is recorded in the cache, on any host:
    host, working folder, start and end, outcome, and the model when known. A host ak drives is then
    counted even if it keeps no readable history of its own.
-2. **External adapters can declare a read-only session source.**
-   - **The gap today.** An external adapter can only name built-in observability sources
-     (`src/lib/adapters/registries.mjs:77-79`, `src/lib/adapters/manifest.mjs:145`). The Hermes
-     adapter declares `transcripts: false` and `observability: []`
-     (`docs/authoring-host-adapters.md:40-63`), so Hermes sessions are invisible.
-   - **The contract.** A declared parser hook, which ak runs with no network and no write access.
-     It emits normalized session records: host, session id, working folder, start and end, model,
-     and token counts when known.
-   - **Conformance** checks that the hook writes nothing and that its output is bounded and
-     well-formed.
-   - **Hermes** gets one if it keeps local session history (to verify).
-3. **A coverage card.** It lists every host ak knows: the three built-ins and every admitted
-   adapter. For each, it shows whether the host is installed, whether its sessions can be read, and
-   from what date. A host whose history ak cannot read shows as a visible gap, not a silent zero.
+2. **Hosts ak doesn't support yet are detected, not read.** A read-only check finds Hermes,
+   Gemini CLI and other known hosts by their install markers. It never opens their session
+   history. Reading them is v5 work (see
+   [Setting host adapters aside for v5](#setting-host-adapters-aside-for-v5)).
+3. **A coverage card.** It lists the three built-in hosts, plus every other known host that is
+   installed. For each, it shows whether the host is installed, whether its sessions can be read,
+   and from what date. A host whose history ak cannot read shows as a visible gap, not a silent
+   zero.
 
-Hosts ak has no reader or adapter for are outside what it can observe. The coverage card says so
-instead of guessing.
+Hosts ak has no reader for are outside what it can observe. The coverage card says so instead of
+guessing.
 
 ### Every place work happens
 
@@ -899,6 +937,7 @@ which this release closes:
 | Three edits an older ak made inside Ruflo's install before it kept receipts | Cannot be restored. `--purge --dry-run` says so for anyone keeping their own Ruflo, and points to reinstalling Ruflo |
 | The user-scope `claude-flow` MCP entry in `~/.claude.json` | Removed. It is also what the new version's single check looks for, so leaving it would block `ak init` |
 | deja-vu | Wiring removed. Package and index each confirmed separately, defaulting to keep |
+| External host adapters (experimental) | Each admitted adapter's own teardown runs. Its consent and grant files go with the rest of `~/.config/agentic-kit` |
 
 It ends by printing the new version's opt-in command. A sandboxed-`HOME` regression test proves it:
 run setup, then `uninstall --purge`, and `HOME` matches its pre-setup fingerprint apart from data the
@@ -924,9 +963,9 @@ npx @pacphi/agentic-kit@<exit-release> uninstall --purge
 # 2. Remove the old global runner, if you installed one
 npm uninstall -g @pacphi/agentic-kit
 
-# 3. Opt in each project you want
+# 3. Opt in each project you want (@beta during the betas, @latest after GA)
 cd my-project
-npx @pacphi/agentic-kit@next init
+npx @pacphi/agentic-kit@beta init
 ```
 
 To keep using deja-vu on its own, answer "keep" to its prompts in step 1, then run
@@ -978,12 +1017,12 @@ dashboard work.
 | Phase | Lands |
 | --- | --- |
 | Prerequisites | On `main`, in any order: [A](2026-10-01-prereq-ruflo-reference-pointer.md) (dangling reference pointer), [B](2026-10-01-prereq-intelligence-no-project-writes.md) (Intelligence writes into projects; adds `paths.cacheDir()`), [C](2026-10-01-prereq-maintenance-hook-scope.md) (hook scope and inventory wiring) |
-| P0 | The exit release, which includes the prerequisites on the current line: a complete `uninstall --purge` and its regression test. Then, on the new line: remove deja-vu, the ADR, the write gate in report-only mode, and contract tests recording today's violations as the baseline |
+| P0 | The exit release, which includes the prerequisites on the current line: a complete `uninstall --purge` and its regression test. Then, on the new line: remove deja-vu; tag and retire the external host-adapter contract; the ADR; the write gate in report-only mode; and contract tests recording today's violations as the baseline |
 | P1 | The `.agentic-kit/` layout and `ak init` in personal mode for Claude: rules, skills, `settings.local.json`, local-scope MCP launchers. Staged initializers that use existing setups. The legacy check. User-level guidance writes stop |
 | P2 | Tool cache and launchers. Global npm installs, self-update and host-CLI installs removed. Daemon handling scoped to the project |
-| P3 | Codex project settings and the exception register; OpenCode project settings; write scopes and read-only session sources for external adapters |
+| P3 | Codex project settings and the exception register; OpenCode project settings |
 | P4 | Brain knowledge-base-only mode, agent-browser, embeddings consent, Superpowers evidence. Upstream requests filed |
-| P5 | `sync`, `status` and `uninstall` on project state; team mode; the command removals and folds |
+| P5 | `sync`, `status` and `uninstall` on project state; team mode; the command removals and folds, including `ak x harvest` |
 | P6 | Dashboard: launch-anywhere with the scope filter and host facet, places of every kind, the host coverage card and `ak run` records, the project index and `optedIn` census scope, status snapshots, the work view and Managed files panel, read-only views, the System, Maintenance and Usage changes, telemetry v2, and the Footprint card |
 | P7 | Write gate enforcing; the machine-reconciliation code paths deleted |
 
@@ -1000,8 +1039,10 @@ dashboard work.
 - **One filter, with exceptions.** The dashboard defaults to All work. Plan limits stay
   account-wide whatever the filter. A panel that only exists for managed projects says so at All
   work, and a panel without data at the selected level says so instead of showing an empty card.
-- **Observation reach.** ak sees only hosts it has a reader or adapter for. The coverage card
-  shows any gap rather than hiding it.
+- **Observation reach.** In v4, ak reads sessions only from Claude Code, Codex and OpenCode. Other
+  hosts show on the coverage card as installed but not read, until v5.
+- **Hermes leaves v4.** Supervised Hermes workers stop on the new line. Anyone who needs them can
+  stay on the exit release until v5 supports Hermes directly.
 - **Snapshot freshness.** Aggregates are only as fresh as each project's last `ak status` or
   `ak sync`. The dashboard shows each snapshot's age and offers an explicit refresh, rather than
   re-collecting every project when it opens.
@@ -1017,3 +1058,5 @@ dashboard work.
 - Whether the Brain installer has, or will accept, a knowledge-base-only mode.
 - Whether `claude plugin` operations at `local` or `project` scope leave
   `~/.claude/plugins/installed_plugins.json` untouched.
+- Which install markers reliably identify Hermes, Gemini CLI and other known hosts for the
+  coverage card, without reading their session history.
