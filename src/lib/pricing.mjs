@@ -143,11 +143,12 @@ export const PRICES = {
   // field shows the knowledge cutoff instead). Standard rates, cached input 0.1x,
   // writes 1.25x, same >272K surcharge as Astra (unmodelled):
   // https://developers.openai.com/api/docs/models/gpt-6-sol and .../gpt-6-luna.
-  // GPT-6.1 Sol (a successor to GPT-6 Sol, on sale by 2026-09-29; OpenAI's pages
-  // carry no release-date field we could verify) lists the SAME $2/$10 and 1.25x
-  // writes, but reads cache at 0.05x ($0.10), half of GPT-6 Sol's 0.1x
+  // GPT-6.1 Sol (GPT-6 Sol's successor, released 2026-09-29 per OpenAI's API
+  // changelog) lists the SAME $2/$10 and 1.25x writes, but reads cache at 0.05x
+  // ($0.10), half of GPT-6 Sol's 0.1x
   // (https://developers.openai.com/api/docs/models/gpt-6.1-sol and
-  // .../api/docs/pricing, verified 2026-09-29). It needs its own key twice over:
+  // .../api/docs/pricing, verified 2026-09-29 and unchanged on 2026-10-01). It
+  // needs its own key twice over:
   // its id normalises to `gpt-6-1-sol`, which is not a token-boundary prefix of
   // `gpt-6-sol`, so it would otherwise price at FALLBACK_PRICE ($3/$15,
   // matched:false); and it must not inherit any 0.1x multiplier. >272K-token

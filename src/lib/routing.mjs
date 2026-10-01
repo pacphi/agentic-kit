@@ -124,15 +124,17 @@ export const MODEL_CATALOG = {
     // Astra is priced above Opus 5.5 ($10/$50 vs $4/$20); OpenAI positions it for
     // the hardest end-to-end work, and Anthropic reports Opus 5.5 at Fable 5.1
     // level, which is Astra's class. It also answers for claude's `flagship`.
-    // GPT-6.1 Sol succeeds GPT-6 Sol as the balanced preset: the same $2/$10
-    // per-token list price, cache reads at half the GPT-6 Sol rate ($0.10), and
-    // OpenAI-reported results near Astra on agentic coding and computer use
-    // (developers.openai.com/api/docs/models/gpt-6.1-sol, learn.chatgpt.com/docs/models,
-    // verified 2026-09-29). Those are OpenAI's own benchmarks, not ak-measured.
+    // GPT-6.1 Sol succeeds GPT-6 Sol as the balanced preset. It was released on
+    // 2026-09-29 (developers.openai.com/api/docs/changelog) at the same $2/$10
+    // per-token list price, with cache reads at half the GPT-6 Sol rate ($0.10)
+    // (developers.openai.com/api/docs/models/gpt-6.1-sol). Codex CLI 0.159.1 made
+    // it the bundled default the same day (learn.chatgpt.com/docs/changelog).
+    // OpenAI's system card addendum describes capabilities comparable to GPT-6
+    // Astra; that is OpenAI's claim, not ak-measured. Verified 2026-10-01.
     // It must stay FIRST among the balanced entries: swapHostModel() takes the
     // first tier match. It has no `none` reasoning effort (GPT-6 Sol does), and
     // OpenAI lists no withdrawal for GPT-6 Sol, so that stays a pinnable prior.
-    { id: 'gpt-6.1-sol', tier: 'balanced', note: 'workhorse preset for coding, testing and everyday work; near-Astra on OpenAI-reported agentic coding' },
+    { id: 'gpt-6.1-sol', tier: 'balanced', note: 'workhorse preset for coding, testing and everyday work; OpenAI reports capability comparable to GPT-6 Astra' },
     { id: 'gpt-6-sol', tier: 'prior', note: 'prior workhorse preset retained for user pins; compare measured per-task results before switching' },
     { id: 'gpt-6-luna', tier: 'fast', note: 'fast-tier preset for mechanical work, documentation and packaging' },
     { id: 'gpt-6-astra', tier: 'reasoning', pairs: ['flagship'], note: 'reasoning preset for the hardest end-to-end work; compare per-task cost before selection' },

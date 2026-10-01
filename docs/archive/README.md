@@ -91,7 +91,7 @@ reconfirmed by this metadata audit. The per-file inventory and limitations are r
 | File | Original location | What it was | Why it is historical |
 | --- | --- | --- | --- |
 | [2026-09-23-audit-model-pricing.md](2026-09-23-audit-model-pricing.md) | `docs/MODEL-PRICING-AUDIT.md` | Historical record | Frozen during the documentation reorganization. |
-| [2026-09-29-audit-gpt-6-1-sol.md](2026-09-29-audit-gpt-6-1-sol.md) | — (written directly to the archive) | GPT-6.1 Sol capability and price audit | Dated evidence; valid only for 2026-09-29 and the cited pages. |
+| [2026-09-29-audit-gpt-6-1-sol.md](2026-09-29-audit-gpt-6-1-sol.md) | — (written directly to the archive) | GPT-6.1 Sol capability and price audit | Dated evidence for 2026-09-29, with a 2026-10-01 re-verification addendum; valid only for the cited pages. |
 | [2026-08-08-artifact-about-tab-mock.html](2026-08-08-artifact-about-tab-mock.html) | `docs/assets/about-tab-mock.html` | Historical design mock | Historical design example; current UI is generated from source. |
 | [2026-08-08-artifact-system-tab-mock.html](2026-08-08-artifact-system-tab-mock.html) | `docs/assets/system-tab-mock.html` | Historical design mock | Historical design example; current UI is generated from source. |
 | [2026-09-09-audit-aqe-integration-repair.md](2026-09-09-audit-aqe-integration-repair.md) | `docs/audits/2026-09-09-aqe-integration-repair.md` | Dated audit | Findings are preserved as recorded; later reports may supersede them. |
