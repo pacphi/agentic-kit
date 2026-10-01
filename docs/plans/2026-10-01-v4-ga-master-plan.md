@@ -2,11 +2,11 @@
 
 ## Status
 
-**Active: decisions complete; card inventory ready for review.** Decisions 1–8 are made, with
-amendments 3a and 3b and the design gaps G1, G6, G10, G12 and G13. The
-[card inventory](#card-inventory) has 127 cards in `.github/program/v4-ga-cards.csv`. No GitHub
-issue has been created yet. Three PRs that carry finished work (#291, #292 and #293) are held as
-drafts until their cards exist.
+**Active: issues created.** Decisions 1–8 are made, with amendments 3a and 3b and the design gaps
+G1, G6, G10, G12 and G13. On 2026-10-01 the [card inventory](#card-inventory) became GitHub issues:
+the 13 epics are #294–#306, the 107 new cards are #307–#413, and seven cards adopted existing
+issues. The `issue` column of `.github/program/v4-ga-cards.csv` records each number. The held
+PRs #291, #292 and #293 get `Closes #N` once the dependency sync has run.
 
 ## Boards
 
@@ -138,6 +138,10 @@ than a comment because the dependency sync reads only issue bodies.
 | `GA-05` | #213 | — |
 | `C41-01` | #255 | — |
 | `V5-01` | #239 | — |
+
+**#239 is the one exception.** Another contributor opened it, so its text is left exactly as
+written. Its card, including its **Blocked by** line, is a comment, and the dependency sync does not
+see it. The first sync therefore adds 193 links, not 194.
 
 **How the issues are created, after this PR merges:**
 
