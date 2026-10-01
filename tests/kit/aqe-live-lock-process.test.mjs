@@ -14,6 +14,66 @@ function sandbox(root) {
   return spawnEnv(home);
 }
 
+test('scope caps retained child output and marks overflow as failed evidence', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-output-cap-'));
+  const scope = createProcessScope(new AbortController().signal, { maxOutputBytes: 256 });
+  try {
+    const run = scope.launch(process.execPath, ['-e', 'console.log("x".repeat(2048))'], { env: sandbox(root) });
+    const result = await scope.wait(run, 2000);
+    assert.equal(result.outputLimitExceeded, true);
+    assert.ok(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) <= 256);
+  } finally {
+    await scope.closeAll();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cooperative EOF closes a holder normally without relying on platform signals', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-eof-proof-'));
+  const scope = createProcessScope(new AbortController().signal);
+  try {
+    const run = scope.launch(process.execPath, ['-e',
+      'process.stdin.resume();process.stdin.on("end",()=>{console.log("released");process.exit(0)});console.log("ready")'],
+    { cwd: root, env: sandbox(root) }, { pipeInput: true });
+    const deadline = Date.now() + 2000;
+    while (!run.stdout.includes('ready') && !run.closed && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.match(run.stdout, /ready/);
+    assert.ok(run.child.stdin, 'holder must keep a call-owned input pipe open');
+    assert.equal(run.closed, false);
+    const result = await scope.stop(run, 2000, { closeInput: true });
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
+    assert.equal(result.stopMethod, 'stdin-eof');
+    assert.match(result.stdout, /released/);
+  } finally {
+    await scope.closeAll();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a holder ignoring EOF is reported as forcibly stopped', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-eof-refusal-'));
+  const scope = createProcessScope(new AbortController().signal);
+  try {
+    const run = scope.launch(process.execPath, ['-e',
+      'process.stdin.resume();setInterval(()=>{},1000);console.log("ready")'],
+    { cwd: root, env: sandbox(root) }, { pipeInput: true });
+    const deadline = Date.now() + 2000;
+    while (!run.stdout.includes('ready') && !run.closed && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.match(run.stdout, /ready/);
+    const result = await scope.stop(run, 25, { closeInput: true });
+    assert.equal(result.stopMethod, 'sigkill');
+    assert.equal(run.closed, true);
+  } finally {
+    await scope.closeAll();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('abort closes a call-owned child before its temporary root is removed', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-abort-proof-'));
   const controller = new AbortController();

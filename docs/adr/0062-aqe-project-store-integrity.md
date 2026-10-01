@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
+- **Updated:** 2026-09-30 — [private released 3.14.6 real-MCP lock proof](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) preserves patterns.rvf/sidecar bytes and confirms packed-kit busy startup on macOS. Full shutdown conformance fails on omitted shared-adapter cleanup; store merge, installed-target convergence and Windows remain unproved by this receipt
 - **Updated:** 2026-09-27 — adversarial review fixes: no pin in files git tracks (B5-M5), AQE's
   re-init value taken back, clean release; holder checks that time out refuse; nested repositories
   are not strays; stores fingerprinted at copy time; root checked before backup; applying receipt;

@@ -232,6 +232,7 @@ incident reports intentionally keep their original, now-dangling paths.
 | --- | --- | --- | --- |
 | [2026-09-29-plan-remediation-v2-closeout.md](2026-09-29-plan-remediation-v2-closeout.md) | `docs/plans/2026-09-29-remediation-v2-closeout.md` | V7 closeout execution plan | Implementation and local gates completed; later PR, timing and human-review receipts remain separate. |
 | [2026-09-29-aqe-released-artifact-receipt.md](2026-09-29-aqe-released-artifact-receipt.md) | Written here | AQE 3.14.5 released-artifact receipt (2026-09-29) | Dated capture; final main approval and operational gates remain. |
+| [2026-09-30-aqe-m1-mcp-lock-proof.md](2026-09-30-aqe-m1-mcp-lock-proof.md) | Written here | AQE 3.14.6 native M1 MCP lock proof | Busy startup and preservation observed; stock shutdown marker failure and bounded source controls retained. |
 | [2026-09-29-remediation-v2-integration-evidence.md](2026-09-29-remediation-v2-integration-evidence.md) | Written here | Remediation v2 integration evidence | Dated capture; final main approval and operational gates remain. |
 | [2026-09-29-remediation-v2-rulings.md](2026-09-29-remediation-v2-rulings.md) | Written here | Remediation v2 ordered execution rulings | Dated capture; final main approval and operational gates remain. |
 | [2026-09-29-dashboard-paused-time-evidence.md](2026-09-29-dashboard-paused-time-evidence.md) | `.superpowers/sdd/2026-09-28-dashboard-refresh/paused-time-report.md` | V3 paused-time consumer proof | Body preserved from its pre-integration capture; later integration evidence is separate. |
