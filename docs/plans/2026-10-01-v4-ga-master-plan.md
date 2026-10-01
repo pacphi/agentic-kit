@@ -3,7 +3,7 @@
 ## Status
 
 **Active: decisions in progress.** Decisions 1–3 are made, including the amendment to
-Decision 3, and Decisions 4–5. Decisions 6–8 are open. The supersession ledger that Decision 4 calls for is being compiled. No GitHub issues have been created yet. When the decisions are
+Decision 3, and Decisions 4–6. Decisions 7–8 are open. The supersession ledger that Decision 4 calls for is being compiled. No GitHub issues have been created yet. When the decisions are
 complete, this file gains the card inventory (scope, acceptance criteria, size, release and
 dependencies for every card) for review before any issue is created.
 
@@ -75,9 +75,111 @@ There is no `size:XL`: an XL card is split.
 | 3a | Upstream integration (amendment, confirmed) | v4.1.0 gains an **Upstream integration** epic. Its standing card runs the upstream report at the start of v4.1 planning and turns each released fix, or each workaround ak still carries, into a unit card through the existing dispatch flow. A second card raises the tested version range and the default pins. First cards: agentic-qe#655 and #753 (released, workaround still carried), plus an intake card for the three threads with no recorded ak change. **The rule:** upstream work belongs to v4.1.0, unless a fix ships before `4.0.0-rc.1` **and** either removes a workaround the redesign is already touching or affects GA quality. Items still waiting at rc.1 move to v4.1.0. |
 | 4 | How the remaining remediation is sequenced against the redesign | **A, triage and fold in.** Each remaining item gets one outcome: **exit-critical** (`alpha.61`: a v2 close-out step, prerequisites A–C, needed for a complete `uninstall --purge`, or a defect that would hurt users staying on `alpha.61`), **superseded** (closed, citing the design section or phase that removes the code; no fix written), **still needed** (the earliest beta whose phase touches that area), or **upstream-dependent** (Decision 3a). The calls are recorded in a supersession ledger. It lists everything planned and not started, started and not finished, or finished and made obsolete by the redesign, with citations, and is reviewed with the master plan. |
 | 5 | How release, size and workstream are recorded | **A.** Release is the issue's milestone. Size and workstream are labels. Kind is the GitHub issue type (Task, Bug or Feature). Phases come from the epic and sub-issue structure. The maintainer creates the labels and milestones once (see [Labels and milestones](#labels-and-milestones)); Claude sets them on every card. |
-| 6 | How dependencies are recorded | Open |
+| 6 | How dependencies are recorded | **C.** Every card body carries **Blocked by** and **Blocks** lines; Claude writes and maintains them, and they are the source of truth. `scripts/issue-dependencies.mjs` mirrors them into GitHub's native "Blocked by" links. The maintainer runs it when told to; see the [dependency sync runbook](#dependency-sync-runbook). No `blocked` label. |
 | 7 | Review flow: master-plan PR first, or straight to issues | Open |
 | 8 | Branches and worktrees not visible from the cloud session | Open |
+
+## Card format
+
+Every card's body has these sections, in this order:
+
+1. **Why:** links to the design section, decision-log entry or issue it comes from.
+2. **In scope**, then **Out of scope**.
+3. **Acceptance criteria:** testable checkboxes.
+4. **Dependencies:** exactly two lines, which the dependency script reads.
+
+   ```markdown
+   **Blocked by:** #12, #34
+   **Blocks:** #56
+   ```
+
+   Either line can read `None`. Only `#number` references in this repository count. An issue
+   labelled `needs-review` is never listed.
+5. **Plan:** release (the milestone), size and workstream (labels), and phase or epic (the parent
+   issue).
+6. **Verification:** the commands that prove it.
+
+## Dependency sync runbook
+
+`scripts/issue-dependencies.mjs` makes GitHub's native "Blocked by" links match the
+**Blocked by** lines in the cards. It reads open issues that carry a routing label (`v4.0.0`,
+`v4.1.0`, `v5.0.0`), skips anything labelled `needs-review`, and adds only missing links. A plain
+run is a dry run. It is safe to re-run at any time.
+
+**When to run it.** Claude tells you each time, with the number of links to expect:
+
+- after a batch of cards is created, starting with the first population of the boards;
+- after Claude adds, changes or removes **Blocked by** lines, for example at a release reconcile;
+- whenever you want to check: the dry run never changes anything.
+
+Do not add dependencies by hand in GitHub's UI. Ask Claude to add them to the card text instead,
+because the text is the source of truth, and `--prune` would remove hand-made links.
+
+**One-time preparation:**
+
+1. Check the GitHub CLI: `gh --version`. You need 2.48 or newer. If it's missing or older, run
+   `brew install gh` or `brew upgrade gh`.
+2. Check the sign-in: `gh auth status`. It must show `Logged in to github.com account pacphi`,
+   with `repo` among the token scopes. If not, run `gh auth login` (GitHub.com → HTTPS → log in
+   with a browser), or `gh auth refresh -s repo`.
+3. Check Node: `node --version`. You need 22.13 or newer.
+4. Have a local clone of `pacphi/agentic-kit`.
+
+**Each run:**
+
+1. Update the clone so the script is current:
+
+   ```bash
+   cd /path/to/agentic-kit && git switch main && git pull --ff-only
+   ```
+
+2. Preview, which changes nothing:
+
+   ```bash
+   node scripts/issue-dependencies.mjs
+   ```
+
+   Read the output:
+   - `would add #45 blocked by #12` lines are the links it will create;
+   - `kept …` lines are native links not in any card text;
+   - `ignored …` lines are self-references or `needs-review` issues;
+   - the last line is the summary, for example `14 to add, 0 to remove, 0 kept, 0 ignored`.
+
+   Check that the "to add" count matches what Claude told you to expect.
+3. Apply:
+
+   ```bash
+   node scripts/issue-dependencies.mjs --apply
+   ```
+
+   It prints `added #45 blocked by #12` for each link, pausing about a second between writes.
+4. Confirm: run step 2 again. The summary must read `0 to add, 0 to remove`.
+5. Spot-check one card on GitHub. The issue's sidebar shows the blocking issue under
+   **Relationships → Blocked by**, and the board card shows the *Blocked* marker.
+6. Paste the summary line from step 3 into the conversation, so Claude can record the run.
+
+**`--prune`** removes native links that no card lists any more. Use it only when Claude tells you
+a dependency was removed from a card's text:
+
+```bash
+node scripts/issue-dependencies.mjs --prune
+node scripts/issue-dependencies.mjs --apply --prune
+```
+
+The first command previews; the second applies.
+
+**If something goes wrong:**
+
+| Symptom | What to do |
+| --- | --- |
+| `gh: command not found` | Install the GitHub CLI (`brew install gh`), then do the one-time preparation |
+| `HTTP 401` or `HTTP 403` (not a rate limit) | `gh auth refresh -s repo`, then run again |
+| `secondary rate limit` | Wait five minutes, then run `--apply` again. It continues where it stopped |
+| `HTTP 422` on an add | The link already exists or would form a cycle. Run the preview again and paste the output to Claude |
+| `HTTP 404` on a dependencies call | Paste the output to Claude. The issue may have been transferred or deleted |
+| The run was interrupted | Run `--apply` again. It only adds what is still missing |
+
+Exit codes: `0` means success, `1` an error (the message says which), `2` a usage mistake.
 
 ## Release train (v4.0.0)
 
