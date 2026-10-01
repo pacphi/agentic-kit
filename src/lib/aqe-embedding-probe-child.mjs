@@ -18,6 +18,34 @@ function classify(error) {
   return 'embedding-probe-failed';
 }
 
+// Only RvfPatternStore proves AQE's RVF-backed pattern index (ADR-066) binds to
+// the configured embedder; the legacy in-memory HNSW PatternStore is a silent,
+// unrelated fallback AQE takes when the RVF native binding or its data
+// directory are unavailable, and must never be read as a pass (agentic-qe#754).
+async function patternIndexEvidence(cfg, spaceId, vectors) {
+  let store;
+  try {
+    const projectRoot = process.cwd();
+    fs.mkdirSync(path.join(projectRoot, '.agentic-qe'), { recursive: true });
+    process.env.AQE_PROJECT_ROOT = projectRoot;
+    const { createPatternStore } = await import(pathToFileURL(path.join(cfg.packageRoot, 'dist/learning/pattern-store.js')).href);
+    store = createPatternStore(null, { embeddingSpaceId: spaceId, embeddingDimension: 384 });
+    await store.initialize();
+    if (store.constructor?.name !== 'RvfPatternStore' || typeof store.getAdapter !== 'function' || !store.getAdapter()) {
+      return { status: 'failed', reason: 'rvf-pattern-index-not-bound' };
+    }
+    const created = await store.create({ patternType: 'test-template', name: 'ak-pattern-index-probe',
+      description: 'ak live check (agentic-qe#754): confirms the RVF pattern index binds to the configured embedder.',
+      template: { type: 'prompt', content: '{{probe}}', variables: [] }, embedding: vectors[0] });
+    if (!created.success) return { status: 'failed', reason: 'pattern-store-create-failed' };
+    const found = await store.search(vectors[1], { useVectorSearch: true, embeddingSpaceId: spaceId, limit: 5 });
+    if (!found.success) return { status: 'failed', reason: 'pattern-store-search-failed' };
+    const bound = found.value.some(r => r.pattern.id === created.value.id && r.matchType === 'vector');
+    return bound ? { status: 'passed' } : { status: 'failed', reason: 'pattern-not-retrieved' };
+  } catch { return { status: 'failed', reason: 'pattern-index-probe-failed' }; }
+  finally { try { await store?.dispose(); } catch {} }
+}
+
 async function corpusEvidence(cfg, activeSpaceId) {
   if (!cfg.corpusPath) return undefined;
   if (!fs.existsSync(cfg.corpusPath)) return { status: 'unavailable', reason: 'corpus-not-found' };
@@ -44,6 +72,7 @@ async function corpusEvidence(cfg, activeSpaceId) {
 let runtime;
 let cfg;
 let result;
+let vectors;
 try {
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
@@ -57,7 +86,7 @@ try {
     if (cfg.modelCacheDir) transformers.env.cacheDir = cfg.modelCacheDir;
   }
   runtime = await import(pathToFileURL(path.join(cfg.packageRoot, 'dist/learning/real-embeddings.js')).href);
-  const vectors = await runtime.computeBatchEmbeddings([
+  vectors = await runtime.computeBatchEmbeddings([
     'The cat is sitting on the mat.', 'A kitten rests on a rug.',
     'Database transactions require atomic commit guarantees.',
   ], { endpoint: cfg.backend === 'endpoint' ? cfg.endpoint : undefined,
@@ -77,4 +106,7 @@ try {
 } catch (error) { result = { status: 'failed', reason: classify(error) }; }
 finally { try { runtime?.resetInitialization(); } catch {} }
 if (cfg?.corpusPath) result.corpus = await corpusEvidence(cfg, result.spaceId ?? null);
+if (cfg?.verifyPatternIndex && result.status === 'passed') {
+  result.patternIndex = await patternIndexEvidence(cfg, result.spaceId, vectors);
+}
 process.stdout.write('AK_EMBEDDING_PROBE=' + JSON.stringify(result) + '\n');

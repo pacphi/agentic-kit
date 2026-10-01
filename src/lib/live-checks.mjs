@@ -297,11 +297,15 @@ export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.c
   const resolved = resolveAqeEmbedding(cfg);
   const embedding = aqeEmbeddingConfiguration({ env: resolved.env });
   const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
-  const live = await probe({ packageRoot: aqeRoot(), env: resolved.env, backend,
+  const live = await probe({ packageRoot: aqeRoot(), env: resolved.env, backend, verifyPatternIndex: true,
     ...(corpus ? { corpusPath: path.join(projectAqeDir(cwd), 'memory.db') } : {}) });
-  // A pass proves the embedder, not AQE's pattern index binding (agentic-qe#754).
-  if (live.status === 'passed') ok(`embedder verified: live embedding request passed; dimension=${live.dimension ?? 'unknown'}; AQE pattern index binding unverified (agentic-qe#754)`);
-  else fail(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  // A pass proves the embedder; the pattern index binding is its own round trip
+  // through AQE's real RVF pattern store (agentic-qe#754), never inferred from it.
+  if (live.status === 'passed') {
+    const binding = live.patternIndex?.status === 'passed'
+      ? 'AQE pattern index binding verified (agentic-qe#754)' : 'AQE pattern index binding unverified (agentic-qe#754)';
+    ok(`embedder verified: live embedding request passed; dimension=${live.dimension ?? 'unknown'}; ${binding}`);
+  } else fail(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
   return live;
 }
 

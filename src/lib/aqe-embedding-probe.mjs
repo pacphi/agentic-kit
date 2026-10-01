@@ -25,9 +25,9 @@ function validEvidence(evidence) {
     && Number.isFinite(evidence.relatedSimilarity) && Number.isFinite(evidence.unrelatedSimilarity);
 }
 
-/** @param {{packageRoot?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number,backend?:string,allowDownload?:boolean,corpusPath?:string,modelCacheDir?:string}} options */
+/** @param {{packageRoot?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number,backend?:string,allowDownload?:boolean,corpusPath?:string,modelCacheDir?:string,verifyPatternIndex?:boolean}} options */
 export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeoutMs = 30_000,
-  backend = 'endpoint', allowDownload = false, corpusPath, modelCacheDir }) {
+  backend = 'endpoint', allowDownload = false, corpusPath, modelCacheDir, verifyPatternIndex = false }) {
   const endpoint = env.AQE_EMBEDDER_ENDPOINT;
   if (backend === 'endpoint' && !endpoint) return { status: 'not-configured', reason: 'embedding-endpoint-not-configured' };
   if (!['endpoint', 'in-process'].includes(backend)) return { status: 'invalid-config', reason: 'unsupported-backend' };
@@ -45,7 +45,7 @@ export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeo
   try {
     const result = await run(process.execPath, ['--experimental-import-meta-resolve', CHILD], {
       input: JSON.stringify({ packageRoot, endpoint, token: env.AQE_EMBEDDER_TOKEN,
-        backend, allowDownload, corpusPath, modelCacheDir }),
+        backend, allowDownload, corpusPath, modelCacheDir, verifyPatternIndex }),
       cwd: temporary, timeout: timeoutMs, maxBuffer: 64 * 1024,
       env: { ...Object.fromEntries(Object.keys(process.env).map(key => [key, undefined])),
         PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: temporary,
@@ -62,6 +62,7 @@ export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeo
           relatedSimilarity: evidence.relatedSimilarity, unrelatedSimilarity: evidence.unrelatedSimilarity, elapsedMs };
       } else outcome = { status: 'failed', reason: REASONS.has(evidence.reason) ? evidence.reason : 'invalid-probe-result', elapsedMs };
       if (corpusPath && evidence.corpus) outcome.corpus = evidence.corpus;
+      if (verifyPatternIndex && evidence.patternIndex) outcome.patternIndex = evidence.patternIndex;
       return outcome;
     } catch { return { status: 'failed', reason: 'invalid-probe-result', elapsedMs }; }
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
