@@ -3,6 +3,7 @@
 - **Status:** Implemented
 - **Release target:** `4.0.0-alpha.53`
 - **Date:** 2026-09-20
+- **Updated:** 2026-09-30 — [private released 3.14.6 MCP/packed-kit proof](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) observes ordinary busy startup and unchanged patterns.rvf/sidecar bytes on macOS; semantic readiness remains separate and stock MCP shutdown leaves its dead-PID marker. No Windows, installed-target or universal-floor claim
 - **Updated:** 2026-09-20 — implemented explicit defaults, owned Claude/Codex/OpenCode projections and qualified runtime proof
 - **Updated:** 2026-09-23 — project projections are scoped to the enclosing git repository root; outside a repository only the user Codex target applies (earlier project-scope values are relinquished by receipt), and the `.mcp.json` AQE registration is required only in an AQE-initialized project
 - **Updated:** 2026-09-26 — incomplete local setup distinguishes an installed-but-stopped Ollama (refused loopback connection with `ollama` on PATH) from a missing one and asks the user to start it rather than install it (#237)
