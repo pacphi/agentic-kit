@@ -183,7 +183,9 @@ test('a malformed interpret() on the timeout path is bounded, not shipped raw (q
     async cleanup() {},
   };
   const results = await executeRunPlan({ workers: [worker('a', 'opencode')] }, {
-    adapters: { opencode: malformed }, timeoutMs: 5, clock,
+    // Wide enough that readiness, prepare and launch finish first on a slow runner, so the
+    // deadline can only land inside observe(), the branch under test.
+    adapters: { opencode: malformed }, timeoutMs: 100, clock,
   });
   assert.equal(results.length, 1);
   assert.equal(results[0].workerId, 'a');
