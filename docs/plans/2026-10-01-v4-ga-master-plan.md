@@ -2,8 +2,8 @@
 
 ## Status
 
-**Active: decisions in progress.** Decisions 1–3 are made, including the amendment to
-Decision 3, and Decisions 4–7. Decision 8 is open. The supersession ledger that Decision 4 calls for is being compiled. No GitHub issues have been created yet. When the decisions are
+**Active: decisions complete; inventory in progress.** Decisions 1–8 are made, including the
+amendment to Decision 3. The supersession ledger that Decision 4 calls for is being compiled. No GitHub issues have been created yet. When the decisions are
 complete, this file gains the card inventory (scope, acceptance criteria, size, release and
 dependencies for every card) for review before any issue is created.
 
@@ -77,7 +77,7 @@ There is no `size:XL`: an XL card is split.
 | 5 | How release, size and workstream are recorded | **A.** Release is the issue's milestone. Size and workstream are labels. Kind is the GitHub issue type (Task, Bug or Feature). Phases come from the epic and sub-issue structure. The maintainer creates the labels and milestones once (see [Labels and milestones](#labels-and-milestones)); Claude sets them on every card. |
 | 6 | How dependencies are recorded | **C.** Every card body carries **Blocked by** and **Blocks** lines; Claude writes and maintains them, and they are the source of truth. `scripts/issue-dependencies.mjs` mirrors them into GitHub's native "Blocked by" links. The maintainer runs it when told to; see the [dependency sync runbook](#dependency-sync-runbook). No `blocked` label. |
 | 7 | Review flow: master-plan PR first, or straight to issues | **A, plus a spreadsheet.** The full inventory is reviewed in one PR before any issue exists. The card data is one CSV, `.github/program/v4-ga-cards.csv`: one row per card, with a stable card ID, and dependencies written as card IDs until the issues exist. An XLSX with filterable column headers is generated from it for review; GitHub also renders the CSV as a searchable table. This master plan holds the narrative and per-release summaries; the supersession ledger and the v5 impact review sit beside it. GitHub has no native CSV or XLSX import for issues. After approval, Claude creates the issues from the CSV with its GitHub tools, fills an `issue` column, and rewrites card-ID dependencies as `#number` lines; then the maintainer runs the dependency sync. The design branch gets its own PR first. |
-| 8 | Branches and worktrees not visible from the cloud session | Open |
+| 8 | Branches and worktrees not visible from the cloud session | **C.** A Claude Code session on the maintainer's Mac, started with `claude remote-control` in the agentic-kit clone, runs read-only checks: worktrees, branches with unpushed commits, uncommitted work, and a search of local Claude Code and Codex session histories for v5 and mockup material. Its findings are pushed as `wip/local-inventory-2026-10-01` and recorded in the supersession ledger and the v5 sources register. Remediation v2's D-9 is the baseline: as of 2026-09-28 the only unmerged local branches were the two v5 branches, both on origin. |
 
 ## Card format
 
