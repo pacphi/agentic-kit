@@ -112,7 +112,43 @@ The v5 research's requirements come from two meetings. The links are private Gra
 `meeting-evidence.md` cites them by turn number. It also explains which turns are excluded, and
 why a demonstration report is not a reproduced defect.
 
-## 5. Gaps
+## 5. Host adapter work set aside from v4
+
+v4 retires the experimental external host-adapter contract and its Hermes integration
+([design Decision 10](https://github.com/pacphi/agentic-kit/blob/docs/project-scope-only-design/docs/plans/2026-10-01-project-scope-only-design.md#setting-host-adapters-aside-for-v5)).
+v5 plans first-class support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai, Desktop)
+and ChatGPT/Codex. It should start from this work rather than from nothing.
+
+**Where it is.** On `main` until the P0 removal lands. After that, at the annotated tag
+`archive/v4-host-adapters`, which marks the last `main` commit that has the code.
+
+| Part | Files |
+| --- | --- |
+| Commands | `src/commands/x/host-adapters.mjs`, `host-adapters-grants.mjs`, `aqe-provider.mjs` |
+| Admission, consent and grants | `src/lib/adapters/{admission,admitted,consent,grants,integrity,manifest,sources}.mjs` |
+| Conformance | `src/lib/adapters/conformance.mjs`; `docs/host-adapter-freeze-checklist.md` |
+| Execution | `src/lib/adapters/hook-runner.mjs`, `src/lib/adapters/aqe-provider.mjs`, `src/lib/execution/{admitted,adapters}.mjs` |
+| Hook audit | `src/lib/hook-audit/providers/external.mjs` |
+| Lifecycle | The external entries in `src/lib/adapters/lifecycle-registry.mjs` |
+| Tests | `tests/kit/adapter-*.test.mjs`, `admitted-grants`, `conformance-tiers`, `host-adapters-cli` and `live-adapters`; the removal card lists the exact set |
+| Decisions | ADR-0029 (extension point) and ADR-0031 (capability graduation), both "Withdrawn from v4; carried to v5" |
+| Guides | `docs/hermes-host-adapter.md`, `docs/authoring-host-adapters.md` |
+| Community adapter | [`adrianco/ak-adapter-hermes`](https://github.com/adrianco/ak-adapter-hermes), maintained outside this repository |
+
+**Worth carrying into v5:**
+
+- hash-pinned consent;
+- fail-closed admission;
+- conformance tiers earned by recorded evidence;
+- capabilities granted only on that evidence;
+- subprocess supervision with timeouts and usage reporting.
+
+**Not carried:**
+
+- the plug-in contract itself;
+- the consent and grant stores in `~/.config/agentic-kit`.
+
+## 6. Gaps
 
 These sources could not be reached on 2026-10-01:
 

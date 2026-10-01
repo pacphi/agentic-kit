@@ -57,7 +57,7 @@ There is no `size:XL`: an XL card is split.
 | --- | --- | --- | --- |
 | `4.0.0-alpha.61` | v4.0.0 | The exit release: v2 close-out, prerequisites A–C, a complete `uninstall --purge` | `next` |
 | `4.0.0-beta.1` | v4.0.0 | P0–P2 plus Codex; Claude Code and Codex only | `beta` |
-| `4.0.0-beta.2` | v4.0.0 | OpenCode and add-on hosts; P4 | `beta` |
+| `4.0.0-beta.2` | v4.0.0 | OpenCode; P4 | `beta` |
 | `4.0.0-beta.3` | v4.0.0 | P5; first half of P6 | `beta` |
 | `4.0.0-beta.4` | v4.0.0 | Rest of P6; P7; design closed | `beta` |
 | `4.0.0-rc.1` | v4.0.0 | GA readiness and remaining remediation | `next` |
@@ -70,7 +70,9 @@ There is no `size:XL`: an XL card is split.
 | # | Decision | Choice (2026-10-01) |
 | --- | --- | --- |
 | 1 | Release train and version names | **A.** `4.0.0-alpha.61` is the last alpha and the exit release; `next` stays on it. The project-scoped line ships as `4.0.0-beta.1` … `beta.4` on a new **`beta`** npm tag, so older installations never update into it on their own. Then `4.0.0-rc.N` on `next`, and `4.0.0` on `latest`. The release workflow change is a `beta.1` card. Because the release candidates later go on `next`, `alpha.61` never self-updates: its `ak sync` prints the upgrade steps instead (an `alpha.61` card). |
-| 2 | What `beta.1` covers | **B.** Claude Code and Codex, including the Codex exception register. OpenCode and add-on hosts follow in `beta.2`. Acceptance criterion on every beta release card until all hosts are back: the release notes say which hosts are supported, which are not yet, the release each is planned for, and that users who rely on them should stay on `alpha.61`. |
+| 2 | What `beta.1` covers | **B.** Claude Code and Codex, including the Codex exception register. OpenCode follows in `beta.2`. Hermes leaves v4 (see G1). Acceptance criterion on every beta release card: the release notes say which hosts are supported, which are not yet, the release each is planned for (Hermes: v5), and that users who rely on them should stay on `alpha.61`. |
+| G1 | Host adapters and Hermes (design gap) | **A.** The experimental external host-adapter contract and Hermes are retired in P0 (`beta.1`) and set aside for v5: tagged `archive/v4-host-adapters`, listed in the [v5 planning sources](../proposals/v5-planning-sources.md), ADR-0029 and ADR-0031 marked "Withdrawn from v4; carried to v5". v5 plans first-class support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai, Desktop) and ChatGPT/Codex, so the v5.0.0 board gets a host-support card that starts from the tag. Host binding and provider controls become `init` choices, and `ak host status` becomes the Hosts section of `ak status`. A heads-up to the community Hermes adapter's maintainer is posted only with approval of the text. |
+| G6 | `ak x harvest` (design gap) | **A.** Removed in P5 with the other `ak x` folds, with its `harvest` live check. The `ak-ruflo` skill documents the two Ruflo commands it ran. |
 | 3 | What each board holds | **A, across three boards.** **v4.0.0:** the project-scope redesign (prerequisites A–C, then P0–P7), remediation v2 close-out and its surviving leftovers, #271, #262, #257, #240 and #213 (waiting on upstream), the gpt-6.1-sol model registry update, and GA readiness. **v4.1.0:** #255, starting with a design card. **v5.0.0:** #239, plus intake cards for the `codex/v5-experience-research` branch, the dashboard taxonomy proposal, and the Claude artifacts and meeting sources in the [v5 planning sources](../proposals/v5-planning-sources.md) register. |
 | 3a | Upstream integration (amendment, confirmed) | v4.1.0 gains an **Upstream integration** epic. Its standing card runs the upstream report at the start of v4.1 planning and turns each released fix, or each workaround ak still carries, into a unit card through the existing dispatch flow. A second card raises the tested version range and the default pins. First cards: agentic-qe#655 and #753 (released, workaround still carried), plus an intake card for the three threads with no recorded ak change. **The rule:** upstream work belongs to v4.1.0, unless a fix ships before `4.0.0-rc.1` **and** either removes a workaround the redesign is already touching or affects GA quality. Items still waiting at rc.1 move to v4.1.0. |
 | 4 | How the remaining remediation is sequenced against the redesign | **A, triage and fold in.** Each remaining item gets one outcome: **exit-critical** (`alpha.61`: a v2 close-out step, prerequisites A–C, needed for a complete `uninstall --purge`, or a defect that would hurt users staying on `alpha.61`), **superseded** (closed, citing the design section or phase that removes the code; no fix written), **still needed** (the earliest beta whose phase touches that area), or **upstream-dependent** (Decision 3a). The calls are recorded in a supersession ledger. It lists everything planned and not started, started and not finished, or finished and made obsolete by the redesign, with citations, and is reviewed with the master plan. |
@@ -187,7 +189,7 @@ Exit codes: `0` means success, `1` an error (the message says which), `2` a usag
 | --- | --- | --- |
 | `4.0.0-alpha.61` | Current line, final release | Remediation v2 close-out (V7; #240 can close with the AQE 3.14.4 evidence its registry entry names), prerequisites A–C, and the exit release with a complete `uninstall --purge` |
 | `4.0.0-beta.1` | Project-scoped | P0–P2 and the Codex part of P3 |
-| `4.0.0-beta.2` | | OpenCode and add-on hosts (the rest of P3), and P4 |
+| `4.0.0-beta.2` | | OpenCode (the rest of P3), and P4 |
 | `4.0.0-beta.3` | | P5, and the first half of P6 |
 | `4.0.0-beta.4` | | The rest of P6, and P7. The design is closed |
 | `4.0.0-rc.N`, then `4.0.0` | | GA readiness and any remaining remediation |

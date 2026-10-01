@@ -96,9 +96,11 @@ The 11 conflicts come down to seven decisions, X1–X7 below.
    - the read-only session-source contract;
    - the managed share, the Footprint card, and telemetry v2.
 6. **Migration design is obsolete.** v4 ships no migration code (GA Decision 7).
-7. **Host scope narrows.** beta.1 and beta.2 cover Claude Code, Codex and OpenCode, plus the Hermes
-   adapter contract. v5 keeps the Gemini CLI and Grok Build adapters, and a decision on how deeply
-   ak manages hosts (X5).
+7. **Host scope narrows, and v5's host direction is set.** v4 covers Claude Code, Codex and
+   OpenCode. The Hermes adapter contract leaves v4 and is set aside for v5 (design Decision 10).
+   v5 aims at first-class support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai,
+   Desktop) and ChatGPT/Codex, with no plug-in adapter contract (X5). claude.ai and ChatGPT keep
+   their sessions in the cloud, so observing them needs an export or API access.
 
 ### Decisions v5 must make
 
@@ -108,7 +110,7 @@ The 11 conflicts come down to seven decisions, X1–X7 below.
 | X2 | The dashboard writing configuration and running lifecycle | B3.1; also F02, F03, B4.1, B5.1 | The dashboard is read-only for project files, and lifecycle commands are shown ready to copy. The command trim rules out `ak config` and `ak operations` | A product choice, not a breach of the rule: the rule would allow a requested write into an opted-in project, and "Refresh this project" is a precedent |
 | X3 | Fleet remote operations | B8.6; also campaigns, signed remote requests, cohorts, canaries | The unit of management is the opted-in project, and no machine-level configuration remains | The fleet observes and produces per-project plans. Plans run only as `ak sync` in projects opted in on that machine. Teams roll out by committing pins in `project.json` |
 | X4 | A lasting home for user data that spans places | B10.2; also T03, T04, O05, B9.1, B9.4, B8.5, C56.11 | Writes go only to opted-in project roots, or to a cache that is always safe to delete | Accept cache behaviour plus export and import; amend the rule with a fifth, declared, non-disposable kit data folder; or keep labels only for managed places, in `local.json` |
-| X5 | Equal management depth across six hosts | B7.5 | The Codex exception register is closed and coded, and adapters can't extend it; the registry rejects `scope: 'user'` | Observe-only plus the project-level subset; or one coded register per host, by ADR amendment. Hermes keeps configuration in profile homes, and Grok's project config covers only MCP, plugins and permissions |
+| X5 | Equal management depth across six hosts | B7.5 | The Codex exception register is closed and coded, and nothing can extend it; the registry rejects `scope: 'user'` | **Direction set (2026-10-01):** first-class support for every named host in v5, with no plug-in adapter contract. Still open: how each host's user-level settings fit the project-only rule (observe-only plus the project-level subset, or one coded register per host by ADR amendment). Hermes keeps configuration in profile homes, and Grok's project config covers only MCP, plugins and permissions |
 | X6 | ADR-0056's command surface | C56.8 | The command surface is trimmed, and `setup` becomes `init` | Put delivery opt-in into `init` and the reports into `usage`/`dashboard`; or argue for one new verb |
 | X7 | Telemetry contract version collision | C56.10 | ADR-0056 defines "schema version 2" with a `delivery` section, but v4 defines telemetry contract v2 for GA | Delivery becomes v3 after GA; v4's v2 reserves a `delivery: unavailable` section; or v2 defines an extension map for optional named sections. **This one touches v4 before the GA surface freeze** |
 
@@ -351,9 +353,9 @@ The report's M-01 to M-15 map onto these candidates:
 | ID | Item | Verdict and basis | Next |
 | --- | --- | --- | --- |
 | B7.1 (RPT:183-190; HO:30-33) | Claude Code, Codex and OpenCode | Delivered by v4, in beta.1 and beta.2 | None |
-| B7.2 (HO:32, 68) | Hermes | Reshaped. An external adapter, with declared write roots and a read-only session source | How deeply to manage it (X5) |
+| B7.2 (HO:32, 68) | Hermes | Reshaped. The v4 adapter contract is withdrawn and tagged for v5; v5 supports Hermes as a first-class host | How deeply to manage it (X5) |
 | B7.3 (HO:34, 70) | Gemini CLI | Reshaped. Its project settings fit the projection model; observation through an adapter | A v5 adapter |
-| B7.4 (HO:35, 71; ME:43) | Grok Build | Reshaped. Only the project subset (MCP, plugins, permissions); observation through an adapter | A v5 adapter; X5 for anything more |
+| B7.4 (HO:35, 71; ME:43) | Grok Build | Reshaped. Only the project subset (MCP, plugins, permissions); observation as a first-class v5 host | v5 host support; X5 for anything more |
 | B7.5 (RPT:198; HO:7, 50-62) | Equal quality across six hosts (Manage, Run, Observe, Update) | Conflicts (X5). The Update axis is obsoleted | X5 |
 | B7.6 (RPT:194; HO:37-48, 87) | Host versus provider versus payer; native authentication | Unaffected | #95's scope stays out |
 | B7.7 (RPT:196; HO:60-62) | A parity and conformance suite | Reshaped. Add v4's "HOME unchanged" and write-root conformance tests | Extend the tests |
@@ -396,7 +398,7 @@ The report's M-01 to M-15 map onto these candidates:
 | B10.6 (RPT:282) | Slice 1: shared foundations | Reshaped | Re-scope around place identity |
 | B10.7 (RPT:283) | Slice 2: the first complete experience | Reshaped. Launching without flags is delivered | Re-scope |
 | B10.8 (RPT:284) | Slice 3: managed care | Conflicts (X1). Fine-grained selection and pins are delivered | X1 |
-| B10.9 (RPT:285) | Slice 4: six hosts | Reshaped. v4 covers three hosts plus the Hermes contract | Gemini CLI and Grok Build |
+| B10.9 (RPT:285) | Slice 4: six hosts | Reshaped. v4 covers three hosts; Hermes moves to v5 | Gemini CLI and Grok Build |
 | B10.10 (RPT:286) | Slice 5: team visibility | Reshaped. Team mode is in v4 | A receiver after X3 and X4 |
 | B10.11 (RPT:287) | Slice 6: outcomes and financial evidence | Unaffected | Carry |
 | B10.12 (RPT:289) | The v5.0 commitment: slices 0 to 5 | Reshaped | Cut again |

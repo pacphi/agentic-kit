@@ -33,7 +33,7 @@ Each entry has a source citation, a state, the redesign's impact on it, and one 
 | --- | --- |
 | `alpha.61` | Prerequisites A–C and the exit release |
 | `beta.1` | P0–P2, plus the Codex part of P3 |
-| `beta.2` | The rest of P3 (OpenCode, add-on hosts), and P4 |
+| `beta.2` | The rest of P3 (OpenCode), and P4 |
 | `beta.3` | P5, and the first half of P6 |
 | `beta.4` | The rest of P6, and P7 |
 
@@ -60,7 +60,8 @@ same items in v1.
 | ADRs, shipped features, docs, proposals, issues | 108 | 6 | 61 | 37 | 4 |
 
 The entries overlap: the same item can appear in several sources. The combined, de-duplicated
-work lists are the next three sections.
+work lists are the next three sections. The counts are as the three reviews found them; decisions G1
+and G6 later added three superseded entries in sections C and D.
 
 ## Exit-critical work for `alpha.61`
 
@@ -114,12 +115,12 @@ These are de-duplicated across all sources. Each becomes an `alpha.61` card.
 
 | # | Gap | Resolution |
 | --- | --- | --- |
-| G1 | `ak host adapters` (trust, conformance, grants: `src/commands/x/host-adapters.mjs`, `host-adapters-grants.mjs`, about 975 lines), the host binding and `--aqe-provider` controls (ADR-0020 Decision 2), and `ak host status` have no home in the trimmed command surface | **Needs a decision**, raised in the master-plan PR |
+| G1 | `ak host adapters` (trust, conformance, grants: `src/commands/x/host-adapters.mjs`, `host-adapters-grants.mjs`, about 975 lines), the host binding and `--aqe-provider` controls (ADR-0020 Decision 2), and `ak host status` have no home in the trimmed command surface | **Decided (A), 2026-10-01.** The adapter contract and Hermes are retired in P0 and set aside for v5 (design Decision 10). Binding and provider controls become `init` choices; `ak host status` becomes the Hosts section of `ak status` |
 | G2 | `x dashboard` and `x admin` are not duplicates. The top-level `dashboard` and `admin` commands import the same modules (`bin/agentic-kit.mjs:30-31`) | Only the `ak x` aliases go; the modules stay |
 | G3 | The new ADR is **0064** (0056 and 0057 are reserved; 0059 is cited but has no file). About 20 more ADRs need notes beyond the three the design names (§C below), including ADR-0040 §5 (project trust) and ADR-0014 (dashboard writes) | One `ga-readiness` card per batch of ADR notes |
 | G4 | `docs/adr/README.md` lists ADR-0051 as "Accepted; implemented locally", but the ADR says "Implemented; published in 4.0.0-alpha.48" | Fixed in the first ADR card |
 | G5 | The companion registry is used only by deja-vu. MetaHarness (ADR-0022) does not use it | Delete it in P0 with deja-vu |
-| G6 | `ak x harvest` is missing from the command fold table | **Needs a decision**, raised in the master-plan PR |
+| G6 | `ak x harvest` is missing from the command fold table | **Decided (A), 2026-10-01.** Removed in P5 (design Decision 11) |
 | G7 | The exit release would have deleted user data and self-updated into the new line | **Fixed** in the design at `505786e` |
 | G8 | Items the v5 review sent to v4 (see the [v5 impact review](../proposals/v5-impact-of-v4.md#items-that-belong-on-the-v4-board)): D01 and D10 triage; an advised-commands test; "all healthy" while warnings are open; splitting `/api/system`; showing where limits were sampled; Codex per-profile configs; the not-OTLP wording; complexity limits for P6; the "[BLOCKED]" exit-code finding | Cards in the phases named there |
 
@@ -302,7 +303,8 @@ note; **Updated** takes an `Updated` line.
 | 0020 GA stable surfaces | Implemented | Decision 2's host namespace; the new command surface | P5 | **Updated** (new surface table) |
 | 0025, 0027, 0048 | Implemented / Accepted | Footprint, census scopes and place kinds, Maintenance write gate | P6 | **Updated** |
 | 0044, 0040, 0041 | Implemented / Accepted | User-scope providers become advice; 0040 §5 (project trust) reversed for the consented register line | P3, P5, P6 | **Updated** |
-| 0016, 0029, 0031, 0033 | Accepted / Implemented | Projections, adapter write roots and session sources, registry rejects user scope, register repair matcher | P1, P3, P6 | **Updated** |
+| 0016, 0033 | Accepted / Implemented | Projections, registry rejects user scope, register repair matcher | P1, P3 | **Updated** |
+| 0029, 0031 external host adapters | Accepted (experimental contract) | The whole contract leaves v4 (**G1**) | P0 | **Withdrawn from v4; carried to v5** |
 | 0053, 0063, 0062, 0026, 0024 | Implemented / Accepted | Host health from project state; evidence store location; merge archive location; About card; Intelligence ring in the cache | Prereq B, P0, P5, P6 | **Updated** |
 | 0006, 0009, 0032, 0042, 0050, 0054 | Amended / Implemented | Primary host in `project.json`; usage index and places; model store; context audit sources; place kinds; telemetry v2 | P5, P6 | **Updated** |
 | 0014 dashboard auth | Implemented | The dashboard gains Refresh and Forget writes (from the v5 review) | P6 | **Updated** |
@@ -319,7 +321,9 @@ All are finished work. Sizes are line counts.
 | --- | --- | --- | --- |
 | `ak setup` | `src/commands/setup.mjs` (1059), `src/lib/trust-manifest.mjs` (303) | P1, P5 | Superseded by `init` |
 | `ruflo init --full --force` in place | `setup.mjs` project path | P1 | Superseded by staged initializers |
-| `ak host pick`, `off`, `reset-routes`, `status`; `ak x host` | `src/commands/x/host.mjs` (1214) | P5 | Superseded; **G1** decides the fate of `host adapters` |
+| `ak host pick`, `off`, `reset-routes`, `status`; `ak x host` | `src/commands/x/host.mjs` (1214) | P5 | Superseded. Binding and provider flags become `init` choices; `host status` becomes a section of `status` (**G1**) |
+| `ak host adapters`, `ak x aqe-provider`, adapter routing in `ak run` | `x/host-adapters.mjs` (525), `x/host-adapters-grants.mjs` (450), `x/aqe-provider.mjs`, ten `src/lib/adapters/` modules, `execution/admitted.mjs` (372), `execution/adapters.mjs` (53), `hook-audit/providers/external.mjs` (114): about 5,700 lines | P0 | Withdrawn from v4; tagged `archive/v4-host-adapters` for v5 (**G1**) |
+| `ak x harvest` | `x/harvest.mjs` (97), `harvest.mjs` (143), the `harvest` live check | P5 | Superseded (**G6**) |
 | `ak host check-connection` | `x/host-connection.mjs` (100) | P5 | Superseded by `status --refresh=live` |
 | `ak host align`, `ak x host-align` | `x/host-align.mjs` (71), `lib/host-alignment.mjs` (255), Maintenance provider (92) | P3, P5, P7 | Superseded; the `:32` matcher survives as the register repair matcher |
 | `ak heal hooks` | `commands/heal.mjs` (168), `lib/hook-remediation/` (about 1,760) | P5, P6 | Partly superseded: project actions move to `maintain` |
@@ -352,7 +356,7 @@ All are finished work. Sizes are line counts.
 | Evidence and derived state under `~/.config` and `~/.local/state` | `evidence.mjs`, `live-check-evidence.mjs`, `model-inventory/store.mjs`, `footprint/snapshot.mjs` | P6 | Partly superseded (moved to the cache) |
 | Machine-level status sections | natives, user-memory, daemons, self, versions, statusline, codex-mcp, codex-plugins, codex-context | P5 | Partly superseded |
 | `ak uninstall` | `commands/uninstall.mjs` (663) | `alpha.61`, P5 | Exit-critical, then rewritten |
-| External adapter lifecycle hooks | `adapters/lifecycle-registry.mjs` (356) | P3 | Partly superseded |
+| External adapter lifecycle hooks | `adapters/lifecycle-registry.mjs` (356) | P0 | Superseded with the adapter contract; the built-in hosts' lifecycle stays |
 
 ## E. User docs
 
@@ -367,7 +371,7 @@ All are finished work. Sizes are line counts.
 | `docs/managed-tools.md`, `docs/host-support.md` | Invariants, companion lifecycle, install modes, external adapters | beta.1 and beta.2 |
 | `docs/providers.md`, `docs/hooks.md`, `docs/maintenance.md`, `docs/dashboard.md` | `ak host` and `heal hooks` references, discovery intent, what can act, local state, host badges | beta.3 and beta.4 |
 | `docs/troubleshooting.md`, `docs/aqe-embeddings.md`, `docs/telemetry.md`, `docs/devcontainers.md` | Self-update, deja-vu, global installs, daemons, Brain installer, embeddings default, telemetry contract, container setup | Each in its own phase |
-| `docs/authoring-host-adapters.md`, `docs/hermes-host-adapter.md` | `ak host` references, write roots, session sources | beta.2 and beta.4 |
+| `docs/authoring-host-adapters.md`, `docs/hermes-host-adapter.md`, `docs/host-adapter-freeze-checklist.md` | The whole documents | Removed at beta.1; kept at the `archive/v4-host-adapters` tag |
 | `docs/README.md`, `docs/maintainer.md`, `docs/usage-scorecard-metrics.md`, `docs/models.md` | Index entries, self-update notes, store paths | Each in its own phase |
 | `docs/ddd/*`, `docs/explainer.html` | Domain-model pages; the explainer's three-scopes section | Each in its own phase |
 
