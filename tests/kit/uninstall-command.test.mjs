@@ -684,10 +684,13 @@ test('without the older-ak marker, agentdb is never removed even when the user s
 
 test('--purge --yes keeps the deja-vu derived index; only an interactive yes deletes it', async () => {
   seedHome();
+  // deja-vu is only asked about when it is actually installed (a Kit ownership receipt exists)
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { dejaVu: { install: { version: '1.0.0' } } } } });
   const purged = [];
   const dejaIndex = (o) => ({ purgeDejaVuIndex: async (a) => { purged.push(Boolean(a.dryRun)); return { ok: true, changed: true }; }, ...o });
   await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([]), ...dejaIndex({}) } }));
   assert.deepEqual(purged, []);
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { dejaVu: { install: { version: '1.0.0' } } } } }); // the first purge removed kit.json
   await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([], { confirmKeep: true }), ...dejaIndex({}) } }));
   assert.deepEqual(purged, [false]);
 });
@@ -787,4 +790,14 @@ test('a plain uninstall never removes config, state, archives or memory', async 
   await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([], { brain: false }) } }));
   assert.equal(fs.existsSync(path.join(state, 'evidence', 'x.json')), true);
   assert.equal(fs.existsSync(path.join(memory, 'memory.db')), true);
+});
+
+test('--purge does not ask about the deja-vu index when deja-vu was never installed', async () => {
+  seedHome();
+  const calls = [];
+  const { result } = await captureLog(() => uninstall.run({
+    flags: { purge: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls, { confirmKeep: true, brain: false }) },
+  }));
+  assert.equal(result, 0);
+  assert.ok(!calls.some((c) => c[0] === 'confirmKeep' && /deja-vu/.test(c[1])));
 });
