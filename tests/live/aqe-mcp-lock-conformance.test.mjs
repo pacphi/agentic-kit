@@ -82,6 +82,8 @@ test('released MCP holder yields ordinary busy startup through the packed kit wi
   const owner = scope.launch(process.execPath, [mcp], options, { pipeInput: true });
   const session = createMcpSession(owner);
   let discovery;
+  let proofError;
+  let shutdownError;
   try {
     discovery = await session.discover();
     const deadline = Date.now() + 30_000;
@@ -91,11 +93,16 @@ test('released MCP holder yields ordinary busy startup through the packed kit wi
     assert.ok(before['patterns.rvf'] && before['patterns.rvf.lock']);
     preserved(owner, store, before);
     const status = await invoke(cli, ['status']);
+    t.diagnostic(JSON.stringify({ phase: 'aqe-status', exit: status.code,
+      output: (status.stdout + status.stderr).slice(-1800) }));
     assert.equal(status.timedOut, false);
     assert.equal(status.outputLimitExceeded, false);
     assert.equal(status.code, 0);
-    assert.match(status.stdout + status.stderr, /LockHeld|0x0300/);
+    // 3.14.6's live-owner sentinel deliberately returns before the generic
+    // adapter-error logger. Its warning, preserved ownership and successful
+    // SQLite fallback are the contract; no literal error token is required.
     assert.match(status.stdout + status.stderr, /locked by a live process/);
+    assert.match(status.stdout + status.stderr, /not breaking the lock; degrading to SQLite/);
     assert.doesNotMatch(status.stdout + status.stderr, /FsyncFailed|0x0303/);
     preserved(owner, store, before);
     const result = await invoke(kitBin, ['status', '--refresh=live', '--only', 'aqe', '--json'], 180_000);
@@ -115,21 +122,33 @@ test('released MCP holder yields ordinary busy startup through the packed kit wi
       platform: process.platform, node: process.version, sourceHashes, discovery,
       startup: 'busy', semanticCheck: checks[0].status, kitExit: result.code,
       rvfPreserved: true, before, after: snapshot(store) }));
+  } catch (error) {
+    proofError = error;
   } finally {
     session.dispose();
-    const closed = await scope.stop(owner, 10_000, { closeInput: true });
-    if (!t.signal.aborted) {
-      assert.equal(closed.stopMethod, 'stdin-eof');
-      assert.equal(closed.code, 0);
-      assert.equal(closed.signal, null);
-      assert.equal(closed.outputLimitExceeded, false);
-      assert.match(closed.stderr, /Shutting down \(stdin-(eof|close)\)/);
-      assert.match(closed.stderr, /\[MCP\] Server stopped/);
-      assert.doesNotMatch(closed.stderr, /Shutdown watchdog fired/);
-      assert.notEqual(lockOwner(store), owner.child.pid, 'closed MCP left its owned RVF lock');
-      console.log(JSON.stringify({ phase: 'shutdown', sourceHashes, aqeVersion: aqe.pkg.version,
-        platform: process.platform, stopMethod: closed.stopMethod, exit: closed.code,
-        signal: closed.signal, watchdog: false, ownedLockReleased: true }));
+    try {
+      const closed = await scope.stop(owner, 10_000, { closeInput: true });
+      if (!t.signal.aborted) {
+        assert.equal(closed.stopMethod, 'stdin-eof');
+        assert.equal(closed.code, 0);
+        assert.equal(closed.signal, null);
+        assert.equal(closed.outputLimitExceeded, false);
+        assert.match(closed.stderr, /Shutting down \(stdin-(eof|close)\)/);
+        assert.match(closed.stderr, /\[MCP\] Server stopped/);
+        assert.doesNotMatch(closed.stderr, /Shutdown watchdog fired/);
+        t.diagnostic(JSON.stringify({ phase: 'shutdown', exit: closed.code,
+          remainingLockPid: lockOwner(store), ownerPid: owner.child.pid,
+          stderr: closed.stderr.slice(-1800) }));
+        assert.equal(fs.existsSync(path.join(store, 'patterns.rvf.lock')), false, 'closed MCP left its owned RVF lock');
+        console.log(JSON.stringify({ phase: 'shutdown', sourceHashes, aqeVersion: aqe.pkg.version,
+          platform: process.platform, stopMethod: closed.stopMethod, exit: closed.code,
+          signal: closed.signal, watchdog: false, ownedLockReleased: true }));
+      }
+    } catch (error) {
+      shutdownError = error;
     }
   }
+  if (proofError && shutdownError) throw new AggregateError([proofError, shutdownError], 'startup proof and shutdown both failed');
+  if (proofError) throw proofError;
+  if (shutdownError) throw shutdownError;
 });
