@@ -589,3 +589,120 @@ test('a plain uninstall (no --purge) leaves provider env and Codex MCP alone', a
   await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo(calls) } }));
   assert.deepEqual(calls, []);
 });
+
+// #311 (exit release): --purge also removes what older ak installed outside kit.json's
+// receipts. Removals ak can prove it owns ask first (--yes approves them). Defaults that
+// KEEP data (deja-vu package/index, the standalone agentdb) need an interactive yes that
+// --yes does not give, so `--purge --yes` can never delete them.
+const ALIAS = 'Xenova/all-MiniLM-L6-v2';
+function fakeExtras(calls, o = {}) {
+  return {
+    confirm: async (q, yes) => { calls.push(['confirm', q]); return o.confirm ?? yes === true; },
+    confirmKeep: async (q) => { calls.push(['confirmKeep', q]); return o.confirmKeep ?? false; },
+    run: async (cmd, args) => {
+      calls.push(['run', cmd, ...args]);
+      if (cmd === 'ollama' && args[0] === 'list') {
+        return { code: 0, stdout: o.ollamaList ?? `NAME ID SIZE MODIFIED\nall-minilm:22m 1b226e2802db 45 MB 2 days ago\n${ALIAS}:latest 1b226e2802db 45 MB 2 days ago\n`, stderr: '' };
+      }
+      return { code: o.runCode ?? 0, stdout: '', stderr: '' };
+    },
+    have: async (cmd) => o.have?.includes(cmd) ?? true,
+    brainPresent: () => o.brain ?? true,
+    disableNightly: async () => { calls.push(['nightly']); return { ok: true, detail: 'nightly self-updater disabled' }; },
+    agentdbDir: () => o.agentdbDir ?? null,
+  };
+}
+const purgeWith = (extras, flags = {}) => captureLog(() => uninstall.run({
+  flags: { purge: true, ...flags }, deps: { undo: fakeUndo([]), extras },
+}));
+const ran = (calls) => calls.filter((c) => c[0] === 'run').map((c) => c.slice(1).join(' '));
+
+test('--purge removes the Brain plugin and nightly LaunchAgent after a confirmation, and keeps the knowledge base', async () => {
+  seedHome();
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls), { yes: true });
+  assert.ok(ran(calls).includes('claude plugin uninstall ruvnet-brain@ruvnet-brain'));
+  assert.ok(calls.some((c) => c[0] === 'nightly'));
+  assert.ok(!ran(calls).some((c) => /ruvnet-brain.*--uninstall|rm -rf/.test(c)), 'the knowledge base is never removed');
+  assert.match(out, /knowledge base.*kept/i);
+});
+
+test('declining the Brain confirmation removes nothing', async () => {
+  seedHome();
+  const calls = [];
+  await purgeWith(fakeExtras(calls, { confirm: false }));
+  assert.deepEqual(ran(calls).filter((c) => c.includes('plugin')), []);
+  assert.ok(!calls.some((c) => c[0] === 'nightly'));
+});
+
+test('--purge removes the Ollama alias only when it is a copy of the model ak pulled', async () => {
+  seedHome();
+  const calls = [];
+  await purgeWith(fakeExtras(calls), { yes: true });
+  assert.ok(ran(calls).includes(`ollama rm ${ALIAS}`));
+});
+
+test('a foreign Ollama model under the alias name is left alone', async () => {
+  seedHome();
+  const calls = [];
+  const ollamaList = `NAME ID SIZE MODIFIED\nall-minilm:22m 1b226e2802db 45 MB 2 days ago\n${ALIAS}:latest ffffffffffff 90 MB 1 day ago\n`;
+  const { out } = await purgeWith(fakeExtras(calls, { ollamaList }), { yes: true });
+  assert.ok(!ran(calls).some((c) => c.startsWith('ollama rm')));
+  assert.match(out, /not a copy ak made/i);
+});
+
+test('--purge removes a standalone agentdb only with the older-ak marker AND an interactive yes', async () => {
+  seedHome();
+  const agentdbDir = path.join(HOME, 'npm-global', 'agentdb');
+  fs.mkdirSync(agentdbDir, { recursive: true });
+  writeKitConfig(HOME, { aqe: true, agentdb: { enabled: true } });
+  const calls = [];
+  await purgeWith(fakeExtras(calls, { agentdbDir, confirmKeep: true }), { yes: true });
+  assert.ok(ran(calls).includes('npm uninstall -g agentdb'));
+});
+
+test('--purge --yes alone never removes a standalone agentdb; it prints the command', async () => {
+  seedHome();
+  const agentdbDir = path.join(HOME, 'npm-global', 'agentdb');
+  fs.mkdirSync(agentdbDir, { recursive: true });
+  writeKitConfig(HOME, { aqe: true, agentdb: { enabled: true } });
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls, { agentdbDir }), { yes: true });
+  assert.ok(!ran(calls).includes('npm uninstall -g agentdb'));
+  assert.match(out, /npm uninstall -g agentdb/);
+});
+
+test('without the older-ak marker, agentdb is never removed even when the user says yes', async () => {
+  seedHome();
+  const agentdbDir = path.join(HOME, 'npm-global', 'agentdb');
+  fs.mkdirSync(agentdbDir, { recursive: true });
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls, { agentdbDir, confirmKeep: true }), { yes: true });
+  assert.ok(!ran(calls).includes('npm uninstall -g agentdb'));
+  assert.match(out, /npm uninstall -g agentdb/);
+});
+
+test('--purge --yes keeps the deja-vu derived index; only an interactive yes deletes it', async () => {
+  seedHome();
+  const purged = [];
+  const dejaIndex = (o) => ({ purgeDejaVuIndex: async (a) => { purged.push(Boolean(a.dryRun)); return { ok: true, changed: true }; }, ...o });
+  await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([]), ...dejaIndex({}) } }));
+  assert.deepEqual(purged, []);
+  await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([], { confirmKeep: true }), ...dejaIndex({}) } }));
+  assert.deepEqual(purged, [false]);
+});
+
+test('--purge --dry-run lists the extra removals and runs none of them', async () => {
+  seedHome();
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls), { yes: true, 'dry-run': true });
+  assert.deepEqual(ran(calls).filter((c) => !c.startsWith('ollama list')), []);
+  for (const label of ['Brain plugin', 'Ollama alias', 'agentdb']) assert.match(out, new RegExp(`\\[dry-run\\].*${label}`));
+});
+
+test('a plain uninstall touches none of the extras', async () => {
+  seedHome();
+  const calls = [];
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls) } }));
+  assert.deepEqual(ran(calls), []);
+});
