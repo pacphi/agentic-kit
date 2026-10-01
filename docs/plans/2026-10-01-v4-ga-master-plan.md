@@ -2,10 +2,11 @@
 
 ## Status
 
-**Active: decisions complete; inventory in progress.** Decisions 1–8 are made, including the
-amendment to Decision 3. The supersession ledger that Decision 4 calls for is being compiled. No GitHub issues have been created yet. When the decisions are
-complete, this file gains the card inventory (scope, acceptance criteria, size, release and
-dependencies for every card) for review before any issue is created.
+**Active: decisions complete; card inventory ready for review.** Decisions 1–8 are made, with
+amendments 3a and 3b and the design gaps G1, G6, G10, G12 and G13. The
+[card inventory](#card-inventory) has 127 cards in `.github/program/v4-ga-cards.csv`. No GitHub
+issue has been created yet. Three PRs that carry finished work (#291, #292 and #293) are held as
+drafts until their cards exist.
 
 ## Boards
 
@@ -81,6 +82,73 @@ There is no `size:XL`: an XL card is split.
 | 6 | How dependencies are recorded | **C.** Every card body carries **Blocked by** and **Blocks** lines; Claude writes and maintains them, and they are the source of truth. `scripts/issue-dependencies.mjs` mirrors them into GitHub's native "Blocked by" links. The maintainer runs it when told to; see the [dependency sync runbook](#dependency-sync-runbook). No `blocked` label. |
 | 7 | Review flow: master-plan PR first, or straight to issues | **A, plus a spreadsheet.** The full inventory is reviewed in one PR before any issue exists. The card data is one CSV, `.github/program/v4-ga-cards.csv`: one row per card, with a stable card ID, and dependencies written as card IDs until the issues exist. An XLSX with filterable column headers is generated from it for review; GitHub also renders the CSV as a searchable table. This master plan holds the narrative and per-release summaries; the supersession ledger and the v5 impact review sit beside it. GitHub has no native CSV or XLSX import for issues. After approval, Claude creates the issues from the CSV with its GitHub tools, fills an `issue` column, and rewrites card-ID dependencies as `#number` lines; then the maintainer runs the dependency sync. The design branch gets its own PR first. |
 | 8 | Branches and worktrees not visible from the cloud session | **C.** A Claude Code session on the maintainer's Mac, started with `claude remote-control` in the agentic-kit clone, runs read-only checks: worktrees, branches with unpushed commits, uncommitted work, and a search of local Claude Code and Codex session histories for v5 and mockup material. Its findings are pushed as `wip/local-inventory-2026-10-01` and recorded in the supersession ledger and the v5 sources register. Remediation v2's D-9 is the baseline: as of 2026-09-28 the only unmerged local branches were the two v5 branches, both on origin. |
+
+## Card inventory
+
+The cards live in [`.github/program/v4-ga-cards.csv`](../../.github/program/v4-ga-cards.csv), one
+row per card. Its columns:
+
+- `id`: a stable card ID, such as `A61-04` or `P1-02`. Epics start with `EP-`.
+- `title`: the issue title, written to the issue-title rule in `AGENTS.md`.
+- `board`, `milestone` and `type`: Decision 5.
+- `parent`: the epic card.
+- `size` and `workstream`: labels.
+- `existing_issue` and `linked_pr`: set when the card adopts an issue or a PR that already exists.
+- `why`, `in_scope`, `out_of_scope`, `acceptance_criteria` and `verification`: the card body.
+- `blocked_by` and `blocks`: card IDs. `blocks` is derived from `blocked_by`.
+- `sources`: where the card comes from.
+- `issue`: filled in when the issue exists.
+
+Every card passed these checks before the CSV was written:
+
+- IDs are unique;
+- every dependency exists;
+- there are no cycles;
+- no v4.0.0 card is blocked by a card in a later release;
+- every parent is on the same board.
+
+An XLSX with filterable headers and a Summary sheet is generated from the CSV for review. It is not
+committed.
+
+| Release | Cards | What it delivers | Gate |
+| --- | --- | --- | --- |
+| `4.0.0-alpha.61` | 17 | Prerequisites A–C (`A61-01`…`03`); the #271, #240 and #262 work (`A61-04`…`06`); a complete purge with its sandboxed-`HOME` proof (`A61-07`…`10`); no self-update (`A61-11`); GPT-6.1 Sol (`A61-12`); v2 close-out and archiving (`A61-13`, `A61-14`); the maintainer's machine jobs (`A61-15`); triage of D01, D10 and the "[BLOCKED]" finding (`A61-16`); the release (`A61-17`) | `A61-17` blocks all P0 work |
+| `4.0.0-beta.1` | 27 | P0 (deja-vu removed, the adapter tag and retirement, the Hermes heads-up, ADR-0064, the gates in report-only mode, contract tests, the `beta` tag), P1 (layout, `init`, Claude projections, local-scope MCP, staged initializers, the legacy check, no user guidance, the guides), P2 (tool cache, launchers, no global installs, project daemons, exact pins), and the Codex part of P3 with the AQE conformance rewrite | Claude Code and Codex only |
+| `4.0.0-beta.2` | 10 | OpenCode, the Codex per-profile check, P4 (Brain without user mode, agent-browser, embeddings consent, Superpowers evidence, upstream requests), ADR notes for P0–P3 | OpenCode returns |
+| `4.0.0-beta.3` | 17 | P5 (`sync`, `sync --all`, `status`, `uninstall`, team mode, the command folds including `aqe-store` and `skills`, the advised-commands test, guides) and the first half of P6 (launch anywhere, project index, places, snapshots, coverage card and `ak run` records, Cowork, the X7 decision) | `P6-07` decides X7 before telemetry v2 |
+| `4.0.0-beta.4` | 12 | The rest of P6 (work view, project-state panels, System, Maintenance, Usage, telemetry v2, Footprint proof, docs and complexity limits), P7 (enforcement, deleting the machine-reconciliation code), ADR notes for P4–P7 | The design is closed |
+| `4.0.0-rc.1` | 5 | Surface freeze, the full docs pass, #213, upgrade acceptance on real machines, the release | Upstream items still waiting move to v4.1.0 |
+| `4.0.0` | 1 | General availability on `latest` | — |
+| `4.1.0` | 13 | The upstream integration epic (report and dispatch, pins, agentic-qe #655, #753 and #801, the replies, the Ruflo task-ledger reports, dispatch PRs #286–#288, the Codex hooks line) and two capability intake cards (#255, encryption at rest) | Intake depth |
+| `5.0.0` | 12 | Intake for #239, the v5 research branch, the taxonomy and delivery ADRs, the artifacts and meetings, first-class hosts, Sessions and Activity, the Activity and Topic taxonomy, conflicts X1–X4 and X6, the Environment Auditor, evaluation gates, the MetaHarness and autonomous-improvement proposals, and learning from `ak run` | Intake depth |
+
+With the 13 epics, that makes 127 cards.
+
+**Existing issues the cards adopt.** These keep their numbers and titles. Each gets its routing
+label, milestone, size and workstream labels, and a comment in card format, instead of a rewritten
+body.
+
+| Card | Issue | PR |
+| --- | --- | --- |
+| `A61-04` | #271 | #291 (draft, held) |
+| `A61-05` | #240 | #293 (draft, held) |
+| `A61-06` | #262 | #292 (draft, measurement) |
+| `P6-06` | #257 | — |
+| `GA-05` | #213 | — |
+| `C41-01` | #255 | — |
+| `V5-01` | #239 | — |
+
+**How the issues are created, after this PR merges:**
+
+1. Re-check every adopted issue for `needs-review`. A labelled issue is skipped, and its card
+   is held for the maintainer.
+2. Create the epics, then the cards in ID order. Each body follows the [card format](#card-format),
+   with card-ID dependencies at first.
+3. Fill the `issue` column. Rewrite each **Blocked by** and **Blocks** line as `#number`
+   references, then commit the updated CSV.
+4. Link each card to its epic as a sub-issue.
+5. The maintainer runs the [dependency sync](#dependency-sync-runbook).
+6. Each held PR gets `Closes #N` for its card and is marked ready for review.
 
 ## Card format
 
