@@ -63,7 +63,9 @@ Each entry has a source citation, a state, the redesign's impact on it, and one 
 
 **Excluded:** issues labelled `needs-review` (#95, #109, #115, #116, #117, #167) and every item
 about them. That covers v2's D-12 to D-14, the matching decision-gate rows DG-3 to DG-5, and the
-same items in v1.
+same items in v1. Maintainer rule, 2026-10-02: an issue labelled `needs-review` is out of scope for
+every planned release (4.0.0, 4.1.0 and 5.0.0), so these rows need no card. D-31 ("archive a plan
+only when every open row maps to a card") is met for them by this exclusion, not by a card.
 
 ## Summary
 
@@ -486,6 +488,7 @@ part of P10 about #109.
 | P19 (release) | PRG:417; M1L:37 | Publish; global `ak` matches | Planned | Checked through `npx` | **Exit-critical**; the global match is superseded |
 | P19 (jobs) / M1-G04 | PRG:419-420; M1L:36 | Pin, footprint, stray store, temp backlog | Planned | — | **Exit-critical** or waived (exit item 8); the footprint is superseded |
 | P19 (upgrade check) | PRG:417-421 | Upgrade, restart, sync twice | Planned | The sandboxed-`HOME` exit test replaces it | **Superseded** |
+| P19 (memory and attended time) | PRG:421 | Project-memory read-back with reopened-process evidence; record attended time as unmeasured | Planned | Attended time is recorded as "not instrumented" in DL (#423). One store per project through the project launchers (P1-04, P2-02) replaces the user-level memory path | **Superseded**; the residual upstream proof stays on the Ruflo memory-routing tracker (GA-05, #213) |
 | P20 / M1-G08 | PRG:425-434; M1L:40 | Close the issues and archive the plans | Planned | — | **Exit-critical** (exit item 7) |
 | M1-G06 | M1L:38, 51-60 | Dispatch evidence read back | Started | — | **Exit-critical** (DoD-3) |
 | M1-G07 | M1L:39 | Branch and worktree cleanup | Planned | — | **Superseded** (v2 DoD item 7 already is) |
