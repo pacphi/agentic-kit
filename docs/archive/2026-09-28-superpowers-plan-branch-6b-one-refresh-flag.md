@@ -12,7 +12,7 @@
 
 **Tech Stack:** Node 22/26 ESM CLI (`bin/agentic-kit.mjs`, `node:util` `parseArgs` with `strict: true`), `node:test`, the Playwright UI harness (`tests/ui`), the 6a spawn-guard harness (`tests/helpers/spawn-guard.mjs`, `tests/kit/helpers/dashboard-child-server.mjs`), the sandbox helpers (`tests/kit/helpers/home-sandbox.mjs`).
 
-**Spec:** [Remediation program, Branch 6b](../plans/2026-09-26-remediation-program.md) · [Audit record, Addendum 3 Item 4; Decisions 1, 5, 6](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md) · [ADR-0063](../adr/0063-evidence-store-and-refresh-vocabulary.md) · ledger decisions **B6b-D1**, **B6b-D2**, **B6b-D3** (`.superpowers/sdd/2026-09-26-remediation-program/progress.md`, main checkout, section "Wave 3 Branch 6b"). B6b-D3 supersedes the program plan's "including `docs/UPGRADING.md` for the renamed flags".
+**Spec:** [Remediation program, Branch 6b](2026-09-26-plan-remediation-program.md) · [Audit record, Addendum 3 Item 4; Decisions 1, 5, 6](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) · [ADR-0063](../adr/0063-evidence-store-and-refresh-vocabulary.md) · ledger decisions **B6b-D1**, **B6b-D2**, **B6b-D3** (`.superpowers/sdd/2026-09-26-remediation-program/progress.md`, main checkout, section "Wave 3 Branch 6b"). B6b-D3 supersedes the program plan's "including `docs/UPGRADING.md` for the renamed flags".
 
 The design this work implements (audit Addendum 3 Item 4, copied so no implementer needs the audit). 6b delivers every CLI entry in it; the quoted dashboard controls and Reload land in 6c:
 

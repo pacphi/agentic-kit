@@ -30,8 +30,10 @@ import { loadKitConfig, saveKitConfig, configErrorRecovery, configRecoveryLines 
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, collectIntegrationFacts, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
-import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
+import { driftReport, installedVersion } from '../lib/versions.mjs';
+import { upgradeStepLines } from '../lib/upgrade-steps.mjs';
 import { lookUpPlanVersions, skippedVersionEvidence } from './sync/plan-versions.mjs';
+import { brainRetryError } from './sync/brain-retry.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { runScaffoldAgentsFix } from '../lib/scaffold.mjs';
@@ -137,6 +139,7 @@ export async function refreshPlanHosts(flags, cwd, probes = {}) {
 export const options = {
   'dry-run': { type: 'boolean', default: false },
   'no-upgrade': { type: 'boolean', default: false },
+  'retry-brain': { type: 'boolean', default: false },
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
   skip: { type: 'string', multiple: true },
@@ -153,6 +156,9 @@ dates for the Ruflo support window. --dry-run makes the same lookups and
 records nothing: its npm lookups use a temporary npm cache it removes
 afterwards. A dry run reads host evidence as ak last recorded it (it expires
 after 6 h).
+Sync never installs another ak version: every run ends by printing the three
+steps that move a machine to the project-scoped line, run by exact version
+through npx.
 In a Ruflo project, sync applies ak's daemon settings (flat keys in
 .claude-flow/config.json, start-on-use on unless kit.json rufloDaemon.autoStart
 is false) and restarts the project's daemon only if it was running.
@@ -183,6 +189,11 @@ that fix anyway, so it is still listed under "needs your action" instead of
 version lookup out: the plan reads the latest versions ak last recorded for it.
 An unknown name is rejected with the list of names sync accepts.
 
+--retry-brain permits one attempt past a fresh Brain refusal hold. It leaves
+installer safety checks intact and does not clear the stored refusal. A new
+refusal starts a fresh hold. --dry-run previews only; --no-upgrade, an explicit
+--skip ruvnet-brain, or disabled Brain management cannot be overridden.
+
 --json writes every human line (the plan, step results, prompts) to stderr
 and exactly one JSON object to stdout, pretty-printed as \`ak status --json\`:
   { plan[], steps[{id, ok, detail}], unresolved[], skipped[],
@@ -201,7 +212,8 @@ Usage: ak sync [options]
 Options:
   --dry-run            print the plan and stop; like a real sync it checks
                        the latest versions online first, and records nothing
-  --no-upgrade         heal only; don't upgrade ruflo/aqe/kit versions
+  --no-upgrade         heal only; don't upgrade ruflo/aqe versions
+  --retry-brain        permit one Brain retry past a fresh hold
   --skip SUBSYSTEM     leave SUBSYSTEM out of this run (repeatable, or
                        comma-separated: --skip natives,ruvnet-brain)
   --yes                approve disclosed repairs without prompting
@@ -217,7 +229,7 @@ Examples:
 // ── the sync step registry ───────────────────────────────────────────────────
 // Every heal used to be a `if (subsystems.has(X)) { ... }` block inlined into
 // `run()`, with real ordering invariants (natives LAST among npm-tree
-// mutations, statusline AFTER providers, kit self-update LAST of all) proven
+// mutations, statusline AFTER providers) proven
 // only by source-order and explained only in comments — nothing stopped a
 // future edit from reordering them apart. Each step below is
 // `{id, when(subsystems, flags, cfg), run(ctx)}`; SYNC_STEPS's array order
@@ -705,10 +717,6 @@ export const SYNC_STEPS = [
       }
     },
   },
-  // kit self-update — LAST, after every other heal: npm replaces the kit's
-  // files on disk, and the new code applies from the next ak run, so nothing
-  // after this point should depend on the kit's own modules being current.
-  // (Array position — the final entry in SYNC_STEPS — is the invariant.)
   {
     id: 'codex-context',
     when: (subs, flags, cfg) => subs.has('codex-context') && !!cfg.codexContext && !!cfg.integrations?.hosts?.codex,
@@ -741,14 +749,6 @@ export const SYNC_STEPS = [
       ctx.report('AQE project pin', pin);
       recordApplyFailure(ctx.state, 'aqe-pin', pin);
       if (recordAqePinProject(ctx.cfg, pin.root)) saveKitConfig(ctx.cfg);
-    },
-  },
-  {
-    id: 'self',
-    when: (subs, flags) => subs.has('self') && !flags['no-upgrade'],
-    run: async (ctx) => {
-      const s = await selfDrift({ pkgRoot: ctx.pkgRoot, force: true });
-      if (s.outdated) await ctx.step('self-update', () => heal.selfUpdate(s.latest));
     },
   },
 ];
@@ -1034,11 +1034,21 @@ export const jsonUsageError = (message) => ({ ...emptyResult(), exitCode: 2, err
  *  dry run with a plan, a rejected flag, an error). Manual rows never decide
  *  it; every run ends by listing them (needsYourAction). An unreadable kit.json
  *  also adds `recovery`, the commands that set it aside (config.mjs). */
+// The exit release never updates the kit itself. It prints the steps that move a machine to the
+// project-scoped line, run by exact version through npx, whatever is installed globally.
+function reportUpgradeSteps(pkgRoot) {
+  let version = null;
+  try { version = readJson(path.join(pkgRoot, 'package.json'))?.version ?? null; } catch { /* the steps then name a placeholder */ }
+  console.log('');
+  for (const line of upgradeStepLines(version)) console.log(line);
+}
+
 export async function run(opts) {
   const result = emptyResult();
   if (!opts.flags.json) {
     result.exitCode = await converge(opts, result);
     reportNeedsYourAction(result.needsYourAction);
+    reportUpgradeSteps(opts.pkgRoot);
     return result.exitCode;
   }
   await humanOutputToStderr(async (capture) => {
@@ -1051,6 +1061,7 @@ export async function run(opts) {
       Object.assign(result, { converged: null, exitCode: 1, error: e?.message ?? String(e) }, recovery ? { recovery } : {});
     }
     reportNeedsYourAction(result.needsYourAction);
+    reportUpgradeSteps(opts.pkgRoot);
   });
   console.log(JSON.stringify(result, null, 2));
   return result.exitCode;
@@ -1076,6 +1087,12 @@ async function converge({
   if (skipError) {
     fail(`ak sync: ${skipError}`);
     result.error = skipError;
+    return 2;
+  }
+  const retryError = brainRetryError({ flags, skip, cfg: flags['retry-brain'] ? loadKitConfig() : undefined });
+  if (retryError) {
+    fail(`ak sync: ${retryError}`);
+    result.error = retryError;
     return 2;
   }
   // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
@@ -1109,6 +1126,7 @@ async function converge({
   // post-repair state, not what was cached before it.
   const rows = await collectFn({
     pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false, versionEvidence,
+    retryBrain: flags['retry-brain'] === true,
   });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair

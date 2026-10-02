@@ -11,7 +11,6 @@ import { run } from './exec.mjs';
 import { rufloRoot, aqeRoot, installEditsPath } from './paths.mjs';
 import { pruneInstallEdits, recordInstallEdit } from './install-edits.mjs';
 import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent, probeBsq3Runtime, recordNativeRuntimeEvidence } from './natives.mjs';
-import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import {
   INSTALL_SPEC, INSTALL_ARGS, UPDATE_ARGS as RB_UPDATE_ARGS, UPDATE_ENV as RB_UPDATE_ENV,
@@ -215,20 +214,6 @@ export async function upgradePackage(pkg, { bin = null, runner = run, sleep } = 
   return { ok: r.code === 0, detail: r.code === 0 ? 'upgraded' : r.stderr.split('\n').slice(-3).join(' ') };
 }
 
-/** Upgrade the kit itself to a pinned version. Runs LAST in sync: npm
- *  replaces the kit's files on disk, so the new code applies from the next
- *  ak invocation — never mid-run. Pinning the exact version (not a dist-tag)
- *  installs precisely what the drift check saw. */
-export async function selfUpdate(version, { runner = run } = {}) {
-  const r = await runner('npm', globalInstallArgs(`${KIT_PKG}@${version}`), { timeout: 300_000 });
-  return {
-    ok: r.code === 0,
-    detail: r.code === 0
-      ? `kit upgraded to ${version} (applies from the next ak run)`
-      : `FAILED (${(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`,
-  };
-}
-
 /** Refresh an existing Brain through the bundle's own updater. `--update`
  *  ignores `--version`, so success is judged by the release on disk, never by
  *  the tag ak asked about: a changed release is stamped; an unchanged one is
@@ -330,12 +315,13 @@ const BRAIN_REFUSAL = /install stopped:|\[forge-update\]\s*ERROR:|refusing to up
 // A specific, permanent subtype of BRAIN_REFUSAL (ADR-0061): forge-update's
 // legacy-backup reclaim (reclaimBackups(), upstream issue #35) refuses to
 // create another full-KB rollback copy while any kb.bak-*/kb.install-preserved-*
-// snapshot from a prior update remains unresolved. Verified 2026-09-27: retrying
-// --update can never clear this (the snapshots are never touched by --update),
-// but deleting kb/ (npx ruvnet-brain --uninstall) and reinstalling fresh takes a
-// different code path (obtainBundle(), not forge-update.mjs) that isn't blocked
-// by it — see stuinfla/ruvnet-brain#335. Exported so status can give this one
-// subtype of held refusal different, actionable remediation text.
+// snapshot from a prior update remains unresolved. Retrying --update can never
+// clear this (the snapshots are never touched by --update). On 2026-09-27, with
+// ruvnet-brain 4.3.29, deleting kb/ (npx ruvnet-brain --uninstall) and
+// reinstalling fresh took a different code path (obtainBundle(), not
+// forge-update.mjs) that was not blocked by it — see stuinfla/ruvnet-brain#335.
+// Later installers are unverified (ADR-0061 §5). Exported so status can give
+// this one subtype of held refusal different, actionable remediation text.
 export const BRAIN_RECLAIM_STUCK = /unresolved rollback state exists|refusing to create another full-KB copy/i;
 
 /** Did the installer or updater refuse, rather than fail transiently? */

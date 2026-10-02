@@ -587,7 +587,7 @@ test('the plan read and the converge proof get exactly these collect() arguments
     pkgRoot: PKG_ROOT, cwd: PROJECT, dejaVuAdapter: calls[0].dejaVuAdapter,
     dejaVuPlanOptions: { allowUpgrade: false }, record, versionEvidence: {},
   });
-  assert.deepEqual(calls[0], expected(false));
+  assert.deepEqual(calls[0], { ...expected(false), retryBrain: false });
   assert.deepEqual(calls[1], expected(true));
   assert.equal(calls[1].dejaVuAdapter, calls[0].dejaVuAdapter);
 });
@@ -912,6 +912,9 @@ test('every subsystem a sync step answers to is a name --skip accepts', () => {
       integrations: { ...loadKitConfig().integrations, hosts: { claude: true, codex: true, opencode: true } },
     };
     for (const name of known) {
+      // `self` is the kit's own version lookup, not a step: sync never installs the kit, but
+      // --skip self still leaves that lookup out (tests/kit/sync-skip-versions.test.mjs).
+      if (name === 'self') continue;
       assert.ok(sync.performingSteps(name, FLAGS(), cfg).length > 0, `--skip ${name} names nothing sync does`);
     }
   } finally {

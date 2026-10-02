@@ -3,7 +3,7 @@
 // is upstream, yet status kept `fix: 'sync refreshes the KB'`, so every sync
 // re-ran the refused refresh and failed again. A refused refresh is held as
 // blocked — visible, with its cause and the user's options, but not planned —
-// until the (installed, latest) release pair changes.
+// while the hold is fresh; expiry or a release-pair change permits another attempt.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -77,7 +77,7 @@ test('an updater that ran without changing the release is held too', async () =>
   assert.match(held[0].detail, /still v4\.3\.22/);
 });
 
-test('status holds the refresh as blocked, names the cause and the options, until the pair changes', async () => {
+test('status preserves a fresh hold and releases it when either version changes', async () => {
   seedBrain();
   brain.recordHeldRefresh({ detail: 'install stopped: private overlay preflight failed', latest: '4.3.28' });
   const saved = loadKitConfig().versionCheck.ruvnetBrain.heldRefresh;
@@ -110,10 +110,9 @@ test('a successful install clears the held refresh', () => {
 // ADR-0061: forge-update's legacy-backup reclaim (issue #35) refuses to make
 // another full-KB rollback copy while old kb.bak-*/kb.install-preserved-*
 // snapshots remain. Verified 2026-09-27 that --update can never clear this —
-// only npx ruvnet-brain --uninstall (which never touches those snapshots) then
-// a fresh reinstall does. This is a *distinct* held refusal, not a new "held"
-// mechanism: it must still be recorded, still block sync from retrying, and
-// still clear on a real version change — only the offered `fix` text differs.
+// uninstall/reinstall worked on the historically tested 4.3.29 path. Current
+// installers can still refuse; private snapshots must be preserved. A fresh
+// refusal remains held while its TTL and release pair apply.
 const RECLAIM_STUCK = [
   '  🧠  RuvNet Brain — refresh',
   '    [forge-update] ERROR: unresolved rollback state exists; refusing to create another full-KB copy.',
@@ -153,11 +152,11 @@ test('status gives a reclaim-stuck hold different, actionable remediation — an
   assert.doesNotMatch(ordinary.fix, /--uninstall/);
 });
 
-test('after --uninstall, ak\'s existing install routing already takes the fresh path — no new logic needed', async () => {
+test('installer dispatch after uninstall takes the pinned fresh path when reached', async () => {
   // updaterPresent() is false once kb/forge-update.mjs is gone (that's what
   // --uninstall removes); present() stays true (the plugin cache survives).
-  // installRuvnetBrain must fall to the pinned --force --version fresh-install
-  // branch, and a successful run must clear the hold, exactly as ADR-0061 §5 says.
+  // This installer-boundary fixture checks pinned dispatch, not sync reaching
+  // the installer or a current upstream installer permitting the operation.
   const calls = [];
   const r = await installRuvnetBrain({
     runner: async (cmd, args) => { calls.push({ cmd, args }); return { code: 0, stdout: '', stderr: '' }; },

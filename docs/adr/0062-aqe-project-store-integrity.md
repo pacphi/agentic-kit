@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
+- **Updated:** 2026-09-30 — [private released 3.14.6 real-MCP lock proof](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) preserves patterns.rvf/sidecar bytes and confirms packed-kit busy startup on macOS. Full shutdown conformance fails on omitted shared-adapter cleanup; store merge, installed-target convergence and Windows remain unproved by this receipt
 - **Updated:** 2026-09-27 — adversarial review fixes: no pin in files git tracks (B5-M5), AQE's
   re-init value taken back, clean release; holder checks that time out refuse; nested repositories
   are not strays; stores fingerprinted at copy time; root checked before backup; applying receipt;
@@ -11,7 +12,7 @@
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (project memory status and
   stray stores), [ADR-0055](0055-aqe-embedding-lifecycle.md) (the AQE embedding projections this
   pin sits beside), the
-  [issues 237–239 audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)
+  [issues 237–239 audit record](../archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md)
   (Addendum 3 items 2 and 3; decisions B5-D1 to B5-D5), upstream
   [agentic-qe#735](https://github.com/proffesor-for-testing/agentic-qe/issues/735),
   [#736](https://github.com/proffesor-for-testing/agentic-qe/issues/736) and

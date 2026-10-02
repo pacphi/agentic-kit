@@ -1,15 +1,14 @@
 // Opt-in native contract for agentic-qe#574. No installed package is patched.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createProcessScope } from './aqe-live-lock-process.mjs';
+import { digest, childEnv, snapshot } from './aqe-live-lock-fixtures.mjs';
 
 const required = process.env.AK_AQE_LOCK_LIVE === '1';
-const digest = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function installedRoot() {
@@ -27,47 +26,12 @@ function installedRoot() {
   throw new Error('AQE missing: set AK_AQE_PACKAGE_ROOT to absolute installed package root');
 }
 
-function childEnv(root, project) {
-  const home = path.join(root, 'home');
-  const tmp = path.join(root, 'tmp');
-  fs.mkdirSync(home); fs.mkdirSync(tmp);
-  return {
-    PATH: process.env.PATH ?? '',
-    ...(process.platform === 'win32' ? {
-      SystemRoot: process.env.SystemRoot ?? 'C:\\Windows',
-      ComSpec: process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe',
-      PATHEXT: process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD',
-    } : {}),
-    HOME: home, USERPROFILE: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp,
-    LANG: 'en_US.UTF-8', CI: '1', NO_COLOR: '1',
-    XDG_CONFIG_HOME: path.join(home, 'config'), XDG_STATE_HOME: path.join(home, 'state'),
-    XDG_DATA_HOME: path.join(home, 'data'), XDG_CACHE_HOME: path.join(home, 'cache'),
-    APPDATA: path.join(home, 'appdata'), LOCALAPPDATA: path.join(home, 'localappdata'),
-    CODEX_HOME: path.join(home, 'codex'), CLAUDE_CONFIG_DIR: path.join(home, 'claude'),
-    HERMES_HOME: path.join(home, 'hermes'), npm_config_prefix: path.join(home, 'npm-prefix'),
-    npm_config_cache: path.join(home, 'npm-cache'),
-    MISE_DATA_DIR: path.join(home, 'mise-data'), MISE_CONFIG_DIR: path.join(home, 'mise-config'),
-    MISE_CACHE_DIR: path.join(home, 'mise-cache'), AQE_PROJECT_ROOT: project,
-    AQE_MEMORY_PATH: path.join(project, '.agentic-qe', 'memory.db'),
-    AQE_STORAGE_PATH: path.join(project, '.agentic-qe'),
-    CLAUDE_FLOW_MEMORY_PATH: path.join(project, '.swarm'),
-    CLAUDE_FLOW_DB_PATH: path.join(project, '.swarm', 'memory.db'),
-    RUFLO_DAEMON_AUTOSTART: '0',
-  };
-}
 
 async function bounded(scope, file, args, options, limit) {
   const run = scope.launch(process.execPath, [file, ...args], options);
   return scope.wait(run, limit);
 }
 
-function snapshot(store) {
-  return Object.fromEntries(fs.readdirSync(store).filter((n) => n.startsWith('patterns.rvf'))
-    .sort().map((name) => {
-      const file = path.join(store, name);
-      return [name, { sha256: digest(file), bytes: fs.statSync(file).size }];
-    }));
-}
 
 function check(label, result, owner, before, store) {
   const output = result.stdout + result.stderr;
@@ -78,7 +42,7 @@ function check(label, result, owner, before, store) {
   assert.equal(owner.child.signalCode, null, `native holder signaled during ${label}`);
   assert.ifError(owner.error);
   assert.match(output, /is locked by a live process/, `${label} missed live-lock warning`);
-  assert.match(output, /LockHeld|0x0300/, `${label} missed LockHeld fallback`);
+  assert.match(output, /not breaking the lock; degrading to SQLite/, `${label} missed live-owner fallback`);
   assert.doesNotMatch(output, /FsyncFailed|0x0303/, `${label} emitted FsyncFailed`);
   assert.deepEqual(snapshot(store), before, `${label} changed RVF bytes`);
   assert.ok(!fs.readdirSync(store).some((n) => n.includes('.corrupt-')), `${label} quarantined RVF`);
@@ -115,8 +79,8 @@ test('installed AQE degrades under a live native RVF lock without changing the s
     const ready = path.join(root, 'ready');
     const holderFile = path.join(root, 'holder.mjs');
     const moduleUrl = pathToFileURL(adapter).href;
-    fs.writeFileSync(holderFile, `import { createRequire } from 'node:module'; import fs from 'node:fs';\nglobalThis.require=createRequire(${JSON.stringify(adapter)});\nconst {getSharedRvfAdapter}=await import(${JSON.stringify(moduleUrl)});\nglobalThis.hold=getSharedRvfAdapter(${JSON.stringify(store)},384);\nif(!globalThis.hold)process.exit(2);\nfs.writeFileSync(${JSON.stringify(ready)},String(process.pid));\nconst timer=setInterval(()=>{if(!globalThis.hold)process.exit(3)},1000);\nprocess.on('SIGTERM',()=>{clearInterval(timer);globalThis.hold.close();process.exit(0)});\n`);
-    const owner = scope.launch(process.execPath, [holderFile], options);
+    fs.writeFileSync(holderFile, `import { createRequire } from 'node:module'; import fs from 'node:fs';\nglobalThis.require=createRequire(${JSON.stringify(adapter)});\nconst {getSharedRvfAdapter}=await import(${JSON.stringify(moduleUrl)});\nglobalThis.hold=getSharedRvfAdapter(${JSON.stringify(store)},384);\nif(!globalThis.hold)process.exit(2);\nfs.writeFileSync(${JSON.stringify(ready)},String(process.pid));\nconst timer=setInterval(()=>{if(!globalThis.hold)process.exit(3)},1000);\nconst close=()=>{clearInterval(timer);globalThis.hold.close();process.exit(0)};process.stdin.resume();process.stdin.once('end',close);process.on('SIGTERM',close);\n`);
+    const owner = scope.launch(process.execPath, [holderFile], options, { pipeInput: true });
     try {
       const deadline = Date.now() + 30_000;
       while (!fs.existsSync(ready) && !owner.closed && !owner.error && owner.child.exitCode === null
@@ -138,13 +102,17 @@ test('installed AQE degrades under a live native RVF lock without changing the s
       assert.match(challenger.stdout, /"fallback":true/, 'adapter did not fall back');
       console.log(JSON.stringify({ aqeVersion: pkg.version, platform: process.platform,
         node: process.version, sourceHashes, ownerPid: owner.child.pid,
-        status: { exit: status.code, liveLock: true, lockHeld: true, fsyncFailed: false },
-        adapter: { exit: challenger.code, fallback: true, liveLock: true, lockHeld: true, fsyncFailed: false },
+        status: { exit: status.code, liveLock: true, liveOwnerFallback: true, fsyncFailed: false },
+        adapter: { exit: challenger.code, fallback: true, liveLock: true, liveOwnerFallback: true, fsyncFailed: false },
         before, after: snapshot(store) }));
     } finally {
-      const closed = await scope.stop(owner, 10_000);
+      const closed = await scope.stop(owner, 10_000, { closeInput: true });
       if (!t.signal.aborted) {
+        assert.equal(closed.stopMethod, 'stdin-eof');
+        assert.equal(closed.signal, null);
         assert.equal(closed.code, 0, `holder failed to close: ${closed.stderr.slice(-1000)}`);
+        assert.equal(fs.existsSync(path.join(store, 'patterns.rvf.lock')), false, 'explicit adapter close left its lock marker');
+        t.diagnostic('explicit adapter close removed its owned lock marker');
       }
     }
   });

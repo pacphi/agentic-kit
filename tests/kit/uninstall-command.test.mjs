@@ -518,3 +518,366 @@ test('uninstall restores autoStart and removes the managed daemon keys in receip
   assert.match(run.out, /ruflo daemon settings restored/);
   rmrf(root, elsewhere);
 });
+
+// #310 (exit release): --purge runs the host-off teardown that `ak host off` runs —
+// provider env, the AQE router, the Codex MCP entries and the AQE embedding
+// projections — while kit.json still holds the receipts, then deletes kit.json.
+function seedHostOwnership(ownership) {
+  seedHome();
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { codex: ownership } } });
+}
+function fakeUndo(calls, overrides = {}) {
+  const ok = (detail) => ({ ok: true, changed: true, detail });
+  return {
+    providers: (cwd) => { calls.push(['providers', cwd]); return ok('provider env restored'); },
+    aqeRouter: (cwd) => { calls.push(['aqeRouter', cwd]); return ok('aqe router restored'); },
+    codexMcp: async (cwd, opts) => { calls.push(['codexMcp', cwd, opts.managed]); return ok('codex MCP removed'); },
+    rufloMcpInCodex: async (cwd, opts) => { calls.push(['rufloMcpInCodex', cwd, opts.managed]); return ok('ruflo MCP removed from codex'); },
+    aqeEmbedding: (cfg, cwd) => { calls.push(['aqeEmbedding', cfg.aqeEmbedding?.mode, cwd]); return ok('embedding projections released'); },
+    ...overrides,
+  };
+}
+
+test('--purge runs every host-off teardown, each before kit.json is deleted', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  let kitJsonSeen = null;
+  const undo = fakeUndo(calls, {
+    aqeEmbedding: (cfg, cwd) => { kitJsonSeen = fs.existsSync(paths.kitConfigPath()); calls.push(['aqeEmbedding', cfg.aqeEmbedding?.mode, cwd]); return { ok: true, changed: true, detail: 'x' }; },
+  });
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true }, deps: { undo } }));
+  assert.equal(result, 0, out);
+  assert.deepEqual(calls.map((c) => c[0]), ['providers', 'aqeRouter', 'codexMcp', 'rufloMcpInCodex', 'aqeEmbedding']);
+  assert.equal(calls.find((c) => c[0] === 'codexMcp')[2], true, 'ak-owned Codex MCP is removed');
+  assert.equal(calls.find((c) => c[0] === 'rufloMcpInCodex')[2], true, 'ak-owned ruflo-in-Codex entry is removed');
+  assert.equal(calls.find((c) => c[0] === 'aqeEmbedding')[1], 'unmanaged', 'embedding projections are released through the receipts');
+  assert.equal(kitJsonSeen, true, 'teardown reads receipts while kit.json still exists');
+  assert.equal(fs.existsSync(paths.kitConfigPath()), false);
+});
+
+test('--purge never removes a Codex MCP entry the user added themselves', async () => {
+  seedHostOwnership({});
+  const calls = [];
+  await captureLog(() => uninstall.run({ flags: { yes: true, purge: true }, deps: { undo: fakeUndo(calls) } }));
+  assert.equal(calls.find((c) => c[0] === 'codexMcp')[2], false);
+  assert.equal(calls.find((c) => c[0] === 'rufloMcpInCodex')[2], false);
+});
+
+test('a failed host teardown keeps kit.json under --purge and exits 1', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  const undo = fakeUndo(calls, { codexMcp: async () => ({ ok: false, changed: false, detail: 'codex MCP removal failed: exit 1' }) });
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true }, deps: { undo } }));
+  assert.equal(result, 1, out);
+  assert.match(out, /codex MCP removal failed/);
+  assert.ok(fs.existsSync(paths.kitConfigPath()), 'kit.json holds the receipts a retry needs');
+});
+
+test('--purge --dry-run lists each host teardown step and runs none', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  const before = snapshot(HOME);
+  const { out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true, 'dry-run': true }, deps: { undo: fakeUndo(calls) } }));
+  assert.deepEqual(calls, []);
+  for (const label of ['provider env', 'AQE router', 'Codex MCP', 'AQE embedding']) assert.match(out, new RegExp(`\\[dry-run\\].*${label}`));
+  assertUnchanged(before, HOME, 'a previewed purge must not touch the filesystem');
+});
+
+test('a plain uninstall (no --purge) leaves provider env and Codex MCP alone', async () => {
+  seedHostOwnership({ mcp: 'ak', reverseMcp: 'ak' });
+  const calls = [];
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo(calls) } }));
+  assert.deepEqual(calls, []);
+});
+
+// #311 (exit release): --purge also removes what older ak installed outside kit.json's
+// receipts. Removals ak can prove it owns ask first (--yes approves them). Defaults that
+// KEEP data (deja-vu package/index, the standalone agentdb) need an interactive yes that
+// --yes does not give, so `--purge --yes` can never delete them.
+const ALIAS = 'Xenova/all-MiniLM-L6-v2';
+function fakeExtras(calls, o = {}) {
+  return {
+    confirm: async (q, yes) => { calls.push(['confirm', q]); return o.confirm ?? yes === true; },
+    confirmKeep: async (q) => { calls.push(['confirmKeep', q]); return o.confirmKeep ?? false; },
+    run: async (cmd, args) => {
+      calls.push(['run', cmd, ...args]);
+      if (cmd === 'ollama' && args[0] === 'list') {
+        return { code: 0, stdout: o.ollamaList ?? `NAME ID SIZE MODIFIED\nall-minilm:22m 1b226e2802db 45 MB 2 days ago\n${ALIAS}:latest 1b226e2802db 45 MB 2 days ago\n`, stderr: '' };
+      }
+      return { code: o.runCode ?? 0, stdout: '', stderr: '' };
+    },
+    have: async (cmd) => o.have?.includes(cmd) ?? true,
+    brainPresent: () => o.brain ?? true,
+    disableNightly: async () => { calls.push(['nightly']); return { ok: true, detail: 'nightly self-updater disabled' }; },
+    agentdbDir: () => o.agentdbDir ?? null,
+  };
+}
+const purgeWith = (extras, flags = {}) => captureLog(() => uninstall.run({
+  flags: { purge: true, ...flags }, deps: { undo: fakeUndo([]), extras },
+}));
+const ran = (calls) => calls.filter((c) => c[0] === 'run').map((c) => c.slice(1).join(' '));
+
+test('--purge removes the Brain plugin and nightly LaunchAgent after a confirmation, and keeps the knowledge base', async () => {
+  seedHome();
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls), { yes: true });
+  assert.ok(ran(calls).includes('claude plugin uninstall ruvnet-brain@ruvnet-brain'));
+  assert.ok(calls.some((c) => c[0] === 'nightly'));
+  assert.ok(!ran(calls).some((c) => /ruvnet-brain.*--uninstall|rm -rf/.test(c)), 'the knowledge base is never removed');
+  assert.match(out, /knowledge base.*kept/i);
+});
+
+test('declining the Brain confirmation removes nothing', async () => {
+  seedHome();
+  const calls = [];
+  await purgeWith(fakeExtras(calls, { confirm: false }));
+  assert.deepEqual(ran(calls).filter((c) => c.includes('plugin')), []);
+  assert.ok(!calls.some((c) => c[0] === 'nightly'));
+});
+
+// The Brain installer (not ak) writes a stable-spine MCP shim at ~/.claude/ruvnet-brain/mcp/server.mjs.
+// --purge removes that one file after the Brain confirmation, and its folders only when empty.
+const { brainShimPath } = await import('../../src/lib/opencode-core.mjs');
+function seedShim(extra = {}) {
+  const shim = brainShimPath();
+  fs.mkdirSync(path.dirname(shim), { recursive: true });
+  fs.writeFileSync(shim, '// shim\n');
+  if (extra.sibling) {
+    fs.mkdirSync(path.dirname(extra.sibling), { recursive: true });
+    fs.writeFileSync(extra.sibling, 'upstream file');
+  }
+  return shim;
+}
+
+test('--purge removes the Brain MCP shim and then its empty folders', async () => {
+  seedHome();
+  const shim = seedShim();
+  const { out } = await purgeWith(fakeExtras([]), { yes: true });
+  assert.equal(fs.existsSync(shim), false);
+  assert.equal(fs.existsSync(path.dirname(path.dirname(shim))), false, 'the empty ruvnet-brain folder goes too');
+  assert.match(out, /Brain MCP shim/i);
+});
+
+test('the Brain shim removal never deletes another file the installer put beside it', async () => {
+  seedHome();
+  const sibling = path.join(path.dirname(path.dirname(brainShimPath())), 'hooks', 'notes.txt');
+  const shim = seedShim({ sibling });
+  await purgeWith(fakeExtras([]), { yes: true });
+  assert.equal(fs.existsSync(shim), false);
+  assert.equal(fs.existsSync(path.dirname(shim)), false, 'the emptied mcp folder is removed');
+  assert.equal(fs.readFileSync(sibling, 'utf8'), 'upstream file', 'a file ak did not ask about survives');
+});
+
+test('declining the Brain confirmation keeps the shim', async () => {
+  seedHome();
+  const shim = seedShim();
+  await purgeWith(fakeExtras([], { confirm: false }));
+  assert.equal(fs.existsSync(shim), true);
+});
+
+test('the Brain shim stays while the plugin could not be removed, and the purge fails', async () => {
+  seedHome();
+  const shim = seedShim();
+  const { result, out } = await purgeWith(fakeExtras([], { runCode: 1 }), { yes: true });
+  assert.equal(fs.existsSync(shim), true);
+  assert.equal(result, 1);
+  assert.match(out, /shim kept/i);
+});
+
+test('a shim left behind after the plugin is gone is still removed on a retry', async () => {
+  seedHome();
+  const shim = seedShim();
+  const calls = [];
+  await purgeWith(fakeExtras(calls, { brain: false }), { yes: true });
+  assert.equal(fs.existsSync(shim), false);
+  assert.deepEqual(ran(calls).filter((c) => c.includes('plugin')), [], 'no plugin command when the plugin is already gone');
+});
+
+test('a Brain shim that is not a regular file is left alone', { skip: process.platform === 'win32' }, async () => {
+  seedHome();
+  const shim = brainShimPath();
+  const target = path.join(HOME, 'elsewhere.mjs');
+  fs.writeFileSync(target, 'user file');
+  fs.mkdirSync(path.dirname(shim), { recursive: true });
+  fs.symlinkSync(target, shim);
+  await purgeWith(fakeExtras([], { brain: false }), { yes: true });
+  assert.equal(fs.readFileSync(target, 'utf8'), 'user file');
+  assert.equal(fs.lstatSync(shim).isSymbolicLink(), true);
+});
+
+test('--purge --dry-run names the Brain shim and removes nothing; a plain uninstall ignores it', async () => {
+  seedHome();
+  const shim = seedShim();
+  const { out } = await purgeWith(fakeExtras([]), { yes: true, 'dry-run': true });
+  assert.match(out, /\[dry-run\].*Brain MCP shim/);
+  assert.equal(fs.existsSync(shim), true);
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([]) } }));
+  assert.equal(fs.existsSync(shim), true);
+});
+
+test('--purge removes the Ollama alias only when it is a copy of the model ak pulled', async () => {
+  seedHome();
+  const calls = [];
+  await purgeWith(fakeExtras(calls), { yes: true });
+  assert.ok(ran(calls).includes(`ollama rm ${ALIAS}`));
+});
+
+test('a foreign Ollama model under the alias name is left alone', async () => {
+  seedHome();
+  const calls = [];
+  const ollamaList = `NAME ID SIZE MODIFIED\nall-minilm:22m 1b226e2802db 45 MB 2 days ago\n${ALIAS}:latest ffffffffffff 90 MB 1 day ago\n`;
+  const { out } = await purgeWith(fakeExtras(calls, { ollamaList }), { yes: true });
+  assert.ok(!ran(calls).some((c) => c.startsWith('ollama rm')));
+  assert.match(out, /not a copy ak made/i);
+});
+
+test('--purge removes a standalone agentdb only with the older-ak marker AND an interactive yes', async () => {
+  seedHome();
+  const agentdbDir = path.join(HOME, 'npm-global', 'agentdb');
+  fs.mkdirSync(agentdbDir, { recursive: true });
+  writeKitConfig(HOME, { aqe: true, agentdb: { enabled: true } });
+  const calls = [];
+  await purgeWith(fakeExtras(calls, { agentdbDir, confirmKeep: true }), { yes: true });
+  assert.ok(ran(calls).includes('npm uninstall -g agentdb'));
+});
+
+test('--purge --yes alone never removes a standalone agentdb; it prints the command', async () => {
+  seedHome();
+  const agentdbDir = path.join(HOME, 'npm-global', 'agentdb');
+  fs.mkdirSync(agentdbDir, { recursive: true });
+  writeKitConfig(HOME, { aqe: true, agentdb: { enabled: true } });
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls, { agentdbDir }), { yes: true });
+  assert.ok(!ran(calls).includes('npm uninstall -g agentdb'));
+  assert.match(out, /npm uninstall -g agentdb/);
+});
+
+test('without the older-ak marker, agentdb is never removed even when the user says yes', async () => {
+  seedHome();
+  const agentdbDir = path.join(HOME, 'npm-global', 'agentdb');
+  fs.mkdirSync(agentdbDir, { recursive: true });
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls, { agentdbDir, confirmKeep: true }), { yes: true });
+  assert.ok(!ran(calls).includes('npm uninstall -g agentdb'));
+  assert.match(out, /npm uninstall -g agentdb/);
+});
+
+test('--purge --yes keeps the deja-vu derived index; only an interactive yes deletes it', async () => {
+  seedHome();
+  // deja-vu is only asked about when it is actually installed (a Kit ownership receipt exists)
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { dejaVu: { install: { version: '1.0.0' } } } } });
+  const purged = [];
+  const dejaIndex = (o) => ({ purgeDejaVuIndex: async (a) => { purged.push(Boolean(a.dryRun)); return { ok: true, changed: true }; }, ...o });
+  await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([]), ...dejaIndex({}) } }));
+  assert.deepEqual(purged, []);
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { dejaVu: { install: { version: '1.0.0' } } } } }); // the first purge removed kit.json
+  await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([], { confirmKeep: true }), ...dejaIndex({}) } }));
+  assert.deepEqual(purged, [false]);
+});
+
+test('--purge --dry-run lists the extra removals and runs none of them', async () => {
+  seedHome();
+  const calls = [];
+  const { out } = await purgeWith(fakeExtras(calls), { yes: true, 'dry-run': true });
+  assert.deepEqual(ran(calls).filter((c) => !c.startsWith('ollama list')), []);
+  for (const label of ['Brain plugin', 'Ollama alias', 'agentdb']) assert.match(out, new RegExp(`\\[dry-run\\].*${label}`));
+});
+
+test('a plain uninstall touches none of the extras', async () => {
+  seedHome();
+  const calls = [];
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls) } }));
+  assert.deepEqual(ran(calls), []);
+});
+
+// #312 (exit release): after teardown succeeds, --purge removes ak's state and config
+// folders, but keeps the user's data: AQE store-merge archives and ~/.claude-flow/memory
+// stay unless a typed interactive yes says otherwise (--yes does not).
+function seedLeftovers() {
+  seedHome();
+  const state = path.join(paths.stateBase(), 'agentic-kit');
+  fs.mkdirSync(path.join(state, 'aqe-store-merge', 'backup-1'), { recursive: true });
+  fs.writeFileSync(path.join(state, 'aqe-store-merge', 'backup-1', 'memory.db'), 'user data');
+  fs.mkdirSync(path.join(state, 'evidence'), { recursive: true });
+  fs.writeFileSync(path.join(state, 'evidence', 'x.json'), '{}');
+  fs.writeFileSync(path.join(paths.configDir(), 'adapter-consent.json'), '{}');
+  fs.writeFileSync(path.join(paths.configDir(), 'adapter-grants.json'), '{}');
+  const memory = paths.userMemoryDir();
+  fs.mkdirSync(memory, { recursive: true });
+  fs.writeFileSync(path.join(memory, 'memory.db'), 'memories');
+  return { state, memory, archives: path.join(state, 'aqe-store-merge') };
+}
+const purgeData = (extrasOver = {}, flags = {}, depsOver = {}) => captureLog(() => uninstall.run({
+  flags: { purge: true, ...flags },
+  deps: { undo: fakeUndo([]), extras: fakeExtras([], { brain: false, ...extrasOver }), ...depsOver },
+}));
+
+test('a default --purge removes ak config and state but keeps AQE archives and the Ruflo memory store', async () => {
+  const { state, memory, archives } = seedLeftovers();
+  const { result, out } = await purgeData({}, { yes: true });
+  assert.equal(result, 0, out);
+  assert.equal(fs.existsSync(path.join(paths.configDir(), 'adapter-consent.json')), false, 'adapter consent goes with the config folder');
+  assert.equal(fs.existsSync(path.join(paths.configDir(), 'adapter-grants.json')), false, 'adapter grants go with the config folder');
+  assert.equal(fs.existsSync(path.join(state, 'evidence')), false);
+  assert.equal(fs.existsSync(path.join(archives, 'backup-1', 'memory.db')), true, 'archives are user data');
+  assert.equal(fs.existsSync(path.join(memory, 'memory.db')), true, 'the Ruflo memory store is user data');
+  assert.match(out, /kept.*aqe-store-merge/i);
+  assert.match(out, /kept.*\.claude-flow[\\/]memory/i);
+});
+
+test('only a typed interactive yes deletes the archives and the memory store; --yes does not', async () => {
+  const { memory, archives } = seedLeftovers();
+  await purgeData({ confirmKeep: true }, { yes: true });
+  assert.equal(fs.existsSync(archives), false);
+  assert.equal(fs.existsSync(memory), false);
+});
+
+test('a failed teardown keeps config and state folders for the retry', async () => {
+  const { state } = seedLeftovers();
+  const undo = fakeUndo([], { codexMcp: async () => ({ ok: false, changed: false, detail: 'codex MCP removal failed' }) });
+  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { codex: { mcp: 'ak' } } } });
+  const { result } = await purgeData({}, { yes: true }, { undo });
+  assert.equal(result, 1);
+  assert.equal(fs.existsSync(path.join(state, 'evidence', 'x.json')), true);
+  assert.equal(fs.existsSync(paths.kitConfigPath()), true);
+});
+
+test('state is cleaned after the install-edit receipts are used, never before', async () => {
+  const { state } = seedLeftovers();
+  let receiptSeen = null;
+  const receipts = path.join(state, 'install-edits.json');
+  fs.writeFileSync(receipts, '{"edits":[]}');
+  const installEdits = { ledger: receipts, runner: async () => { receiptSeen = fs.existsSync(receipts); return { code: 0, stdout: '', stderr: '' }; } };
+  await purgeData({}, { yes: true }, { installEdits });
+  assert.equal(fs.existsSync(receipts), false, 'removed in the end');
+  assert.notEqual(receiptSeen, false, 'present whenever the restore step ran');
+});
+
+test('--purge --dry-run names the unrestorable edits and each folder it would keep or remove', async () => {
+  const { state, memory, archives } = seedLeftovers();
+  const before = snapshot(HOME);
+  const { out } = await purgeData({}, { yes: true, 'dry-run': true });
+  assert.match(out, /\[dry-run\].*three edits.*before.*receipts.*cannot be restored/i);
+  assert.match(out, /reinstall Ruflo/i);
+  assert.match(out, /\[dry-run\].*aqe-store-merge/);
+  assert.match(out, /\[dry-run\].*\.claude-flow[\\/]memory/);
+  assertUnchanged(before, HOME, 'a previewed purge must not touch the filesystem');
+  assert.ok(fs.existsSync(state) && fs.existsSync(memory) && fs.existsSync(archives));
+});
+
+test('a plain uninstall never removes config, state, archives or memory', async () => {
+  const { state, memory } = seedLeftovers();
+  await captureLog(() => uninstall.run({ flags: { yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([], { brain: false }) } }));
+  assert.equal(fs.existsSync(path.join(state, 'evidence', 'x.json')), true);
+  assert.equal(fs.existsSync(path.join(memory, 'memory.db')), true);
+});
+
+test('--purge does not ask about the deja-vu index when deja-vu was never installed', async () => {
+  seedHome();
+  const calls = [];
+  const { result } = await captureLog(() => uninstall.run({
+    flags: { purge: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls, { confirmKeep: true, brain: false }) },
+  }));
+  assert.equal(result, 0);
+  assert.ok(!calls.some((c) => c[0] === 'confirmKeep' && /deja-vu/.test(c[1])));
+});

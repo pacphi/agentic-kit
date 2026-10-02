@@ -4,7 +4,19 @@
 
 ## Status
 
-Active under the maintainer-confirmed [develop execution plan](2026-09-28-remediation-v2-develop-execution.md)
+**2026-10-02 close-out:** remediation v2 closes with the exit release `4.0.0-alpha.61`
+([supersession ledger](../plans/2026-10-01-v4-supersession-ledger.md), exit item 7). What it left open is carried by cards on the
+v4.0.0 board, and the ledger holds the dispositions. The [decision log](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md)
+has v2's summary entry, which records DoD-3, attended time and the dropped global-match
+criterion. This plan is archived by the card #317, and the text below stays as it was written.
+
+**2026-09-30 current update:** #285 merged into main as `0511d575`; its tree equals
+the reviewed final develop tree. V1–V7 delivery is retained, not replayed. This plan
+remains active for M1 timing, conformance and separately gated operational closeout.
+The [M1 successor ledger](2026-09-30-plan-completion-m1-closeout-ledger.md) maps all 246
+historical rows and all eight completion clauses. The dated checkpoint below is historical.
+
+Active under the maintainer-confirmed [develop execution plan](2026-09-28-plan-remediation-v2-develop-execution.md)
 (2026-09-28). V1 #267 and V2 #264/#266/#269 are delivered; #262 still needs residual
 Windows timing evidence. #251 is done, and the alpha.60 release commit is on `main`.
 Publication and global installation were not verified in the execution-plan baseline.
@@ -15,11 +27,11 @@ are integrated through `develop@88ce597f444d487a34d9871a447cf8942f76f760` with a
 13 develop CI checks passing. V7 guard and evidence units are independently accepted;
 V7 shared integration, independent reviews and all nine local gates passed at
 `795a0f7266de0bf6a04358359b75a1ad1b609e1d`; closeout PR CI and integration remain pending.
-The [246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md),
-[integration receipt](../archive/2026-09-29-remediation-v2-integration-evidence.md),
-[ordered rulings](../archive/2026-09-29-remediation-v2-rulings.md),
-[Windows evidence](../archive/2026-09-29-windows-ci-evidence.md) and
-[AQE proof](../archive/2026-09-29-aqe-released-artifact-receipt.md) retain the limits.
+The [246-row scope matrix](2026-09-29-remediation-v2-scope-matrix.md),
+[integration receipt](2026-09-29-remediation-v2-integration-evidence.md),
+[ordered rulings](2026-09-29-remediation-v2-rulings.md),
+[Windows evidence](2026-09-29-windows-ci-evidence.md) and
+[AQE proof](2026-09-29-aqe-released-artifact-receipt.md) retain the limits.
 The dated 19:20 UTC three-PR timing snapshot includes a 358-second Windows leg;
 refresh this separate gate after closeout PR CI.
 The final develop → main PR and human approval remain pending. This plan stays
@@ -28,7 +40,7 @@ write follows from documentation completion. Attended time was not instrumented.
 
 ### Approved execution and precedence
 
-The [confirmed execution plan](2026-09-28-remediation-v2-develop-execution.md) governs
+The [confirmed execution plan](2026-09-28-plan-remediation-v2-develop-execution.md) governs
 branch sources, integration, releases, operations and completion. All Appendix A and B
 rows remain in scope. In particular:
 
@@ -59,11 +71,11 @@ rows remain in scope. In particular:
   operational completion gates after human review, not prerequisites to opening
   that PR. Codex personal-memory updates require a direct user request.
 
-**Goal:** Finish everything left over from [remediation program v1](2026-09-26-remediation-program.md) in seven branches. The maintainer's attention goes into one decision sitting up front and a short list of named interrupts. v1 took about 28 attended hours; v2 aims for under 4 (§4 adds it up).
+**Goal:** Finish everything left over from [remediation program v1](2026-09-26-plan-remediation-program.md) in seven branches. The maintainer's attention goes into one decision sitting up front and a short list of named interrupts. v1 took about 28 attended hours; v2 aims for under 4 (§4 adds it up).
 
 **Written against:** `main@e957737b`. v1 status: #258, #259, #260, #261 and #263 merged on 2026-09-28. npm still ships `4.0.0-alpha.59`, so #259–#263 are unreleased, and #263 changes the CLI in breaking ways. The only worktrees are the main checkout and this one, and no stash exists.
 
-**Sources:** the scope reconciliation, keyed by its row ids in [Appendix A](#appendix-a-the-reconciliations-189-rows); the SDD ledger, cited as `L:NNN`; [the 6b plan](../archive/2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md), whose section "Deferred to Branch 6c" holds the dashboard task text; [the Branch 9 plan](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md), which holds Tasks 5–14, the deferred items and N-1 to N-5; the N-5 list; the final reviews of 6b and Branch 9; and [the docs taxonomy plan](../archive/2026-09-28-plan-docs-taxonomy-and-archive.md). The reconciliation, the ledger, the N-5 list and the reviews are git-ignored files in the main checkout under `.superpowers/sdd/2026-09-26-remediation-program/` (`reports/program-scope-reconciliation.md`, `progress.md`, `reports/n5-253-deferred-minors.md`, `reports/b6b-final-review.md`, `reports/b6b-final-rereview.md`, `reports/b9-final-review.md`).
+**Sources:** the scope reconciliation, keyed by its row ids in [Appendix A](#appendix-a-the-reconciliations-189-rows); the SDD ledger, cited as `L:NNN`; [the 6b plan](2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md), whose section "Deferred to Branch 6c" holds the dashboard task text; [the Branch 9 plan](2026-09-28-superpowers-plan-branch-9-follow-ups.md), which holds Tasks 5–14, the deferred items and N-1 to N-5; the N-5 list; the final reviews of 6b and Branch 9; and [the docs taxonomy plan](2026-09-28-plan-docs-taxonomy-and-archive.md). The reconciliation, the ledger, the N-5 list and the reviews are git-ignored files in the main checkout under `.superpowers/sdd/2026-09-26-remediation-program/` (`reports/program-scope-reconciliation.md`, `progress.md`, `reports/n5-253-deferred-minors.md`, `reports/b6b-final-review.md`, `reports/b6b-final-rereview.md`, `reports/b9-final-review.md`).
 
 **How v2 saves attended time:**
 
@@ -274,7 +286,7 @@ Seven branches. V2 has two PRs, so there are eight PRs in total. Effort is given
 
 ### V2 `docs/taxonomy-reorg` and `docs/archive-link-repair`: the docs taxonomy
 
-**Scope:** [the taxonomy plan](../archive/2026-09-28-plan-docs-taxonomy-and-archive.md) as written, with its Proposed status lifted by D-3.
+**Scope:** [the taxonomy plan](2026-09-28-plan-docs-taxonomy-and-archive.md) as written, with its Proposed status lifted by D-3.
 
 - PR A covers Tasks 1–9. Tasks 1–2 are tools only, so they can overlap V1. Task 3 regenerates the move map, and it starts only after the plan's "When to run" check prints nothing.
 - PR B covers Tasks 10–12, cut from `main` after PR A merges and run alongside Wave 2.
@@ -460,8 +472,8 @@ Two of the issues punted from v1 are new capability, not remediation. They start
    - the footprint snapshot has the current schema;
    - the stray store is handled as D-7 decides;
    - the temp backlog is removed.
-5. The releases approved in D-2 are published, and the global `ak` matches the latest one.
-6. The upstream watch is live and quiet: N-5 is merged, #240 is closed or its evidence is posted, and the scheduled run has nothing waiting on us. The first real dispatch is recorded when a release fires one; today `events.ndjson` on `upstream-watch-ledger` holds 0 `fired` records.
+5. The releases approved in D-2 are published. *(2026-10-02: the second clause, "the global `ak` matches the latest one", is dropped. `alpha.61` is the exit release, and it is checked through `npx`, with no global install; see the ledger's D-2 row.)*
+6. The upstream watch is live and quiet: N-5 is merged, #240 is closed or its evidence is posted, and the scheduled run has nothing waiting on us. The first real dispatch is recorded when a release fires one; today `events.ndjson` on `upstream-watch-ledger` holds 0 `fired` records. *(2026-10-02: recorded in the decision log's v2 close-out entry, from the read-back at M1L:51-60.)*
 7. Locally, only `main` and the two v5 branches (D-9) remain, with no v2 worktree or scratch folder left behind.
 8. The plans and the decision log are archived per the taxonomy, the auto-memory is current, and the ledger records v2's attended time.
 

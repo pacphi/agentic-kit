@@ -497,7 +497,7 @@ family on your behalf.
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
 | `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`, `--with-deja-vu`, `--no-deja-vu`) |
 
-## Installation method and self-update scope
+## Installation method and the kit's own version
 
 The package installation method and the command's operational scope are
 independent. A project-local or `npm exec` copy of `ak` can still upgrade global
@@ -505,12 +505,12 @@ Ruflo/AQE/host packages, write current-user configuration, and heal the current
 project. Conversely, globally installing the runner does not initialize any
 repository until a project-scoped command is run there.
 
-`ak sync` always evaluates the version of the running package. If that version is
-outdated, its final self-update step runs `npm install -g` for the exact version it
-just resolved. Consequently, a sync launched from a local dependency, Git checkout,
-or one-shot npm cache can create or replace a global agentic-kit installation. Use
-`ak sync --no-upgrade` when a lockfile, tarball, or checkout must remain the only
-version authority.
+`ak sync` never installs another agentic-kit version. It may report that a newer kit is
+available, and every run ends by printing the three steps that move a machine to the
+project-scoped line, run by exact version through `npx` whatever is installed globally. A
+sync launched from a local dependency, Git checkout, or one-shot npm cache therefore never
+creates or replaces a global agentic-kit installation. Use `ak sync --no-upgrade` to hold
+back Ruflo, AQE and the other tools too.
 
 See [Installation and scope](installation.md) for global, local, one-shot,
 tarball, Git, source-link, multi-user, and CI guidance.
@@ -558,9 +558,8 @@ be created or validated. Settings env keys, `~/.codex/config.toml` edits (Ruflo/
 `[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and managed guidance
 have host-specific reload behavior. Restart affected sessions to
 load a consistent configuration. Claude can reload a changed status-line command during
-a session; do not assume every setting is frozen until restart. The kit's own self-update
-runs last and applies from the next
-`ak` invocation.
+a session; do not assume every setting is frozen until restart. The kit itself is never
+updated by `ak sync`.
 
 > [!TIP]
 > If other sessions are mid-task: `ak sync --dry-run` first. Even without a `versions` row,
@@ -703,9 +702,8 @@ project entry, and generates the dual-host guidance.
 Add `--primary-host codex` if you want Codex to lead (Claude becomes the alternate).
 
 > [!NOTE]
-> `ak sync` self-updates **last** in its pass, so the newer code applies from your *next*
-> `ak` invocation — which is exactly `ak host pick` in the sequence above. Running the
-> two in this order is correct; the pick runs under the freshly-installed version.
+> `ak sync` no longer updates the kit itself, so install the version you want first (for
+> example `npm install -g @pacphi/agentic-kit`); `ak host pick` then runs under that version.
 
 From then on, `ak sync` **maintains** the choice — it re-applies your recorded dual-host
 config idempotently on every run. `ak status` flags drift; `ak host off` reverts to

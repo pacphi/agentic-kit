@@ -1,5 +1,5 @@
 <!-- BEGIN ruflo-reference -->
-<!-- Compact pointer; full reference: ~/.config/ruflo/ruflo-reference-full.md -->
+<!-- Compact Ruflo guidance; use ruflo <cmd> --help for commands and flags -->
 <!-- Managed by agentic-kit. Refresh with: ak x reference sync -->
 
 ## Ruflo (on demand)
@@ -28,9 +28,8 @@ Project memory can be two stores: `ruflo memory ...` reads `.swarm/memory.db`, t
 if a CLI search finds nothing, repeat with `--path <project>/.swarm/agentdb-memory.db` or
 use MCP `memory_search`.
 
-Read `~/.config/ruflo/ruflo-reference-full.md` or run `ruflo <cmd> --help` for
-commands and flags. Reconcile upgrades with `ak sync`; inspect effective health with
-`ak status`.
+Run `ruflo <cmd> --help` for commands and flags. Reconcile upgrades with `ak sync`;
+inspect effective health with `ak status`.
 
 The daemon defaults to local-only workers with a bounded lifetime. AI workers and
 other spend are opt-in and remain subject to user policy. Inspect or stop them with

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22+/26 ESM (`src/lib/**/*.mjs`), `node:test`, the dashboard client bundle (`src/lib/dashboard/client/*.mjs`, loaded as text in tests).
 
-**Spec:** [Program plan, Branch 1](../plans/2026-09-26-remediation-program.md#branch-1-fiximported-rollout-origins); [ADR-0060 §3](../adr/0060-session-surface-initiator-and-product-names.md) (imported copies excluded everywhere and counted); [ADR-0052 §3](../adr/0052-codex-usage-attribution.md) (the in-rollout marker is the signal); [audit record, ADR-0060 section](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md).
+**Spec:** [Program plan, Branch 1](2026-09-26-plan-remediation-program.md#branch-1-fiximported-rollout-origins); [ADR-0060 §3](../adr/0060-session-surface-initiator-and-product-names.md) (imported copies excluded everywhere and counted); [ADR-0052 §3](../adr/0052-codex-usage-attribution.md) (the in-rollout marker is the signal); [audit record, ADR-0060 section](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md).
 
 ## Global Constraints
 

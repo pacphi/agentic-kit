@@ -15,7 +15,11 @@ function closedWithin(run, ms) {
   ]).finally(() => clearTimeout(timer));
 }
 
-export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS, platform = process.platform } = {}) {
+export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS, platform = process.platform,
+  maxOutputBytes = 2 * 1024 * 1024 } = {}) {
+  if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > 16 * 1024 * 1024) {
+    throw Error('invalid process-scope output limit');
+  }
   // Register uncertainty with the enclosing guarded runner before any child starts.
   const hold = acquireRunRootHold();
   const runs = new Set();
@@ -26,7 +30,7 @@ export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS, plat
   };
   signal.addEventListener('abort', killLive, { once: true });
 
-  function launch(command, args, options) {
+  function launch(command, args, options, { pipeInput = false } = {}) {
     if (closing || signal.aborted) throw Error('cannot launch after process scope closing or aborted');
     if (!options?.env || typeof options.env !== 'object' || Array.isArray(options.env)) {
       throw Error('call-owned child requires an explicit sandbox env');
@@ -44,19 +48,35 @@ export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS, plat
     if (platform === 'win32' && ['SystemRoot', 'ComSpec', 'PATHEXT'].some(missing)) {
       throw Error('call-owned child requires Windows process env');
     }
-    const child = spawn(command, args, { ...options, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const run = { child, closed: false, error: null, stdout: '', stderr: '', done: null, result: null };
+    const child = spawn(command, args, { ...options, env, stdio: [pipeInput ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    const run = { child, closed: false, error: null, inputError: null, stdout: '', stderr: '',
+      outputBytes: 0, outputLimitExceeded: false, done: null, result: null };
+    // A child may exit before the parent closes/writes its protocol pipe.
+    // Retain that error for the caller instead of an unhandled stream error.
+    if (child.stdin) child.stdin.on('error', (error) => { run.inputError = error; });
     runs.add(run);
+    const capture = (channel, chunk) => {
+      const raw = Buffer.from(chunk);
+      const remaining = maxOutputBytes - run.outputBytes;
+      const accepted = raw.subarray(0, remaining);
+      run[channel] += accepted.toString('utf8');
+      run.outputBytes += accepted.length;
+      if (raw.length > remaining) {
+        run.outputLimitExceeded = true;
+        child.kill('SIGKILL');
+      }
+    };
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (s) => { run.stdout += s; });
-    child.stderr.on('data', (s) => { run.stderr += s; });
+    child.stdout.on('data', (chunk) => capture('stdout', chunk));
+    child.stderr.on('data', (chunk) => capture('stderr', chunk));
     // Resolve on close even after spawn error. The caller can inspect error immediately
     // while polling readiness, and no delayed rejection can go unhandled.
     run.done = new Promise((resolve) => {
       child.once('error', (error) => { run.error = error; });
       child.once('close', (code, childSignal) => {
         run.closed = true;
-        run.result = { code, signal: childSignal, stdout: run.stdout, stderr: run.stderr };
+        run.result = { code, signal: childSignal, stdout: run.stdout, stderr: run.stderr,
+          outputLimitExceeded: run.outputLimitExceeded };
         resolve(run.result);
       });
     });
@@ -77,8 +97,14 @@ export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS, plat
     } finally { clearTimeout(timer); }
   }
 
-  async function stop(run, grace = CLOSE_LIMIT_MS) {
-    if (!run.closed) run.child.kill('SIGTERM');
+  async function stop(run, grace = CLOSE_LIMIT_MS, { closeInput = false } = {}) {
+    if (!runs.has(run)) throw Error('cannot stop a child outside this process scope');
+    if (closeInput && !run.closed && !run.child.stdin) throw Error('cooperative stop requires a piped input');
+    let stopMethod = run.closed ? 'already-closed' : closeInput ? 'stdin-eof' : 'sigterm';
+    if (!run.closed) {
+      if (closeInput) run.child.stdin.end();
+      else run.child.kill('SIGTERM');
+    }
     let timer;
     try {
       await Promise.race([
@@ -87,9 +113,12 @@ export function createProcessScope(signal, { closeLimitMs = CLOSE_LIMIT_MS, plat
       ]);
     } finally {
       clearTimeout(timer);
-      if (!run.closed) run.child.kill('SIGKILL');
+      if (!run.closed) {
+        stopMethod = 'sigkill';
+        run.child.kill('SIGKILL');
+      }
     }
-    return closedWithin(run, CLOSE_LIMIT_MS);
+    return { ...await closedWithin(run, CLOSE_LIMIT_MS), stopMethod };
   }
 
   async function closeAll() {

@@ -1378,7 +1378,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": {
-        "refs": ["plan 5.1, audit 2026-09-26 (docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md) addendum 2: memory pin before provider registration"],
+        "refs": ["plan 5.1, audit 2026-09-26 (docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) addendum 2: memory pin before provider registration"],
         "files": ["src/commands/status/sections/project-memory.mjs", "src/lib/providers.mjs", "src/lib/ruflo-memory-config.mjs"]
       },
       "adjustment": "Once a released Ruflo honours the memory settings in .claude-flow/config.yaml, re-evaluate the memory pin written before provider registration.",
@@ -1400,7 +1400,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": {
-        "refs": ["plan 6.2, audit 2026-09-26 (docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md) addendum 3: daemon.idleSecs 0"],
+        "refs": ["plan 6.2, audit 2026-09-26 (docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) addendum 3: daemon.idleSecs 0"],
         "files": []
       },
       "adjustment": "Drop the managed daemon.idleSecs 0 setting once a released Ruflo stops shutting the daemon down on restored lastRun/lastStartedAt timestamps.",
@@ -1918,7 +1918,7 @@
       },
       "mapping": "mapped",
       "kitImpact": {
-        "refs": ["decision 4, audit 2026-09-26 (docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md): the Brain 4.3.28 hooks-changed warning"],
+        "refs": ["decision 4, audit 2026-09-26 (docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md): the Brain 4.3.28 hooks-changed warning"],
         "files": []
       },
       "adjustment": "Once a released Brain stops injecting capacity advice while the Brain is off, re-review the reviewed hook-contract pin (decision 4).",
@@ -1942,7 +1942,7 @@
       },
       "mapping": "mapped",
       "kitImpact": {
-        "refs": ["plan stage 1 commit 7, audit 2026-09-26 (docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md): refused refresh held as blocked"],
+        "refs": ["plan stage 1 commit 7, audit 2026-09-26 (docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md): refused refresh held as blocked"],
         "files": []
       },
       "adjustment": "Once a released Brain --update runs the current updater, lift the blocked hold on the refused refresh.",
@@ -2774,6 +2774,24 @@
         { "date": "2026-09-29", "event": "registered", "note": "3.14.4 disposable project repro: settings changed on all three runs; guidance hashes and mtimes did not" },
         { "date": "2026-09-29", "event": "closed", "note": "upstream completed via PR #783; merge commit 63d3deb dated 13:05:19 UTC, after npm 3.14.5 publication at 10:08:33 UTC" },
         { "date": "2026-09-29", "event": "reviewed", "note": "Source-bound released 3.14.5 disposable public init still churns settings on each of three same-option runs, with backup and default changes on run 2. Subsequent release conformance unverified; global 3.14.4 metadata unchanged. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#801",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/801",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "fix: MCP EOF shutdown leaves the shared patterns.rvf lock marker",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["M1 MCP shutdown conformance; separate from #240's original busy-startup criteria"], "files": ["tests/live/aqe-mcp-lock-conformance.test.mjs", "docs/archive/2026-09-30-upstream-aqe-mcp-shutdown-contribution.md"] },
+      "adjustment": "After a fixing commit lands in a published AQE artifact, rerun real packaged-MCP EOF shutdown and packed-kit startup/preservation conformance on supported platforms. Keep stock-release failure separate from passing source-module controls; do not manually unlink locks, patch installed artifacts, retire unrelated constraints or claim a universal managed floor.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-10-01", "event": "filed", "note": "Maintainer approved exact issue text only; published at 00:22:49Z and remote title/body matched SHA-256 275cbffec6cdfd1f152bc89d8781163dec5d612c2d661a5d0a98cac8077a949d. Source fix remains private." },
+        { "date": "2026-10-01", "event": "registered", "note": "Published 3.14.6 macOS real-MCP/packed-kit busy startup and patterns.rvf preservation passed; EOF leaves dead-PID marker. Explicit adapter close and proposed matched source-module control remove it; normal rebuilt bundle, other platforms and broad fleet readiness unverified. Receipt: docs/archive/2026-09-30-aqe-m1-mcp-lock-proof.md." }
       ]
     }
   ]

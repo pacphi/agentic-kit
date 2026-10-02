@@ -13,7 +13,7 @@
   [ADR-0027](0027-shared-project-census.md) (project census),
   [ADR-0053](0053-host-setup-evidence-and-usage-diagnostics.md) (host management states), ADR-0057
   (dashboard taxonomy and role lenses; on its own branch, to be reconciled on merge), and the
-  [issues 237–239 audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)
+  [issues 237–239 audit record](../archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md)
   (Addendum 3)
 
 ## Context

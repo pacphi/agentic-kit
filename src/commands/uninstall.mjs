@@ -7,9 +7,12 @@ import fs from 'node:fs';
 import { releaseCodexContext } from '../lib/codex-context.mjs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
-import { run as runCmd } from '../lib/exec.mjs';
+import { run as runCmd, have } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
+import { undoProviders, undoCodexMcp, undoRufloMcpInCodex } from '../lib/providers.mjs';
+import { undoAqeRouter } from '../lib/aqe-router.mjs';
+import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { releaseRufloComponents } from '../lib/ruflo-components/teardown.mjs';
 import { releaseAqePins } from '../lib/aqe-project-pin.mjs';
@@ -20,7 +23,10 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderUndoReport } from '../lib/adapters/lifecycle-render.mjs';
 import { parseDejaVuDoctor, validateDejaVuIndexPath } from '../lib/deja-vu.mjs';
 import { present as rbPresent } from '../lib/ruvnet-brain.mjs';
+import { disableRuvnetBrainNightly } from '../lib/heal.mjs';
+import { AQE_EMBEDDING_MODEL, OLLAMA_EMBEDDING_MODEL } from '../lib/aqe-embedding-config.mjs';
 import * as paths from '../lib/paths.mjs';
+import { brainShimPath } from '../lib/opencode-core.mjs';
 import { ok, warn, fail, info } from '../lib/output.mjs';
 import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
 import { modelInventoryPath, modelScopeKeyPath } from '../lib/model-inventory/store.mjs';
@@ -68,8 +74,14 @@ Options:
   --remove-agent-browser  uninstall only a receipt-owned agent-browser package
   --remove-deja-vu uninstall the Kit-owned deja-vu package (confirmed)
   --purge-deja-vu-data delete only the derived deja-vu index (confirmed)
-  --purge          remove Kit footprint + ruflo/aqe and receipt-owned agent-browser;
-                   preserve all browser/session/profile data and deja-vu package/data
+  --purge          remove Kit footprint + ruflo/aqe and receipt-owned agent-browser, and
+                   undo what \`ak host off\` undoes: provider env, the AQE router, the
+                   Codex MCP entries ak registered and the AQE embedding settings, each
+                   by receipt; asks before removing the RuvNet Brain plugin and nightly
+                   updater (its knowledge base is kept) and the Ollama alias ak created;
+                   keeps the deja-vu package/index and a standalone global agentdb unless
+                   you answer yes at their prompts (--yes does not approve those);
+                   preserves all browser/session/profile data
   --yes            skip confirmation prompts
   --dry-run        print what would be removed; change nothing
 
@@ -80,6 +92,16 @@ Examples:
 
 const confirm = async (q, yes) => {
   if (yes) return true;
+  if (!process.stdin.isTTY) return false;
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const a = (await rl.question(`${q} [y/N] `)).trim().toLowerCase();
+  rl.close();
+  return a.startsWith('y');
+};
+
+// For defaults that KEEP data: only a typed interactive yes counts. `--yes` does not
+// approve these, so `ak uninstall --purge --yes` can never delete them.
+const confirmKeep = async (q) => {
   if (!process.stdin.isTTY) return false;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const a = (await rl.question(`${q} [y/N] `)).trim().toLowerCase();
@@ -270,20 +292,23 @@ async function computeDejaVuPlan(ctx) {
   const ownsDeja = hasDejaVuOwnership(cfg);
   const ownedTargetCount = plain(dejaOwn?.targets) ? Object.keys(dejaOwn.targets).length : 0;
   const dejaAdapter = ctx.deps.dejaAdapter ?? companionLifecycleFor('deja-vu');
+  const ask = ctx.deps?.extras?.confirmKeep ?? confirmKeep;
   let removePackageApproved = false;
   let purgeDataApproved = dry && flags['purge-deja-vu-data'];
-  if (!dry && flags['remove-deja-vu'] && dejaOwn?.install) {
-    removePackageApproved = await confirm(
-      'Remove the Kit-owned global deja-vu package for ALL projects on this machine?',
-      flags.yes,
-    );
+  if (dry && flags.purge && !flags['purge-deja-vu-data']) {
+    info('[dry-run] deja-vu package and derived index: kept unless you answer yes at the prompt (--yes does not approve them)');
+  }
+  // An explicit flag keeps today's behaviour (--yes approves). Under --purge alone the
+  // default is to keep, so only an interactive yes approves (#311).
+  if (!dry && (flags['remove-deja-vu'] || flags.purge) && dejaOwn?.install) {
+    const q = 'Remove the Kit-owned global deja-vu package for ALL projects on this machine?';
+    removePackageApproved = flags['remove-deja-vu'] ? await confirm(q, flags.yes) : await ask(q);
     if (!removePackageApproved) info('kept deja-vu package');
   }
-  if (!dry && flags['purge-deja-vu-data']) {
-    purgeDataApproved = await confirm(
-      'Delete the derived deja-vu index? Notes, policy, peers, config, and source transcripts stay.',
-      flags.yes,
-    );
+  // Under --purge alone, ask about the index only when deja-vu is actually installed.
+  if (!dry && (flags['purge-deja-vu-data'] || (flags.purge && ownsDeja))) {
+    const q = 'Delete the derived deja-vu index? Notes, policy, peers, config, and source transcripts stay.';
+    purgeDataApproved = flags['purge-deja-vu-data'] ? await confirm(q, flags.yes) : await ask(q);
     if (!purgeDataApproved) info('kept deja-vu derived index');
   }
   return {
@@ -353,7 +378,7 @@ async function dejaVuDataPurge(ctx) {
 // Phase 3: package removal is possible only after target teardown and any
 // requested data purge succeeded. A data failure retains the CLI for retry.
 async function dejaVuPackageRemoval(ctx) {
-  if (!ctx.flags['remove-deja-vu']) return;
+  if (!ctx.flags['remove-deja-vu'] && !ctx.flags.purge) return;
   const { dry } = ctx;
   const { ownsDeja, dejaOwn, removePackageApproved } = ctx.plan;
   if (!ownsDeja || !dejaOwn?.install) {
@@ -461,6 +486,233 @@ function stepAqePin(ctx) {
   for (const line of result.lines) report[line.level](line.text);
   if (!result.ok) ctx.state.ownershipTeardownOk = false;
   saveKitConfig(ctx.cfg);
+}
+
+// #310 (exit release): the teardown `ak host off` runs, which --purge used to skip.
+// Each undo restores only values whose receipts show ak wrote them, so a user's own
+// provider env, router config or Codex MCP entry is preserved. It runs under --purge
+// only, and before purge-kit-config, so the receipts in kit.json are still readable.
+// `deps.undo` replaces the real calls in tests.
+const REAL_UNDO = {
+  providers: undoProviders,
+  aqeRouter: undoAqeRouter,
+  codexMcp: undoCodexMcp,
+  rufloMcpInCodex: undoRufloMcpInCodex,
+  aqeEmbedding: reconcileAqeEmbeddingProjections,
+};
+
+async function stepHostOffTeardown(ctx) {
+  const { cfg, dry } = ctx;
+  if (dry) {
+    info('[dry-run] restore ak-owned provider env (ENABLE_*, AQE_LLM_PROVIDER, AQE_MAX_BUDGET_USD) by receipt');
+    info('[dry-run] restore or remove the ak-managed AQE router config by receipt');
+    info('[dry-run] remove the Codex MCP entries ak registered (Codex MCP, ruflo MCP in Codex)');
+    info('[dry-run] release ak-owned AQE embedding projections in Codex and OpenCode config by receipt');
+    return;
+  }
+  const undo = { ...REAL_UNDO, ...(ctx.deps?.undo ?? {}) };
+  const cwd = process.cwd();
+  const codexOwn = cfg.integrations?.ownership?.codex ?? {};
+  const results = [
+    undo.providers(cwd),
+    undo.aqeRouter(cwd),
+    await undo.codexMcp(cwd, { managed: codexOwn.mcp === 'ak' }),
+    await undo.rufloMcpInCodex(cwd, { managed: codexOwn.reverseMcp === 'ak' }),
+    // unmanaged mode makes the projection remove only the keys its receipts show ak wrote
+    undo.aqeEmbedding({ ...cfg, aqeEmbedding: { mode: 'unmanaged' } }, cwd),
+  ];
+  const [, , codex, rufloCodex] = results;
+  for (const r of results) (r.ok ? ok : warn)(r.detail);
+  if (results.some((r) => !r.ok)) ctx.state.ownershipTeardownOk = false;
+  // A removed entry no longer needs its receipt; a failed removal keeps it for a retry.
+  cfg.integrations.ownership ??= {};
+  cfg.integrations.ownership.codex = {
+    ...codexOwn,
+    ...(codex.ok ? { mcp: null } : {}),
+    ...(rufloCodex.ok ? { reverseMcp: null } : {}),
+  };
+  saveKitConfig(cfg);
+}
+
+// #311 (exit release): what older ak installed outside kit.json's receipts. Removals
+// ak can show it owns ask first; the knowledge base and anything the user installed
+// themselves are never touched. A failure sets the exit code but not kit.json's fate,
+// because none of these depend on a receipt.
+const REAL_EXTRAS = {
+  confirm,
+  confirmKeep,
+  run: runCmd,
+  have,
+  brainPresent: rbPresent,
+  brainShim: brainShimPath,
+  disableNightly: disableRuvnetBrainNightly,
+  // The standalone global copy, never the one Ruflo bundles inside its own tree.
+  agentdbDir: () => { try { const d = path.join(paths.globalRoot(), 'agentdb'); return fs.existsSync(d) ? d : null; } catch { return null; } },
+};
+const AGENTDB_REMOVE_CMD = 'npm uninstall -g agentdb';
+
+// The Brain installer, not ak, writes this stable-spine MCP shim, so it goes only after the
+// same confirmation as the plugin, only as a regular file, and its folders only when empty.
+function brainShimFile(x) {
+  const shim = x.brainShim();
+  try {
+    if (fs.lstatSync(shim).isFile()) return shim;
+    info(`${shim} is not a regular file — left alone`);
+  } catch { /* absent */ }
+  return null;
+}
+function removeBrainShim(shim, ctx) {
+  try {
+    fs.rmSync(shim);
+    for (const dir of [path.dirname(shim), path.dirname(path.dirname(shim))]) {
+      try { fs.rmdirSync(dir); } catch { break; } // not empty or already gone: leave it
+    }
+    ok(`RuvNet Brain MCP shim: removed ${shim}`);
+  } catch (e) {
+    warn(`RuvNet Brain MCP shim: could not remove ${shim} — ${e.message}`);
+    ctx.state.extrasOk = false;
+  }
+}
+
+async function purgeBrain(x, ctx) {
+  const plugin = x.brainPresent();
+  const shim = brainShimFile(x);
+  if (!plugin && !shim) return;
+  const what = [
+    plugin && 'the RuvNet Brain plugin and its nightly LaunchAgent',
+    shim && `the Brain MCP shim ${shim}`,
+  ].filter(Boolean).join(' and ');
+  if (ctx.dry) {
+    info(`[dry-run] remove ${what} (confirmed); the knowledge base in ~/.cache/ruvnet-brain is kept`);
+    return;
+  }
+  if (!await x.confirm(`Remove ${what}? The knowledge base is kept.`, ctx.flags.yes)) {
+    info('kept the RuvNet Brain plugin and shim');
+    return;
+  }
+  let pluginGone = !plugin;
+  if (plugin) {
+    const removed = await x.run('claude', ['plugin', 'uninstall', 'ruvnet-brain@ruvnet-brain'], { timeout: 60_000 });
+    const nightly = await x.disableNightly();
+    pluginGone = removed.code === 0;
+    (pluginGone ? ok : warn)(`RuvNet Brain plugin: ${pluginGone ? 'removed' : 'could not remove — run `claude plugin uninstall ruvnet-brain@ruvnet-brain`'}`);
+    (nightly.ok ? ok : warn)(`RuvNet Brain nightly updater: ${nightly.detail}`);
+    if (!pluginGone || !nightly.ok) ctx.state.extrasOk = false;
+  }
+  if (shim && pluginGone) removeBrainShim(shim, ctx);
+  else if (shim) warn(`RuvNet Brain MCP shim kept at ${shim} while the plugin is installed — run the purge again once the plugin is removed`);
+  info('RuvNet Brain knowledge base kept in ~/.cache/ruvnet-brain (delete it yourself if you do not want it)');
+}
+
+// The alias is a copy of the model ak pulled, so it shares that model's ID in
+// `ollama list`. A different ID means someone else made it: leave it alone.
+function ollamaIds(listing, names) {
+  const ids = {};
+  for (const line of String(listing).split('\n').slice(1)) {
+    const [name, id] = line.trim().split(/\s+/);
+    for (const n of names) if (name === n || name === `${n}:latest`) ids[n] = id;
+  }
+  return ids;
+}
+async function purgeOllamaAlias(x, ctx) {
+  if (ctx.dry) {
+    info(`[dry-run] remove the Ollama alias ${AQE_EMBEDDING_MODEL} if it is a copy of ${OLLAMA_EMBEDDING_MODEL} (confirmed)`);
+    return;
+  }
+  if (!await x.have('ollama')) return;
+  const listed = await x.run('ollama', ['list'], { timeout: 30_000 });
+  if (listed.code !== 0) return;
+  const ids = ollamaIds(listed.stdout, [AQE_EMBEDDING_MODEL, OLLAMA_EMBEDDING_MODEL]);
+  if (!ids[AQE_EMBEDDING_MODEL]) return;
+  if (ids[AQE_EMBEDDING_MODEL] !== ids[OLLAMA_EMBEDDING_MODEL]) {
+    info(`Ollama model ${AQE_EMBEDDING_MODEL} is not a copy ak made — left alone`);
+    return;
+  }
+  if (!await x.confirm(`Remove the Ollama alias ${AQE_EMBEDDING_MODEL}? The ${OLLAMA_EMBEDDING_MODEL} model stays.`, ctx.flags.yes)) {
+    info('kept the Ollama alias');
+    return;
+  }
+  const rm = await x.run('ollama', ['rm', AQE_EMBEDDING_MODEL], { timeout: 60_000 });
+  (rm.code === 0 ? ok : warn)(`Ollama alias: ${rm.code === 0 ? 'removed' : `could not remove — run \`ollama rm ${AQE_EMBEDDING_MODEL}\``}`);
+  if (rm.code !== 0) ctx.state.extrasOk = false;
+}
+
+// Older ak installed a standalone global agentdb with no ownership receipt. The only
+// trace is the retired `agentdb` key in kit.json, so a copy is removed only with that key
+// AND a typed interactive yes; otherwise the command is printed for the user.
+async function purgeAgentdb(x, ctx) {
+  const dir = x.agentdbDir();
+  if (ctx.dry) { info(`[dry-run] standalone agentdb: remove only with the older-ak marker and an interactive yes, else print \`${AGENTDB_REMOVE_CMD}\``); return; }
+  if (!dir) return;
+  const markedByOlderAk = Object.hasOwn(ctx.cfg, 'agentdb');
+  if (markedByOlderAk && await x.confirmKeep('Remove the standalone global agentdb that an older ak installed?')) {
+    const r = await x.run('npm', ['uninstall', '-g', 'agentdb'], { timeout: 300_000 });
+    (r.code === 0 ? ok : warn)(`agentdb: ${r.code === 0 ? 'removed' : 'could not remove'}`);
+    if (r.code !== 0) ctx.state.extrasOk = false;
+    return;
+  }
+  info(`standalone agentdb left installed${markedByOlderAk ? '' : ' (ak cannot show it installed this copy)'} — remove it yourself if you do not use it: \`${AGENTDB_REMOVE_CMD}\``);
+}
+
+async function stepPurgeExtras(ctx) {
+  const x = { ...REAL_EXTRAS, ...(ctx.deps?.extras ?? {}) };
+  await purgeBrain(x, ctx);
+  await purgeOllamaAlias(x, ctx);
+  await purgeAgentdb(x, ctx);
+}
+
+// #312 (exit release): ak's own config and state folders go once every teardown that reads
+// receipts has finished. Two things are the user's data, not ak's, and stay unless a typed
+// interactive yes (not --yes) says otherwise: the AQE store-merge archives and backups, and
+// the user-level Ruflo memory store. Runs LAST: install-edits.json lives in the state folder
+// and stepInstallEdits reads it.
+const UNRESTORABLE_EDITS = 'Three edits that older ak releases made inside Ruflo\'s install before ak kept receipts cannot be restored. Reinstall Ruflo to get its shipped files back.';
+
+// Only ever remove a folder this code created: its own name, and not a symlink.
+function removableOwnDir(dir) {
+  try { return path.basename(dir) === 'agentic-kit' && !fs.lstatSync(dir).isSymbolicLink(); } catch { return false; }
+}
+async function keepOrDelete(x, ctx, dir, label, question) {
+  if (!fs.existsSync(dir)) return true;
+  if (await x.confirmKeep(question)) {
+    try { fs.rmSync(dir, { recursive: true }); ok(`${label} deleted`); return false; }
+    catch (error) { warn(`${label} could not be deleted: ${error.message}`); ctx.state.extrasOk = false; return true; }
+  }
+  info(`kept ${label} (${dir}) — it is your data, not ak configuration`);
+  return true;
+}
+
+async function stepPurgeConfigState(ctx) {
+  const stateDir = path.join(paths.stateBase(), 'agentic-kit');
+  const configDir = paths.configDir();
+  const archives = paths.aqeStoreMergeDir();
+  const memory = paths.userMemoryDir();
+  if (ctx.dry) {
+    info(`[dry-run] ${UNRESTORABLE_EDITS}`);
+    info(`[dry-run] remove ${configDir} and ${stateDir} after teardown succeeds (adapter consent and grants go with the config folder)`);
+    if (fs.existsSync(archives)) info(`[dry-run] keep the AQE store-merge archives in ${archives} unless you answer yes at the prompt (--yes does not approve it)`);
+    if (fs.existsSync(memory)) info(`[dry-run] keep the Ruflo memory store ${memory} unless you answer yes at the prompt (--yes does not approve it)`);
+    return;
+  }
+  if (!ctx.state.ownershipTeardownOk) {
+    warn('config and state folders retained because a teardown above is incomplete; they hold the receipts a retry needs');
+    return;
+  }
+  const x = { ...REAL_EXTRAS, ...(ctx.deps?.extras ?? {}) };
+  const archivesKept = fs.existsSync(archives)
+    ? await keepOrDelete(x, ctx, archives, 'AQE store-merge archives and backups', `Delete the AQE store-merge archives and backups in ${archives}? They are your data.`)
+    : false;
+  await keepOrDelete(x, ctx, memory, 'the Ruflo memory store', `Delete the user-level Ruflo memory store ${memory}? It holds your memories.`);
+  if (removableOwnDir(stateDir)) {
+    for (const entry of fs.readdirSync(stateDir)) {
+      if (archivesKept && path.join(stateDir, entry) === archives) continue;
+      fs.rmSync(path.join(stateDir, entry), { recursive: true, force: true });
+    }
+    if (!fs.readdirSync(stateDir).length) fs.rmdirSync(stateDir);
+    ok(`removed ak state${archivesKept ? ' (archives kept)' : ''}`);
+  }
+  if (removableOwnDir(configDir)) { fs.rmSync(configDir, { recursive: true, force: true }); ok('removed ak config'); }
+  info(UNRESTORABLE_EDITS);
 }
 
 function stepPurgeArtifacts(ctx) {
@@ -599,7 +851,8 @@ async function stepGlobalPackages(ctx) {
 
 // RuvNet Brain: a user-scope plugin + a large (~512 MB) KB cache — left in
 // place (like ruflo/aqe) rather than force-deleted. Point at the manual path.
-function stepRuvnetBrainNotice() {
+function stepRuvnetBrainNotice(ctx) {
+  if (ctx?.flags?.purge) return; // --purge asks about the plugin itself (purge-extras)
   if (rbPresent()) {
     info('RuvNet Brain left installed — remove manually: `claude plugin uninstall ruvnet-brain@ruvnet-brain` + `rm -rf ~/.cache/ruvnet-brain`');
   }
@@ -623,6 +876,8 @@ export const UNINSTALL_STEPS = [
   { id: 'agent-browser', when: () => true, run: stepAgentBrowser },
   { id: 'aqe-pin', when: () => true, run: stepAqePin },
   { id: 'ruflo-components', when: () => true, run: stepRufloComponents },
+  { id: 'host-off-teardown', when: (ctx) => ctx.flags.purge, run: stepHostOffTeardown },
+  { id: 'purge-extras', when: (ctx) => ctx.flags.purge, run: stepPurgeExtras },
   { id: 'purge-artifacts', when: (ctx) => ctx.flags.purge, run: stepPurgeArtifacts },
   {
     id: 'purge-kit-config',
@@ -634,6 +889,7 @@ export const UNINSTALL_STEPS = [
   { id: 'this-project', when: (ctx) => ctx.flags['this-project'], run: stepThisProject },
   { id: 'install-edits', when: () => true, run: stepInstallEdits },
   { id: 'global-packages', when: () => true, run: stepGlobalPackages },
+  { id: 'purge-config-state', when: (ctx) => ctx.flags.purge, run: stepPurgeConfigState },
   { id: 'ruvnet-brain-notice', when: () => true, run: stepRuvnetBrainNotice },
 ];
 
@@ -651,7 +907,7 @@ export async function run({ flags, deps = {} }) {
     deps,
     cfg,
     act,
-    state: { ownershipTeardownOk: true, dejaVuTeardownOk: true },
+    state: { ownershipTeardownOk: true, dejaVuTeardownOk: true, extrasOk: true },
   };
 
   for (const step of UNINSTALL_STEPS) {
@@ -659,5 +915,5 @@ export async function run({ flags, deps = {} }) {
   }
 
   ok('uninstall complete — project data (.swarm/.claude-flow/.agentic-qe) untouched');
-  return ctx.state.ownershipTeardownOk ? 0 : 1;
+  return ctx.state.ownershipTeardownOk && ctx.state.extrasOk ? 0 : 1;
 }
