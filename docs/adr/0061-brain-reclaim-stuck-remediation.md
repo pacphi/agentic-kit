@@ -6,7 +6,7 @@
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0025](0025-machine-footprint-metrics.md) (machine-footprint metrics; this
   record deliberately does not add a new footprint subsystem there — see §4),
-  the [issues 237–239 audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)
+  the [issues 237–239 audit record](../archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md)
   (Decision 4, the Brain hook-contract warning this record does not touch), upstream
   [stuinfla/ruvnet-brain#335](https://github.com/stuinfla/ruvnet-brain/issues/335) (filed
   2026-09-27, with a follow-up comment recording the workaround verified here)

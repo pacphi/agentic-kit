@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 // Which AQE MCP registrations ak may edit, one rule for Claude, Codex and OpenCode
-// (Decision 3 of docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md,
+// (Decision 3 of docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md,
 // widening the #230 allow-list). Accepted: AQE's own programs started exactly as AQE
 // starts its MCP server. `aqe`, `agentic-qe` and `aqe-v3` are one CLI whose `mcp`
 // command starts the same server as `aqe-mcp` (agentic-qe package.json `bin`,

@@ -172,4 +172,4 @@ Any other command, extra flag, subcommand or wrapper is reported as an unrecogni
 transport and preserved. A user program named like an AQE program that takes exactly
 these arguments receives the loopback endpoint; that value is non-secret and
 receipt-owned, and `aqe-mcp` was already trusted this way. Source: audit decision 3 in
-[the #237–#239 record](https://github.com/pacphi/agentic-kit/blob/main/docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md).
+[the #237–#239 record](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md).

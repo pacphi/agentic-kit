@@ -3,7 +3,7 @@
 ## Status
 
 **Issue filed; source fix private.** M1-only follow-up prepared 2026-09-30 to the
-[native receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md).
+[native receipt](2026-09-30-aqe-m1-mcp-lock-proof.md).
 The maintainer approved Option A, issue publication only. Published
 [AQE #801](https://github.com/proffesor-for-testing/agentic-qe/issues/801) at
 2026-10-01T00:22:49Z; remote title/body were read back and match the exact draft below.

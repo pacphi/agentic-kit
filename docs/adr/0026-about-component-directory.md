@@ -189,7 +189,7 @@ All complete:
 ## Amendment 2026-09-26 — agentdb is the copy Ruflo bundles
 
 ak no longer installs, repins or monitors a standalone global `agentdb` (decision A in the
-[2026-09-26 audit](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md)). The
+[2026-09-26 audit](../archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md)). The
 agentdb entry stays in Engine & memory, because Ruflo's memory runs on it, but its paragraph now
 says it ships inside Ruflo, and both chips read Ruflo's bundled `agentdb/package.json` (`ak
 about` and the dashboard's version fold), never a global that may lag or belong to another
@@ -201,7 +201,7 @@ superseded.
 ## Amendment 2026-09-26 — install-edit line
 
 When ak has an applied install-edit receipt inside Ruflo's install (Addendum 2, problem 3 of the
-[2026-09-26 audit](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md); the
+[2026-09-26 audit](../archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md); the
 native SQLite pin, ruvnet/ruflo#2219), the ruflo card carries one line beside its chip: "ak applied
 Ruflo's native SQLite pin (ruvnet/ruflo#2219)", followed by the package, field and values. `ak about`
 reads it from the receipt ledger and the manifests it names, the same read the `natives` status row

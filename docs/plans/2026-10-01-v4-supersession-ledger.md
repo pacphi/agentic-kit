@@ -41,26 +41,25 @@ Each entry has a source citation, a state, the redesign's impact on it, and one 
 **Citation keys:**
 
 - **DSN** is the [design](2026-10-01-project-scope-only-design.md).
-- **v2** is [remediation program v2](2026-09-28-remediation-program-v2.md).
-- **EX** is its [develop execution plan](2026-09-28-remediation-v2-develop-execution.md).
-- **v1** is [remediation program v1](2026-09-26-remediation-program.md).
-- **WP** and **WD** are the [CI Windows plan](2026-09-28-ci-windows-test-speed.md) and its [design](2026-09-28-ci-windows-test-speed-design.md).
-- **DL** is the [issues 237–239 decision log](2026-09-26-issues-237-238-239-verification-and-decisions.md).
+- **v2** is [remediation program v2](../archive/2026-09-28-plan-remediation-program-v2.md).
+- **EX** is its [develop execution plan](../archive/2026-09-28-plan-remediation-v2-develop-execution.md).
+- **v1** is [remediation program v1](../archive/2026-09-26-plan-remediation-program.md).
+- **WP** and **WD** are the [CI Windows plan](../archive/2026-09-28-plan-ci-windows-test-speed.md) and its [design](../archive/2026-09-28-design-ci-windows-test-speed.md).
+- **DL** is the [issues 237–239 decision log](../archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md).
 - **SM** is the remediation v2 scope matrix, `docs/archive/2026-09-29-remediation-v2-scope-matrix.md`.
-- The completion program (section H), cited as `KEY:line`:
-  - on branch `docs/completion-program-plan`: **PRG**, `docs/plans/2026-09-29-completion-program.md`;
-    **ACC**, `2026-09-29-completion-acceptance-ledger.md`; **SES**,
-    `2026-09-30-session-organization-and-activity-design.md`; **TAX**,
+- The completion program (section H), cited as `KEY:line`. These files were on branches when this
+  ledger was written. They are now on `main`, moved by [#317](https://github.com/pacphi/agentic-kit/issues/317):
+  - in `docs/archive/`: **PRG**, `2026-09-29-plan-completion-program.md`; **ACC**,
+    `2026-09-29-plan-completion-acceptance-ledger.md`; **M1X**, `2026-09-30-plan-completion-m1-execution.md`;
+    **M1L**, `2026-09-30-plan-completion-m1-closeout-ledger.md`; **SHC**,
+    `2026-09-30-upstream-aqe-mcp-shutdown-contribution.md`; **RCP**, `2026-09-30-aqe-m1-mcp-lock-proof.md`;
+    **CL**, `2026-09-29-plan-issue-239-closure-and-v5-foundation.md`; **EV**,
+    `2026-09-29-plan-execution-evidence-and-upgrade-acceptance.md`;
+  - in `docs/proposals/v5/`: **SES**, `2026-09-30-session-organization-and-activity-design.md`; **TAX**,
     `2026-09-30-conversation-activity-and-topic-taxonomy-design.md`;
-  - on branch `fix/completion-m1`: **M1X**, `docs/plans/2026-09-30-completion-m1-execution.md`;
-    **M1L**, `2026-09-30-completion-m1-closeout-ledger.md`; **SHC**,
-    `2026-09-30-aqe-mcp-shutdown-contribution.md`; **RCP**,
-    `docs/archive/2026-09-30-aqe-m1-mcp-lock-proof.md`; **WFL**,
-    `.github/workflows/aqe-m1-conformance.yml`; **REG**,
-    `src/lib/hook-audit/agentic-dependency-constraints.json`;
-  - on branch `wip/local-inventory-2026-10-01`: **CL**,
-    `docs/plans/2026-09-29-issue-239-closure-and-v5-foundation.md`; **EV**,
-    `2026-09-29-execution-evidence-and-upgrade-acceptance.md`.
+  - **REG**, `src/lib/hook-audit/agentic-dependency-constraints.json`, is on `main`;
+  - **WFL**, `.github/workflows/aqe-m1-conformance.yml`, is still on branch `fix/completion-m1`, where it
+    stays until its rewrite (#347).
 
 **Excluded:** issues labelled `needs-review` (#95, #109, #115, #116, #117, #167) and every item
 about them. That covers v2's D-12 to D-14, the matching decision-gate rows DG-3 to DG-5, and the

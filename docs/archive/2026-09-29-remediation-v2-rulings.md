@@ -6,7 +6,7 @@ This record transcribes the controller's current execution log into readable
 language, retaining source order, decisions, reasons and stated costs. It includes
 17 `Ruling:` entries and the separately worded ADR coordination ruling, for 18
 entries total. The earlier 13-entry rollup was incomplete. These execution rulings
-operate within the [confirmed execution plan](../plans/2026-09-28-remediation-v2-develop-execution.md).
+operate within the [confirmed execution plan](2026-09-28-plan-remediation-v2-develop-execution.md).
 They do not create further release, data-operation or provider authority.
 
 ## Maintainer-approved decisions

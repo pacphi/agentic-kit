@@ -1,8 +1,8 @@
 # Usage accuracy execution plan
 
 - **Branch:** `fix/usage-accuracy`, based on `develop@e2f9dcae0554ff63921df618a819fd5e6afe80d2`
-- **Scope sources:** [v2 V6](../plans/2026-09-28-remediation-program-v2.md),
-  [v1 Wave 4](../plans/2026-09-26-remediation-program.md),
+- **Scope sources:** [v2 V6](2026-09-28-plan-remediation-program-v2.md),
+  [v1 Wave 4](2026-09-26-plan-remediation-program.md),
   [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md).
 
 ## Status

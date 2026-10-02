@@ -16,7 +16,7 @@
 // CLI. That step read only `AGENTDB_PATH` or `./agentdb.db` — a store no Ruflo
 // writer uses, so it consolidated nothing — and its install looped on every sync
 // (#237 §3). It was retired with the standalone install (decision A in
-// docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md).
+// docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md).
 //
 // NEVER starts a daemon, NEVER backgrounds anything. `runner` is injectable so
 // `ak status --refresh=live --only harvest` can drive it against an isolated

@@ -3,7 +3,7 @@
 ## Status
 
 **Active**, 2026-09-30. This is the successor to the immutable
-[246-row historical matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md).
+[246-row historical matrix](2026-09-29-remediation-v2-scope-matrix.md).
 It maps M1 closeout only; it does not plan future milestone implementation.
 Each historical identifier occurs exactly once, in its original order.
 Evidence details and original rulings remain in that matrix and its linked receipts.
@@ -63,7 +63,7 @@ AQE #240 retains four obligations: published fixing artifact, verified selected 
 version, actual MCP-holder plus current packaged-kit command, and retired narrow exception
 with independent storage errors still failing. Use `ak status --refresh=live --only aqe`;
 no retired aliases or invented universal floor. Native Windows and installed-target proof remain open.
-The [local 3.14.6 receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) now supplies
+The [local 3.14.6 receipt](2026-09-30-aqe-m1-mcp-lock-proof.md) now supplies
 qualified macOS real-MCP/packed-kit startup and preservation proof. Its full gate failed
 on omitted MCP shutdown cleanup; a private source proposal control passes, while normal
 rebuilt bundle and supported-platform proof remain unverified.

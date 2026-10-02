@@ -5,8 +5,8 @@ Implementation evidence ends at develop `88ce597f444d487a34d9871a447cf8942f76f76
 This records 189 Appendix A and 57 Appendix B identifiers exactly once, in source order.
 Original disposition is retained separately from the current evidence disposition.
 
-The [approved program](../plans/2026-09-28-remediation-program-v2.md) and
-[execution plan](../plans/2026-09-28-remediation-v2-develop-execution.md) govern authority.
+The [approved program](2026-09-28-plan-remediation-program-v2.md) and
+[execution plan](2026-09-28-plan-remediation-v2-develop-execution.md) govern authority.
 Grouped Appendix B findings keep their original group evidence; the expanded identifiers
 do not imply separate runtime probes. Historical DONE and declined/superseded entries
 are provenance, not a new test of current behavior. Original ruling line references

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22+/26 ESM, `node:test`, GitHub CLI (`gh api`, `gh api graphql`), `npm view`.
 
-**Spec:** [Remediation program, Branch 4](../plans/2026-09-26-remediation-program.md#branch-4-featupstream-watch-live), [audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md) ("Upstream watch and dispatch", "Ruflo support window", "Ruflo 3.46.0", "Retroactive upstream sweep"), [the upstream watch](../upstream-watch.md), and the SDD ledger's Branch 4 maintainer decisions (B4-G1, B4-G2, B4-Q1, B4-Q2, B4-Q3) and rulings (main checkout `.superpowers/sdd/2026-09-26-remediation-program/progress.md`, lines 56 and 64–72).
+**Spec:** [Remediation program, Branch 4](2026-09-26-plan-remediation-program.md#branch-4-featupstream-watch-live), [audit record](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) ("Upstream watch and dispatch", "Ruflo support window", "Ruflo 3.46.0", "Retroactive upstream sweep"), [the upstream watch](../upstream-watch.md), and the SDD ledger's Branch 4 maintainer decisions (B4-G1, B4-G2, B4-Q1, B4-Q2, B4-Q3) and rulings (main checkout `.superpowers/sdd/2026-09-26-remediation-program/progress.md`, lines 56 and 64–72).
 
 ## Global Constraints
 
