@@ -2690,17 +2690,18 @@
       "kind": "issue",
       "title": "`--codex-guidance` on an existing AGENTS.md: `full` is not applied, and a `---` separator accumulates outside the AQE block",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": {"refs": ["#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
       "adjustment": "Once a released agentic-qe applies full on an existing AGENTS.md and writes nothing outside its sentinel, run the #655 conformance strictly; if it passes, sunset the constraint and drop the conformance todo.",
-      "status": "fixed-unreleased",
+      "status": "released",
       "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 767; no release contains it yet" },
-        { "date": "2026-09-28", "event": "commented", "note": "thanked the maintainer for PR 767; ak runs the Codex-guidance conformance once a release contains it (issuecomment-5878043475)" }
+        { "date": "2026-09-28", "event": "commented", "note": "thanked the maintainer for PR 767; ak runs the Codex-guidance conformance once a release contains it (issuecomment-5878043475)" },
+        { "date": "2026-10-02", "event": "released", "note": "confirmed by hand on 3.14.5, the first release after the fix: in a disposable project whose AGENTS.md held only user text, aqe init --auto --with-codex --codex-guidance full wrote one AQE block (1769 bytes, against 316 for compact), left the text outside the sentinel byte for byte, wrote no --- separator, and a second run changed nothing (identical sha256); compact behaved the same way. Not the full #655 conformance: the none mode, platform verify and the receipt fields are unverified" }
       ]
     },
     {
