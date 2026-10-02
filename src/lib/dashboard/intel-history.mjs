@@ -101,12 +101,15 @@ function canonicalProject(cwd) {
   try { return fs.realpathSync(cwd); } catch { return path.resolve(cwd); }
 }
 
-/** Where the health ring for `cwd` is cached: `<cache>/intel-history/<id>.json`, where `<id>` is the
+/** Where the health ring for a project is cached: `<cache>/intel-history/<id>.json`, where `<id>` is the
  *  first 16 hex characters of the SHA-256 of the project's canonical real path. */
-export function healthRingPath(cwd) {
-  const id = crypto.createHash('sha256').update(canonicalProject(cwd)).digest('hex').slice(0, 16);
+function ringFor(project) {
+  const id = crypto.createHash('sha256').update(project).digest('hex').slice(0, 16);
   return path.join(cacheDir(), 'intel-history', `${id}.json`);
 }
+
+/** The cache file holding `cwd`'s health ring. */
+export const healthRingPath = (cwd) => ringFor(canonicalProject(cwd));
 
 /** The ring older versions wrote inside the project. It is only ever read. */
 const oldRingFile = (cwd) => path.join(cwd, '.claude-flow', 'health-history.json');
@@ -114,21 +117,21 @@ const oldRingFile = (cwd) => path.join(cwd, '.claude-flow', 'health-history.json
 const samplesOf = (raw) => (Array.isArray(raw) ? raw : Array.isArray(raw?.samples) ? raw.samples : null);
 
 /** The cached ring's samples, or null when it is absent, unreadable or was written for another project. */
-function readCachedRing(cwd) {
-  const raw = readJson(healthRingPath(cwd));
-  if (!raw || Array.isArray(raw) || raw.project !== canonicalProject(cwd)) return null;
+function readCachedRing(project) {
+  const raw = readJson(ringFor(project));
+  if (!raw || Array.isArray(raw) || raw.project !== project) return null;
   return Array.isArray(raw.samples) ? raw.samples : null;
 }
 
 /** Cache first, then the project's older ring (read-only), so existing history keeps showing until
  *  the cache has its own. */
-function currentSamples(cwd) {
-  return readCachedRing(cwd) ?? samplesOf(readJson(oldRingFile(cwd))) ?? [];
+function currentSamples(cwd, project) {
+  return readCachedRing(project) ?? samplesOf(readJson(oldRingFile(cwd))) ?? [];
 }
 
 /** The health-history ring: an array of point samples over time. Returns null when absent or empty. */
 export function readHealthRing(cwd) {
-  const arr = currentSamples(cwd);
+  const arr = currentSamples(cwd, canonicalProject(cwd));
   return arr.length ? arr : null;
 }
 
@@ -163,12 +166,13 @@ function sameSnapshot(a, b) {
  * @returns {void}
  */
 export function appendHealthSnapshot(cwd, snapshot) {
-  const existing = currentSamples(cwd);
+  const project = canonicalProject(cwd);
+  const existing = currentSamples(cwd, project);
   const last = existing.length ? existing[existing.length - 1] : null;
   if (last && sameSnapshot(last, snapshot)) return;
   const next = [...existing, snapshot];
   const capped = next.length > HEALTH_RING_CAP ? next.slice(next.length - HEALTH_RING_CAP) : next;
-  writePrivateFileAtomic(healthRingPath(cwd), `${JSON.stringify({ project: canonicalProject(cwd), samples: capped }, null, 2)}\n`);
+  writePrivateFileAtomic(ringFor(project), `${JSON.stringify({ project, samples: capped }, null, 2)}\n`);
 }
 
 /**
