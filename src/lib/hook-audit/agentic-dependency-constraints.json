@@ -2030,14 +2030,15 @@
       "mapping": "mapped",
       "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": ["docs/troubleshooting.md"] },
       "adjustment": "After the final main PR merges, the controller can close #240 with the released 3.14.4 native macOS/Linux live-owner evidence and ak's exact exception retirement for agentic-qe#574. The old 3.14.3 FsyncFailed sequence now fails closed; ordinary LockHeld fallback remains busy. No native Windows AQE conformance or upstream issue closure is claimed.",
-      "status": "watching",
+      "status": "retired",
       "constraintIds": [],
       "tracks": ["proffesor-for-testing/agentic-qe#574", "proffesor-for-testing/agentic-qe#719"],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-27", "event": "commented", "note": "moved the upstream part of this tracker to the watch registry; agentic-qe 3.14.4 carries PR 719, not yet verified to stop FsyncFailed under a live lock (issuecomment-5858567140)" },
-        { "date": "2026-09-29", "event": "reviewed", "note": "released 3.14.4 passed native macOS and Linux live-owner conformance and ak retired the exact exception; issue closure waits for final main PR" }
+        { "date": "2026-09-29", "event": "reviewed", "note": "released 3.14.4 passed native macOS and Linux live-owner conformance and ak retired the exact exception; issue closure waits for final main PR" },
+        { "date": "2026-10-02", "event": "retired", "note": "closed (completed); the registry retires the tracker, and nothing in ak waits on it" }
       ]
     },
     {
@@ -2532,13 +2533,14 @@
       "title": "memory bridge ignores later explicit dbPath values: first ControllerRegistry silently wins across project and user stores",
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
-      "mapping": "unmapped",
-      "kitImpact": null,
-      "adjustment": null,
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["pacphi/agentic-kit#213"], "files": [] },
+      "adjustment": "None: cited by pacphi/agentic-kit#213 as context, and ak carries nothing for it. The @claude-flow/cli 3.48.0 package contains upstream commit bc05a89b (bridge failures isolated by canonical database path); the issue is still open upstream.",
       "status": "watching",
       "constraintIds": [],
       "history": [
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-10-02", "event": "reviewed", "note": "mapped as no ak change; the maintainer reviewed the upstream watch report" }
       ],
       "note": "Cited by pacphi/agentic-kit#213 as related context; ak carries nothing for it today."
     },
@@ -2550,13 +2552,14 @@
       "title": "Encryption-at-rest (RFE1) silently orphans the memory corpus after the #2786 agentdb-memory.db split",
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
-      "mapping": "unmapped",
-      "kitImpact": null,
-      "adjustment": null,
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["pacphi/agentic-kit#213"], "files": [] },
+      "adjustment": "None: cited by pacphi/agentic-kit#213 as context, and ak carries nothing for it.",
       "status": "watching",
       "constraintIds": [],
       "history": [
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-10-02", "event": "reviewed", "note": "mapped as no ak change; the maintainer reviewed the upstream watch report" }
       ],
       "note": "Cited by pacphi/agentic-kit#213 as related context; ak carries nothing for it today."
     },
@@ -2606,15 +2609,16 @@
       "title": "mcp-bridge: opt-in `codex` backend still launches `@openai/codex mcp-server`, which current Codex CLI no longer has",
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
-      "mapping": "unmapped",
-      "kitImpact": null,
-      "adjustment": null,
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["courtesy report: ak never starts the chat-UI MCP bridge"], "files": [] },
+      "adjustment": "None: filed as a courtesy. ak never starts the chat-UI MCP bridge and runs Codex through codex exec, so nothing in ak waits on it.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863304724)" }
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863304724)" },
+        { "date": "2026-10-02", "event": "reviewed", "note": "mapped as no ak change; the maintainer reviewed the upstream watch report" }
       ],
       "note": "Filed as a courtesy: ak never starts the chat-UI MCP bridge and runs Codex through codex exec, so nothing in ak waits on it."
     },

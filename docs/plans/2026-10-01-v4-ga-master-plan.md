@@ -114,7 +114,7 @@ committed.
 | Release | Cards | What it delivers | Gate |
 | --- | --- | --- | --- |
 | `4.0.0-alpha.61` | 17 | Prerequisites A–C (`A61-01`…`03`); the #271, #240 and #262 work (`A61-04`…`06`); a complete purge with its sandboxed-`HOME` proof (`A61-07`…`10`); no self-update (`A61-11`); GPT-6.1 Sol (`A61-12`); v2 close-out and archiving (`A61-13`, `A61-14`); the maintainer's machine jobs (`A61-15`); triage of D01, D10 and the "[BLOCKED]" finding (`A61-16`); the release (`A61-17`) | `A61-17` blocks all P0 work |
-| `4.0.0-beta.1` | 27 | P0 (deja-vu removed, the adapter tag and retirement, the Hermes heads-up, ADR-0064, the gates in report-only mode, contract tests, the `beta` tag), P1 (layout, `init`, Claude projections, local-scope MCP, staged initializers, the legacy check, no user guidance, the guides), P2 (tool cache, launchers, no global installs, project daemons, exact pins), and the Codex part of P3 with the AQE conformance rewrite | Claude Code and Codex only |
+| `4.0.0-beta.1` | 28 | P0 (deja-vu removed, the adapter tag and retirement, the Hermes heads-up, ADR-0064, the gates in report-only mode, contract tests, the `beta` tag), P1 (layout, `init`, Claude projections, local-scope MCP, staged initializers, the legacy check, no user guidance, the guides), P2 (tool cache, launchers, no global installs, project daemons, exact pins), and the Codex part of P3 with the AQE conformance rewrite | Claude Code and Codex only |
 | `4.0.0-beta.2` | 10 | OpenCode, the Codex per-profile check, P4 (Brain without user mode, agent-browser, embeddings consent, Superpowers evidence, upstream requests), ADR notes for P0–P3 | OpenCode returns |
 | `4.0.0-beta.3` | 17 | P5 (`sync`, `sync --all`, `status`, `uninstall`, team mode, the command folds including `aqe-store` and `skills`, the advised-commands test, guides) and the first half of P6 (launch anywhere, project index, places, snapshots, coverage card and `ak run` records, Cowork, the X7 decision) | `P6-07` decides X7 before telemetry v2 |
 | `4.0.0-beta.4` | 12 | The rest of P6 (work view, project-state panels, System, Maintenance, Usage, telemetry v2, Footprint proof, docs and complexity limits), P7 (enforcement, deleting the machine-reconciliation code), ADR notes for P4–P7 | The design is closed |
@@ -123,7 +123,7 @@ committed.
 | `4.1.0` | 13 | The upstream integration epic (report and dispatch, pins, agentic-qe #655, #753 and #801, the replies, the Ruflo task-ledger reports, dispatch PRs #286–#288, the Codex hooks line) and two capability intake cards (#255, encryption at rest) | Intake depth |
 | `5.0.0` | 12 | Intake for #239, the v5 research branch, the taxonomy and delivery ADRs, the artifacts and meetings, first-class hosts, Sessions and Activity, the Activity and Topic taxonomy, conflicts X1–X4 and X6, the Environment Auditor, evaluation gates, the MetaHarness and autonomous-improvement proposals, and learning from `ak run` | Intake depth |
 
-With the 13 epics, that makes 127 cards.
+With the 13 epics, that makes 128 cards. `P1-10` was added on 2026-10-02 from the `A61-16` triage (the "[BLOCKED]" hook exit-code finding).
 
 **Existing issues the cards adopt.** These keep their numbers, titles and text. Each gets its
 routing label, milestone, size and workstream labels, its issue type and its epic. The card's

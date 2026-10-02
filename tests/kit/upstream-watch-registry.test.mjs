@@ -196,7 +196,7 @@ test('the tracking issues carry their whole upstream remainder', () => {
   assert.ok(t240.kitImpact.files.includes('docs/troubleshooting.md'));
 });
 
-test('the #574 exception retirement records released conformance without closing #240', () => {
+test('the #574 exception retirement records released conformance, and the #240 tracker retires once closed', () => {
   const doc = document();
   const partial = entry(doc, 'proffesor-for-testing/agentic-qe#719');
   assert.equal(partial.mapping, 'unmapped');
@@ -209,9 +209,11 @@ test('the #574 exception retirement records released conformance without closing
   assert.match(driver.adjustment, /macOS and Linux/);
   assert.match(driver.adjustment, /not a universal AQE minimum/);
   assert.ok(driver.history.some((item) => item.event === 'retired' && item.date === '2026-09-29'));
+  // #240 stayed `watching` until its final main PR merged and the maintainer closed it (A61-05).
   const tracker = entry(doc, 'pacphi/agentic-kit#240');
-  assert.equal(tracker.status, 'watching');
+  assert.equal(tracker.status, 'retired');
   assert.match(tracker.adjustment, /final main PR/);
+  assert.ok(tracker.history.some((item) => item.event === 'retired' && item.date === '2026-10-02'));
 });
 
 test('stale threads are mapped to what ak carries, or retired with a reason', () => {
