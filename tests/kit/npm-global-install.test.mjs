@@ -5,7 +5,7 @@ import {
   REVIEWED_GLOBAL_INSTALL_SCRIPTS, globalInstallArgs, installGlobalCli,
 } from '../../src/lib/npm-global-install.mjs';
 import { installHost } from '../../src/lib/providers.mjs';
-import { selfUpdate, upgradePackage } from '../../src/lib/heal.mjs';
+import { upgradePackage } from '../../src/lib/heal.mjs';
 
 test('reviewed global lifecycle policy includes Claude Code postinstall', () => {
   assert.ok(REVIEWED_GLOBAL_INSTALL_SCRIPTS.includes('@anthropic-ai/claude-code'));
@@ -45,18 +45,6 @@ test('npm success is not reported as a usable host when the installed CLI cannot
   assert.equal(result.ok, false);
   assert.equal(result.changed, true);
   assert.match(result.detail, /installed package but claude --version failed/i);
-});
-
-test('the kit self-update uses the same reviewed lifecycle policy', async () => {
-  const calls = [];
-  const result = await selfUpdate('4.2.0', {
-    runner: async (bin, args, options) => {
-      calls.push({ bin, args, options });
-      return { code: 0, stdout: '', stderr: '' };
-    },
-  });
-  assert.equal(result.ok, true);
-  assert.deepEqual(calls[0].args, globalInstallArgs('@pacphi/agentic-kit@4.2.0'));
 });
 
 // npm exits 0 after silently dropping a failed optional dependency — how codex

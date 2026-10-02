@@ -46,7 +46,7 @@ configuration; optionally install the deja-vu transcript companion after an expl
 | Version ownership | Project/lockfile controls the version | Active npm prefix controls the version |
 | Who sees it | That package/workspace and its npm scripts | Every shell/project using that same prefix and OS account |
 | Best fit | Reproducible project automation | Interactive CLI used across many projects |
-| `ak sync` self-update | May install the newer kit globally when drift is found | Updates the existing global installation |
+| `ak sync` and the kit's own version | Never installs a newer kit; prints the upgrade steps | Never installs a newer kit; prints the upgrade steps |
 
 Official npm behavior is described in
 [npm's folder layout](https://docs.npmjs.com/files/folders.html/) and its
@@ -127,8 +127,8 @@ Important limitations:
 - local npm installation may choose the nearest ancestor package/workspace root,
   rather than the literal current directory;
 - `ak setup` still performs its normal global/user/project actions; and
-- an ordinary `ak sync` can self-update by installing a newer agentic-kit globally.
-  Use `ak sync --no-upgrade` when a lockfile must remain the sole version authority.
+- `ak sync` never installs a newer agentic-kit; it prints the steps that move a machine to the
+  project-scoped line. `ak sync --no-upgrade` still holds back Ruflo, AQE and the other tools.
 
 ### One-shot execution with `npm exec` or `npx`
 
@@ -218,7 +218,7 @@ against Node and npm. They are not the supported machine-management contract.
 
 | Surface | Package install only | `ak setup` machine/user phase | `ak setup` project phase |
 | --- | --- | --- | --- |
-| agentic-kit package | Local/cache/global according to npm method | No separate change unless later self-updated | None |
+| agentic-kit package | Local/cache/global according to npm method | No separate change; `ak sync` never updates the kit | None |
 | Ruflo (with its bundled AgentDB), AQE | None | Installed/repaired in the active npm global prefix | Project assets initialized from those versions |
 | Claude/Codex/OpenCode CLI | None | Missing enabled hosts may be installed globally; external installs are reused | Host-specific project wiring may be generated |
 | `~/.config/agentic-kit/kit.json` | None | Created/updated for the current OS user | Choices are read and project routing may be materialized |
@@ -262,7 +262,7 @@ workspace when that identity can be established.
 - Use `ak setup --dry-run` before authorizing machine/project mutation.
 - Cache npm, the Brain, and an opted-in deja-vu index only when their size,
   plaintext content, retention, and trust models are acceptable.
-- Avoid `ak sync` self-update in a lockfile-controlled job; use `--no-upgrade`.
+- Use `ak sync --no-upgrade` in a lockfile-controlled job so Ruflo, AQE and the other tools stay put; `ak sync` never updates the kit itself.
 - Read the result with `ak sync --json`: stdout is one JSON object whose `exitCode` matches
   the process exit code (even for a rejected flag or an unreadable kit.json), and the human
   log goes to stderr. Fixes you must do by hand never fail the job; failing or warning ones
