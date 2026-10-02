@@ -1,9 +1,8 @@
 # Ruflo CLI Reference (full, on-demand)
 
 > This is an on-demand operational reference for the kit's Ruflo integration. It is intentionally NOT auto-loaded into
-> every session (that was a ~5.6K-token-per-session context tax). The global
-> `~/.claude/CLAUDE.md` carries only a compact pointer; read this file on demand.
-> Deployed copy: `~/.config/ruflo/ruflo-reference-full.md`.
+> every session (that was a ~5.6K-token-per-session context tax). It is not deployed to any machine: the package
+> ships it as the source for a future on-demand skill. Until then, run `ruflo <cmd> --help` for commands and flags.
 
 ## Ruflo CLI Reference
 
