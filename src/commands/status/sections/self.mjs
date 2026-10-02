@@ -13,7 +13,7 @@ export default {
       if (s.outdated) {
         rows.push(row('self', 'warn',
           `kit ${s.installed} installed, ${s.latest} available (${s.tag} tag)`,
-          'sync self-updates the kit (runs last)'));
+          'ak never updates itself; `ak sync` prints the upgrade steps', { repair: 'manual' }));
       } else if (s.installed) {
         rows.push(row('self', 'ok', `kit ${s.installed}${s.latest ? ' (latest)' : ''}`));
       }

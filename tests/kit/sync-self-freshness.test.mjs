@@ -35,23 +35,30 @@ async function run(options) {
   finally { process.chdir(previous); }
 }
 
-test('normal sync discovers and schedules a self-update hidden by a fresh stale-version cache', async t => {
+test('sync finds a newer kit but never installs it, and prints the three upgrade steps by exact version', async () => {
   seed();
-  const lookups = [], installs = [];
-  t.mock.method(sync.SYNC_STEPS.find(step => step.id === 'self'), 'run', async ctx => {
-    const state = await selfDrift({ pkgRoot: ctx.pkgRoot });
-    installs.push(state.latest);
-    fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ name: KIT_PKG, version: state.latest }));
-  });
-  const { result, out } = await run({ fetchLatest: async (pkg, tag) => {
-    lookups.push([pkg, tag]);
-    return pkg === KIT_PKG ? (tag === 'next' ? '4.0.0-alpha.50' : '4.0.0-alpha.0') : '9.9.9';
-  } });
+  const heal = await import('../../src/lib/heal.mjs');
+  assert.equal(sync.SYNC_STEPS.some(step => step.id === 'self'), false, 'no sync step installs the kit');
+  assert.equal(heal.selfUpdate, undefined, 'nothing in heal installs the kit');
+  const { result, out } = await run({ fetchLatest: async (pkg, tag) => (
+    pkg === KIT_PKG ? (tag === 'next' ? '4.0.0-alpha.50' : '4.0.0-alpha.0') : '9.9.9') });
   assert.equal(result, 0);
-  assert.deepEqual(installs, ['4.0.0-alpha.50']);
-  assert.match(out, /\[self\].*4\.0\.0-alpha\.50/);
-  assert.deepEqual(lookups.filter(([pkg]) => pkg === KIT_PKG).map(([, tag]) => tag), ['latest', 'next']);
-  assert.equal(loadKitConfig().versionCheck.self.best.version, '4.0.0-alpha.50');
+  assert.match(out, /does not update itself/);
+  assert.doesNotMatch(out, /kit upgraded to/, 'no upgrade happened');
+  // The exact running version through npx, whatever is installed globally.
+  assert.match(out, /1\. Remove the old setup[^\n]*\n\s+npx @pacphi\/agentic-kit@4\.0\.0-alpha\.49 uninstall --purge --dry-run\n\s+npx @pacphi\/agentic-kit@4\.0\.0-alpha\.49 uninstall --purge\n/);
+  assert.match(out, /2\. Remove the old global runner[^\n]*\n\s+npm uninstall -g @pacphi\/agentic-kit\n/);
+  assert.match(out, /3\. Opt in each project[^\n]*\n\s+cd my-project\n\s+npx @pacphi\/agentic-kit@beta init/);
+});
+
+test('the upgrade steps print on every sync: with no newer kit, under --no-upgrade and under --dry-run', async () => {
+  seed();
+  for (const extra of [{}, { 'no-upgrade': true }, { 'dry-run': true }]) {
+    const { result, out } = await run({ flags: flags(extra), fetchLatest: async () => null });
+    assert.equal(result, 0, JSON.stringify(extra));
+    assert.match(out, /does not update itself/, JSON.stringify(extra));
+    assert.match(out, /npx @pacphi\/agentic-kit@4\.0\.0-alpha\.49 uninstall --purge\n/, JSON.stringify(extra));
+  }
 });
 
 test('no-upgrade does not force registry refresh or change the fresh self cache', async () => {
@@ -64,7 +71,7 @@ test('no-upgrade does not force registry refresh or change the fresh self cache'
   assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
 });
 
-test('dry-run looks the kit up online and plans the self-update, but leaves the fresh self cache unchanged', async () => {
+test('dry-run looks the kit up online and reports a newer one, but leaves the fresh self cache unchanged', async () => {
   seed();
   const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
   const tags = [];

@@ -177,7 +177,7 @@ new session and ruflo's own check confirm it. See
 ## Where each piece lives
 
 - **npm tools** — `src/lib/versions.mjs` (`installedVersion`, `driftReport`,
-  `selfDrift`), heals in `src/lib/heal.mjs` (`upgradePackage`, `selfUpdate`).
+  `selfDrift`), heals in `src/lib/heal.mjs` (`upgradePackage`). The kit never updates itself: `ak sync` prints the upgrade steps (`src/lib/upgrade-steps.mjs`).
 - **hosts** — `src/lib/providers.mjs` (`hostInstallState`, `installHost`,
   `updateHost`, `hostDrift`).
 - **agentdb** — `src/lib/agentdb.mjs` (`bundledVersion`, read-only). A standalone
