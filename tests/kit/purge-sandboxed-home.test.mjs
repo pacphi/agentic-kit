@@ -40,7 +40,7 @@ function sandbox(t) {
   fs.mkdirSync(path.join(project, '.git'), { recursive: true });
   fs.mkdirSync(bare, { recursive: true });
   for (const dir of ['.config', '.local/state', '.claude/skills']) fs.mkdirSync(path.join(home, dir), { recursive: true });
-  if (process.platform === 'win32') for (const dir of ['AppData/Roaming', 'AppData/Local']) fs.mkdirSync(path.join(home, dir), { recursive: true });
+  if (process.platform === 'win32') fs.mkdirSync(path.join(home, 'AppData', 'Local'), { recursive: true }); // LOCALAPPDATA
   write(path.join(home, '.claude', 'CLAUDE.md'), USER_CLAUDE_MD);
   write(path.join(home, '.claude', 'skills', 'my-skill', 'SKILL.md'), '# my skill\n');
   write(path.join(home, '.codex', 'AGENTS.md'), USER_CODEX_MD);
@@ -50,7 +50,6 @@ function sandbox(t) {
   const fakes = installFakeClis(root, { globalRoot: fakeNpmRoot(root), codexConfig: path.join(home, '.codex', 'config.toml') });
   const env = spawnEnv(home, {
     PATH: [fakes.bin, '/usr/bin', '/bin'].join(path.delimiter),
-    APPDATA: path.join(home, 'AppData', 'Roaming'),
     npm_config_prefix: path.join(root, 'npm-prefix'),
     npm_config_cache: path.join(root, 'npm-cache'),
     RUVNET_BRAIN_KB: path.join(root, 'no-brain-kb'),
@@ -112,7 +111,8 @@ test('host wiring from `ak host pick` is removed by --purge from HOME and from t
   const pick = s.ak(['host', 'pick', '--host', 'claude,codex', '--yes'], s.project);
   assert.equal(pick.status, 0, pick.out);
   // Not vacuous: Codex now carries ak's ruflo entry beside the user's own, and the project carries provider env.
-  assert.match(s.read('.codex', 'config.toml'), /\[mcp_servers\.ruflo\]/);
+  assert.match(s.read('.codex', 'config.toml'), /\[mcp_servers\.ruflo\]/,
+    `Codex has no ruflo entry; fake CLI calls:\n${s.fakes.calls().join('\n')}\npick output:\n${pick.out}`);
   assert.match(s.read('.codex', 'config.toml'), /\[mcp_servers\.mine\]/);
   const projectSettings = path.join(s.project, '.claude', 'settings.local.json');
   assert.match(fs.readFileSync(projectSettings, 'utf8'), /ENABLE_CODEX/);

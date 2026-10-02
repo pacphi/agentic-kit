@@ -1,7 +1,7 @@
 // tests/kit/helpers/fake-clis.mjs
 // A folder of fake `npm`, `claude`, `codex`, `opencode`, `ruflo` and `ollama` launchers, so a real `ak`
 // child process can run setup and uninstall with no network and no real installs. Every launcher runs
-// fake-cli-main.mjs with this node, so the same fakes work on POSIX (`sh`) and Windows (`.cmd`).
+// fake-cli-main.mjs with this node, so the same fakes work on POSIX (`sh`) and Windows (`.cmd` + `.ps1`).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +26,9 @@ export function installFakeClis(dir, { globalRoot, codexConfig }) {
       `#!/bin/sh\nexec "${process.execPath}" "${MAIN}" "${configPath}" ${name} "$@"\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, `${name}.cmd`),
       `@echo off\r\n"${process.execPath}" "${MAIN}" "${configPath}" ${name} %*\r\n`);
+    // exec.mjs runs a Windows `.cmd` only when it is a recognised npm shim or has a sibling `.ps1`.
+    fs.writeFileSync(path.join(bin, `${name}.ps1`),
+      `& "${process.execPath}" "${MAIN}" "${configPath}" ${name} @args\r\nexit $LASTEXITCODE\r\n`);
   }
   return { bin, log, calls: () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) };
 }
