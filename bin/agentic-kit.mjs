@@ -248,7 +248,9 @@ async function main() {
   // parser or command-level usage error): a rejected `ak status --refresh=bogus`
   // never got as far as doing anything, so it must not spend network calls a
   // parse error never used to.
-  if (code !== 2 && !values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store'].includes(cmd)) {
+  // uninstall is leaving: the nudge runs `npm view` and saves the version cache,
+  // which writes a default kit.json back after `--purge` removed the config folder.
+  if (code !== 2 && !values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store', 'uninstall'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {
