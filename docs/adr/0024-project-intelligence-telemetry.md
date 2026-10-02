@@ -4,6 +4,16 @@
 - **Date:** 2026-08-05
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-08-07
+- **Update note (2026-10-02):** The health ring moved out of the project. It was the one file
+  this view wrote inside a project (`.claude-flow/health-history.json`), which the project-scope
+  design does not allow a view to do. agentic-kit now caches it under its own cache folder,
+  `cacheDir()/intel-history/<id>.json` (`<id>` is the first 16 hex characters of the SHA-256 of the
+  project's canonical path), as `{ project, samples }`, written privately and atomically with no
+  backup. A ring an older version left in the project is still read, until the cache has its own,
+  and is never written, moved or deleted; the first append seeds the cache from it. `readHealthRing`
+  and `appendHealthSnapshot` keep their signatures. A failed cache write now reaches the watcher's
+  `onError`, and the dashboard prints each distinct failure once to stderr. See
+  [the plan](../plans/2026-10-01-prereq-intelligence-no-project-writes.md).
 - **Update note:** Extended Intelligence from one project's telemetry, implicitly tied to the
   dashboard server's own launching cwd, to a machine-wide catalog of every ruflo-initialized
   project plus an explicitly selected, explicitly labeled detail project (defaulting to
@@ -111,7 +121,8 @@ existing learning path. The cached census adds no per-render transcript scan.
 [renderer](../../src/lib/dashboard/client/intelligence.mjs), and
 [table tests](../../tests/kit/intelligence-table-groups.test.mjs) preserve KPI totals
 and every grouped row. The three source files and IntelligenceWatch contract
-remain; a change-only trigger can write the existing 500-sample health ring.
+remain; a change-only trigger can write the existing 500-sample health ring, which since
+2026-10-02 lives in agentic-kit's cache rather than in the project (see the update note).
 The 2.5-second trailing debounce is not a maximum latency guarantee during a
 continuous write stream.
 
@@ -122,7 +133,8 @@ Overview's **Intelligence** destination (`#overview/intelligence`, added by
 amendment) has always advertised "memory, learned patterns, quality feedback, and improvement
 signals." Until now its "learning over time" strip rendered only two sparklines:
 
-- **patterns learned**, sourced from `.claude-flow/health-history.json` — a ring `dashboard-server.mjs`
+- **patterns learned**, sourced from `.claude-flow/health-history.json` (until 2026-10-02; the ring
+  is now cached outside the project) — a ring `dashboard-server.mjs`
   itself appended to, and only while a dashboard happened to be running to observe
   `.claude-flow/neural/stats.json`. On a machine (or CI checkout) where the dashboard had never
   polled long enough to accumulate a ring, this file simply did not exist and the panel showed
@@ -182,8 +194,9 @@ in that document; this ADR records the decision and its consequences.
   same `readJson` helper and `?? 0` defaulting `status.mjs`'s `learning` row already uses, so the two
   call sites cannot drift apart;
 - `readHealthRing(cwd)` and `appendHealthSnapshot(cwd, snapshot)` — moved (not duplicated) from
-  `dashboard-server.mjs`, unchanged behavior, now capped at 500 samples with field-level dedup
-  (a repeated poll of unchanged stats writes nothing);
+  `dashboard-server.mjs`, now capped at 500 samples with field-level dedup (a repeated poll of
+  unchanged stats writes nothing). Since 2026-10-02 the ring is read from and written to
+  agentic-kit's cache, never inside the project;
 - `readIntelHistory(cwd)` — the combinator `collectData()` and the SSE route both call, returning
   `{ patternStore, graph, healthRing, globalStats }`.
 
@@ -231,7 +244,8 @@ path.
 
 - The Intelligence panel shows real trend data — pattern-store growth and reasoning-graph growth —
   sourced from files that already existed, at zero new collection cost and no new write path beyond
-  the existing, now-relocated `appendHealthSnapshot`.
+  the existing, now-relocated `appendHealthSnapshot`, which since 2026-10-02 writes agentic-kit's
+  own cache instead of the project.
 - Users watching active learning see updates within the debounce window (≤ ~3.5s) instead of waiting
   out the general status poll.
 - The lifetime-counter-vs-store-size divergence is now visible and labeled instead of silently

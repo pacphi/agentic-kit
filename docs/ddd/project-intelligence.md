@@ -23,7 +23,8 @@ Project intelligence surfaces trend data about ruflo/agentic-qe's own project-le
 subsystem — the neural pattern store, its lifetime learned-pattern counter, the reasoning graph's
 structural growth, and a machine-health sample ring — inside the dashboard's Overview →
 **Intelligence** view (`#overview/intelligence`). It is a read-only projection over files those
-tools already write under `.claude-flow/`, selected from census projects carrying any supported
+tools already write under `.claude-flow/`, plus agentic-kit's own cached health ring, which is
+never written inside a project. Projects are selected from census projects carrying any supported
 learning-state marker rather than from one implicit location. The view always shows a
 machine-wide aggregate folded across every discovered project, plus per-project detail for exactly
 one explicitly selected, explicitly labeled project — defaulting to whichever discovered project
@@ -120,7 +121,9 @@ projectsInScope(census, 'learning')
 .claude-flow/neural/stats.json                -> GlobalLearningStats   { patternsLearned, trajectoriesRecorded,
                                                                           signalsProcessed, lastAdaptation }
 .claude-flow/data/intelligence-snapshot.json  -> GraphSample[]         { timestamp, nodes, edges, pageRankSum }
-.claude-flow/health-history.json              -> HealthSample[]        (capped ring, deduped, appended here)
+<cache>/intel-history/<id>.json                -> HealthSample[]        (capped ring, deduped, appended here; the
+                                                                          kit's own cache, see Machine-health ring)
+.claude-flow/health-history.json              -> HealthSample[]        (older ring: read-only fallback, never written)
 .claude-flow/data/pending-insights.jsonl      -> change signal only (record contents never used as learning evidence)
 .claude-flow/improvement.json                 -> ImprovementEval       (pre-existing; unchanged by this domain)
 
@@ -185,11 +188,22 @@ metrics above and of the machine-health ring below.
 
 ### Machine-health ring
 
-`healthRing` is the existing capped (500-entry), field-level-deduplicated sample ring in
-`.claude-flow/health-history.json`. Its reader and writer (`readHealthRing` /
-`appendHealthSnapshot`) moved into this domain from `dashboard-server.mjs` with unchanged behavior;
-this document is now their domain home. A repeated snapshot whose fields are identical to the last
-stored sample except `ts` is a no-op — polling unchanged stats does not grow the ring.
+`healthRing` is the capped (500-entry), field-level-deduplicated sample ring. It is agentic-kit's
+own derived data, not a file ruflo or agentic-qe writes, so it is cached outside the project at
+`cacheDir()/intel-history/<id>.json`, where `<id>` is the first 16 hex characters of the SHA-256 of
+the project's canonical real path. The file holds `{ project, samples }`; one whose `project` is
+another path is ignored and replaced. It is written with `writePrivateFileAtomic` (mode 0600,
+atomic, no backup) because it can be rebuilt. Its reader and writer (`readHealthRing` /
+`appendHealthSnapshot`) moved into this domain from `dashboard-server.mjs`; this document is
+their domain home. A repeated snapshot whose fields are identical to the last stored sample except
+`ts` is a no-op — polling unchanged stats does not grow the ring.
+
+A ring that an older version wrote at `<project>/.claude-flow/health-history.json` is read, so
+existing history keeps showing, until the cache has a ring of its own; the first append then seeds
+the cache from those samples. The older file is the user's project content: it is never written,
+moved or deleted, and the dashboard guide says it can be removed by hand. A cache that cannot be
+written makes `appendHealthSnapshot` throw; the watcher routes that to its `onError`, and the
+dashboard prints each distinct failure once.
 
 ### Improvement delta
 
@@ -251,6 +265,8 @@ support, the stream — both paths resolve the same selected project and return 
 3. `readGlobalStats` and `status.mjs`'s CLI `learning` row read the same file through the same
    helper and default logic, so the two cannot silently drift apart.
 4. The health-history ring is capped and deduplicated; unchanged repeated snapshots do not grow it.
+   It is cached under agentic-kit's cache folder; viewing or watching a project never writes that
+   project's own files. When the project is the home folder, only the cache folder inside it changes.
 5. `JsonlTailer` parses complete pending-insight records, but this watcher ignores their contents.
    Only "a record arrived" triggers a bounded reread of the owned learning-state files.
 6. Learning series introduce no session/actor lifecycle or per-field confidence grading.

@@ -89,6 +89,7 @@ import { sseRoute } from './dashboard/sse.mjs';
 // here because readIntelHistory() already composes it (as `.healthRing`,
 // forwarded verbatim below); a bare `readHealthRing` import would be unused.
 import { readIntelHistory, readMachineWideIntel } from './dashboard/intel-history.mjs';
+import { distinctErrorReporter } from './dashboard/watch-errors.mjs';
 import { projectCensus, projectsInScope, describeScope } from './project-census.mjs';
 import { resolveProjectIdentity, safeProjectKey } from './live/project-label.mjs';
 import {
@@ -1340,7 +1341,7 @@ export function startDashboard({
     : intelWatch
       ? () => intelWatch
       : (projectPath, onUpdate) => import('./live/intelligence-watch.mjs').then(
-        ({ IntelligenceWatch }) => new IntelligenceWatch({ cwd: projectPath, onUpdate }),
+        ({ IntelligenceWatch }) => new IntelligenceWatch({ cwd: projectPath, onUpdate, onError: distinctErrorReporter('[dashboard] intelligence watcher failed:') }),
       );
 
   /** One pool entry per resolved project path. */

@@ -29,7 +29,7 @@
 // drift path and never falls through to the network-touching self-computed
 // path (driftReport / the brain and ruvector drift folds) — see
 // tests/dashboard.test.cjs's own comment on the same hazard.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,7 +37,12 @@ import http from 'node:http';
 import { startDashboard as realStartDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readMachineWideIntel } from '../../src/lib/dashboard/intel-history.mjs';
 import { resolveProjectIdentity } from '../../src/lib/live/project-label.mjs';
+import { redirectToolState } from './helpers/home-sandbox.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
+
+// A watcher these tests start can flush and cache a health ring: keep that out of the real ~/.cache.
+const toolState = redirectToolState('ak-dash-intel');
+after(() => toolState.restore());
 
 const STUB_STATUS = { overall: 'ok', rows: [], drift: [] };
 

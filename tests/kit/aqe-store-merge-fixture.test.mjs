@@ -11,12 +11,15 @@ const schema = fs.readFileSync(new URL('../fixtures/aqe-store/schema-3.14.4.sql'
 const statements = schema.split(/;\s*\n(?=CREATE)/).map((s) => s.trim().replace(/;$/, ''))
   .filter((s) => s && !/^CREATE TABLE (sqlite_sequence|'qe_patterns_fts_(data|idx|docsize|config)')/.test(s));
 
-// This is the old sequential loader, kept only as a migration oracle.
+// Keep independent statement-by-statement execution as the migration oracle,
+// but group writes so Windows does not flush every schema statement separately.
 function sequentialStore(dir, experiences) {
   fs.mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(path.join(dir, 'memory.db'));
   try {
+    db.exec('BEGIN');
     for (const sql of statements) if (experiences !== null || !/captured_experiences/.test(sql)) db.exec(sql);
+    db.exec('COMMIT');
     db.exec('PRAGMA journal_mode = WAL');
   } finally { db.close(); }
 }

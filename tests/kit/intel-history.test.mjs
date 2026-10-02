@@ -3,11 +3,13 @@
 // ring, plus the append-with-dedup writer for that ring. Fixtures are written
 // under an isolated mkdtempSync() dir shaped like a real project's
 // .claude-flow/ tree; no real project files are ever touched.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { cacheDir } from '../../src/lib/paths.mjs';
 import {
+  healthRingPath,
   readNeuralPatternStoreHistory,
   readGraphHistory,
   readGlobalStats,
@@ -16,9 +18,16 @@ import {
   readIntelHistory,
   readMachineWideIntel,
 } from '../../src/lib/dashboard/intel-history.mjs';
+import { redirectToolState } from './helpers/home-sandbox.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
+// The health ring is cached under the kit's cache folder, so every test here points that folder (and the
+// temp folder the projects live in) at a throwaway one instead of the machine's real ~/.cache.
+const toolState = redirectToolState('ak-intel-history');
+after(() => toolState.restore());
+
 const tmp = () => tempDir('ak-intel-history');
+const row = (n, extra = {}) => ({ ts: n, patternsLearned: n, trajectoriesRecorded: 0, signalsProcessed: 0, ...extra });
 
 /** Write `content` (object → JSON.stringify'd, string → written verbatim so
  *  malformed-JSON fixtures are easy to express) at cwd-relative `relPath`,
@@ -146,15 +155,17 @@ test('readGlobalStats returns null for malformed JSON text', () => {
 });
 
 // ── readHealthRing ───────────────────────────────────────────────────────
+// Older versions kept the ring inside the project, at .claude-flow/health-history.json. It is still read
+// (so existing history keeps showing) and never written.
 
-test('readHealthRing accepts a bare array', () => {
+test('readHealthRing accepts a bare array in the project\'s older ring', () => {
   const cwd = tmp();
   const samples = [{ ts: 1, ok: true }, { ts: 2, ok: false }];
   writeFixture(cwd, '.claude-flow/health-history.json', samples);
   assert.deepEqual(readHealthRing(cwd), samples);
 });
 
-test('readHealthRing accepts an object with a samples array', () => {
+test('readHealthRing accepts an object with a samples array in the project\'s older ring', () => {
   const cwd = tmp();
   const samples = [{ ts: 1, ok: true }];
   writeFixture(cwd, '.claude-flow/health-history.json', { samples });
@@ -180,17 +191,98 @@ test('readHealthRing returns null for malformed JSON text', () => {
 
 // ── appendHealthSnapshot ─────────────────────────────────────────────────
 
-test('appendHealthSnapshot creates the file fresh, seeded with just this snapshot', () => {
+test('appendHealthSnapshot caches the ring under the kit cache and writes nothing into the project', () => {
   const cwd = tmp();
-  const file = path.join(cwd, '.claude-flow', 'health-history.json');
+  const file = healthRingPath(cwd);
+  assert.ok(file.startsWith(path.join(cacheDir(), 'intel-history') + path.sep), file);
+  assert.match(path.basename(file), /^[0-9a-f]{16}\.json$/);
   assert.equal(fs.existsSync(file), false);
-  appendHealthSnapshot(cwd, { ts: 100, patternsLearned: 5, trajectoriesRecorded: 2, signalsProcessed: 1 });
-  assert.equal(fs.existsSync(file), true);
-  const onDisk = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.deepEqual(onDisk, {
-    samples: [{ ts: 100, patternsLearned: 5, trajectoriesRecorded: 2, signalsProcessed: 1 }],
-  });
-  assert.deepEqual(readHealthRing(cwd), [{ ts: 100, patternsLearned: 5, trajectoriesRecorded: 2, signalsProcessed: 1 }]);
+  const sample = { ts: 100, patternsLearned: 5, trajectoriesRecorded: 2, signalsProcessed: 1 };
+  appendHealthSnapshot(cwd, sample);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { project: cwd, samples: [sample] });
+  assert.deepEqual(readHealthRing(cwd), [sample]);
+  assert.deepEqual(fs.readdirSync(cwd), [], 'the project has no .claude-flow/ or any other new entry');
+  assert.deepEqual(fs.readdirSync(path.dirname(file)), [path.basename(file)], 'no backup or temp file is left beside the ring');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'the ring is private');
+});
+
+test('an older project ring is read, seeds the cache on the first append, and is never touched', () => {
+  const cwd = tmp();
+  const old = [row(1), row(2)];
+  const oldFile = writeFixture(cwd, '.claude-flow/health-history.json', { samples: old });
+  const bytes = fs.readFileSync(oldFile);
+  const { mtimeMs } = fs.statSync(oldFile);
+
+  assert.deepEqual(readHealthRing(cwd), old);
+  assert.equal(fs.existsSync(healthRingPath(cwd)), false, 'reading writes nothing');
+  appendHealthSnapshot(cwd, row(99, { patternsLearned: 2 }));
+  assert.equal(fs.existsSync(healthRingPath(cwd)), false, 'a sample identical to the last older one is a no-op');
+
+  appendHealthSnapshot(cwd, row(3));
+  assert.deepEqual(readHealthRing(cwd), [...old, row(3)]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(healthRingPath(cwd), 'utf8')), { project: cwd, samples: [...old, row(3)] });
+  assert.deepEqual(fs.readFileSync(oldFile), bytes, 'the older ring keeps its bytes');
+  assert.equal(fs.statSync(oldFile).mtimeMs, mtimeMs, 'and its modification time');
+  assert.deepEqual(fs.readdirSync(path.join(cwd, '.claude-flow')), ['health-history.json']);
+
+  fs.writeFileSync(oldFile, JSON.stringify([row(500)]));
+  assert.deepEqual(readHealthRing(cwd), [...old, row(3)], 'once the cache has a ring, the older file no longer matters');
+});
+
+test('a cached ring written for another project is ignored and replaced', () => {
+  const cwd = tmp();
+  const file = healthRingPath(cwd);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ project: path.join(cwd, 'elsewhere'), samples: [row(1), row(2)] }));
+  assert.equal(readHealthRing(cwd), null);
+  appendHealthSnapshot(cwd, row(3));
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { project: cwd, samples: [row(3)] });
+});
+
+test('a cache file that is not a { project, samples } object is ignored', () => {
+  for (const content of ['not json', '[{"ts":1}]', '{"samples":[{"ts":1}]}', '{"project":"x","samples":5}', 'null']) {
+    const cwd = tmp();
+    const file = healthRingPath(cwd);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+    assert.equal(readHealthRing(cwd), null, content);
+    appendHealthSnapshot(cwd, row(1));
+    assert.deepEqual(readHealthRing(cwd), [row(1)], content);
+  }
+});
+
+test('same-named folders in different places keep separate rings', () => {
+  const a = path.join(tmp(), 'app');
+  const b = path.join(tmp(), 'app');
+  fs.mkdirSync(a);
+  fs.mkdirSync(b);
+  assert.notEqual(healthRingPath(a), healthRingPath(b));
+  appendHealthSnapshot(a, row(1));
+  appendHealthSnapshot(b, row(2));
+  assert.deepEqual(readHealthRing(a), [row(1)]);
+  assert.deepEqual(readHealthRing(b), [row(2)]);
+});
+
+test('a symlink to a project shares that project\'s ring', { skip: process.platform === 'win32' }, () => {
+  const cwd = tmp();
+  const link = path.join(tmp(), 'link');
+  fs.symlinkSync(cwd, link, 'dir');
+  assert.equal(healthRingPath(link), healthRingPath(cwd));
+  appendHealthSnapshot(link, row(1));
+  assert.deepEqual(readHealthRing(cwd), [row(1)]);
+});
+
+test('appendHealthSnapshot throws when the cache cannot be written, and still writes nothing into the project', (t) => {
+  const cwd = tmp();
+  const blocker = path.join(tmp(), 'not-a-folder');
+  fs.writeFileSync(blocker, '');
+  const keys = ['XDG_CACHE_HOME', 'LOCALAPPDATA'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  t.after(() => { for (const key of keys) process.env[key] = previous[key]; });
+  for (const key of keys) process.env[key] = path.join(blocker, 'cache'); // a folder cannot be made below a file
+  assert.throws(() => appendHealthSnapshot(cwd, row(1)));
+  assert.deepEqual(fs.readdirSync(cwd), []);
+  assert.equal(readHealthRing(cwd), null);
 });
 
 test('appendHealthSnapshot dedups: an identical snapshot (aside from ts) appended twice leaves the ring length unchanged', () => {

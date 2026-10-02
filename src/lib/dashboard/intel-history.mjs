@@ -1,9 +1,12 @@
 // intel-history.mjs — readers for the "learning intelligence" history the
 // dashboard's intel views chart: the neural pattern store, the reasoning
 // graph's point-in-time snapshots, the machine-health ring, and the neural
-// global stats counters. All four sources are files this project's own
-// ruflo/agentic-qe tooling already writes under .claude-flow/ — this module
-// only reads (and, for the health ring, appends to) them; it invents nothing.
+// global stats counters. Three of the four are files this project's own
+// ruflo/agentic-qe tooling already writes under .claude-flow/, and this module
+// only reads them. The fourth, the health ring, is agentic-kit's own derived
+// data: it is cached under the kit's cache folder and never written into a
+// project, and a ring an older version left in .claude-flow/ is read, never
+// written.
 //
 // IMPORTANT — two metrics that look alike but are NOT the same thing:
 //   - readNeuralPatternStoreHistory() counts ENTRIES actually present in
@@ -14,8 +17,12 @@
 // These can legitimately diverge — the store can be pruned while the counter
 // keeps climbing — and that divergence is not a bug. Do not conflate the two,
 // and do not treat one as a substitute display for the other.
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
-import { readJson, writeJsonWithBackup } from '../settings.mjs';
+import { cacheDir } from '../paths.mjs';
+import { writePrivateFileAtomic } from '../file-write.mjs';
+import { readJson } from '../settings.mjs';
 
 const HEALTH_RING_CAP = 500;
 
@@ -89,15 +96,43 @@ export function readGlobalStats(cwd) {
   };
 }
 
-/** The health-history ring: an array of point samples over time. Accepts
- *  either a bare array or `{ samples: [...] }`. Returns null when absent,
- *  empty, or unreadable. Moved verbatim from dashboard-server.mjs (formerly
- *  a private function there) — behavior is unchanged. */
+/** The project's canonical path: the key its health ring is cached under. */
+function canonicalProject(cwd) {
+  try { return fs.realpathSync(cwd); } catch { return path.resolve(cwd); }
+}
+
+/** Where the health ring for a project is cached: `<cache>/intel-history/<id>.json`, where `<id>` is the
+ *  first 16 hex characters of the SHA-256 of the project's canonical real path. */
+function ringFor(project) {
+  const id = crypto.createHash('sha256').update(project).digest('hex').slice(0, 16);
+  return path.join(cacheDir(), 'intel-history', `${id}.json`);
+}
+
+/** The cache file holding `cwd`'s health ring. */
+export const healthRingPath = (cwd) => ringFor(canonicalProject(cwd));
+
+/** The ring older versions wrote inside the project. It is only ever read. */
+const oldRingFile = (cwd) => path.join(cwd, '.claude-flow', 'health-history.json');
+
+const samplesOf = (raw) => (Array.isArray(raw) ? raw : Array.isArray(raw?.samples) ? raw.samples : null);
+
+/** The cached ring's samples, or null when it is absent, unreadable or was written for another project. */
+function readCachedRing(project) {
+  const raw = readJson(ringFor(project));
+  if (!raw || Array.isArray(raw) || raw.project !== project) return null;
+  return Array.isArray(raw.samples) ? raw.samples : null;
+}
+
+/** Cache first, then the project's older ring (read-only), so existing history keeps showing until
+ *  the cache has its own. */
+function currentSamples(cwd, project) {
+  return readCachedRing(project) ?? samplesOf(readJson(oldRingFile(cwd))) ?? [];
+}
+
+/** The health-history ring: an array of point samples over time. Returns null when absent or empty. */
 export function readHealthRing(cwd) {
-  const raw = readJson(path.join(cwd, '.claude-flow', 'health-history.json'));
-  if (!raw) return null;
-  const arr = Array.isArray(raw) ? raw : Array.isArray(raw.samples) ? raw.samples : null;
-  return arr && arr.length ? arr : null;
+  const arr = currentSamples(cwd, canonicalProject(cwd));
+  return arr.length ? arr : null;
 }
 
 /** Deep-equal on plain JSON-shaped values (objects/arrays/primitives) —
@@ -121,25 +156,23 @@ function sameSnapshot(a, b) {
 }
 
 /**
- * Append `snapshot` to .claude-flow/health-history.json's samples ring,
- * creating the file (seeded with just this snapshot) if it doesn't exist yet.
- * A no-op — nothing is written — when `snapshot` is identical to the last
- * stored row on every field except `ts` (dedup: repeated polling of unchanged
- * stats must not grow the ring). The ring is capped at 500 entries, oldest
- * dropped first. Writes via settings.mjs's writeJsonWithBackup, which reuses
- * file-write.mjs's atomic backup-first replace rather than hand-rolling a
- * tmp-file-then-rename.
+ * Append `snapshot` to the project's cached health ring (see healthRingPath), seeding it from the
+ * older ring in `.claude-flow/` the first time, and never writing inside the project. A no-op —
+ * nothing is written — when `snapshot` is identical to the last stored row on every field except
+ * `ts` (dedup: repeated polling of unchanged stats must not grow the ring). The ring is capped at 500
+ * entries, oldest dropped first. It is written with writePrivateFileAtomic (mode 0600, atomic, no
+ * backup: the cache can be rebuilt). Throws when the cache cannot be written; the watcher reports
+ * that through its onError.
  * @returns {void}
  */
 export function appendHealthSnapshot(cwd, snapshot) {
-  const file = path.join(cwd, '.claude-flow', 'health-history.json');
-  const raw = readJson(file);
-  const existing = Array.isArray(raw) ? raw : Array.isArray(raw?.samples) ? raw.samples : [];
+  const project = canonicalProject(cwd);
+  const existing = currentSamples(cwd, project);
   const last = existing.length ? existing[existing.length - 1] : null;
   if (last && sameSnapshot(last, snapshot)) return;
   const next = [...existing, snapshot];
   const capped = next.length > HEALTH_RING_CAP ? next.slice(next.length - HEALTH_RING_CAP) : next;
-  writeJsonWithBackup(file, { samples: capped });
+  writePrivateFileAtomic(ringFor(project), `${JSON.stringify({ project, samples: capped }, null, 2)}\n`);
 }
 
 /**

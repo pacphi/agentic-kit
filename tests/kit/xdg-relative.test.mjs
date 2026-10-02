@@ -22,6 +22,22 @@ test('xdgBase keeps only absolute XDG values for both path flavors', () => {
   }
 });
 
+test('cacheDir follows XDG_CACHE_HOME on POSIX and LOCALAPPDATA on Windows, and ignores a relative XDG value', () => {
+  const posix = { home: '/home/ada', platform: 'linux', p: path.posix };
+  assert.equal(pathModule.cacheDir({ ...posix, env: {} }), '/home/ada/.cache/agentic-kit');
+  assert.equal(pathModule.cacheDir({ ...posix, env: { XDG_CACHE_HOME: '/opt/cache' } }), '/opt/cache/agentic-kit');
+  assert.equal(pathModule.cacheDir({ ...posix, env: { XDG_CACHE_HOME: 'rel/cache' } }), '/home/ada/.cache/agentic-kit');
+  assert.equal(pathModule.cacheDir({ ...posix, platform: 'darwin', env: {} }), '/home/ada/.cache/agentic-kit');
+
+  const win = { home: 'C:\\Users\\Ada', platform: 'win32', p: path.win32 };
+  const local = 'D:\\Local';
+  assert.equal(pathModule.cacheDir({ ...win, env: { LOCALAPPDATA: local, XDG_CACHE_HOME: 'E:\\xdg' } }),
+    'D:\\Local\\agentic-kit\\cache', 'Windows ignores XDG_CACHE_HOME and sits beside, not on, the state folder');
+  assert.equal(pathModule.cacheDir({ ...win, env: {} }), 'C:\\Users\\Ada\\AppData\\Local\\agentic-kit\\cache');
+  assert.notEqual(pathModule.cacheDir({ ...win, env: { LOCALAPPDATA: local } }),
+    path.win32.join(pathModule.stateBase({ ...win, env: { LOCALAPPDATA: local } }), 'agentic-kit'));
+});
+
 test('Windows deep runtime-log root follows LOCALAPPDATA with a distinct XDG state base', () => {
   const home = 'C:\\Users\\Ada';
   const env = {
@@ -68,7 +84,7 @@ test('relative XDG values cannot redirect live paths or tool root discovery into
   const footprintUrl = new URL('../../src/lib/footprint/index.mjs', import.meta.url).href;
   const script = `import * as paths from ${JSON.stringify(pathsUrl)};
 import { knownFileSpecs } from ${JSON.stringify(footprintUrl)};
-console.log(JSON.stringify([paths.configDir(), paths.evidenceDir(),
+console.log(JSON.stringify([paths.configDir(), paths.evidenceDir(), paths.cacheDir(),
   ...knownFileSpecs().map((row) => row.path), ...paths.toolInternalDirs()]));`;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     cwd,
