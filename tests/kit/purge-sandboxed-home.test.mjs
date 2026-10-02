@@ -79,8 +79,12 @@ function changes(before, after) {
 }
 
 const SAFETY_BACKUP = /\.bak(\.\d+)?$/;
+// On Windows the fake launchers run under powershell.exe, which writes its own startup cache under
+// the sandboxed LOCALAPPDATA and leaves an empty AppData/Roaming. That is the harness, not ak.
+const WINDOWS_POWERSHELL_NOISE = process.platform === 'win32' ? /^[+~-] AppData\/(Local\/Microsoft\/|Roaming\/$)/ : null;
 /** What a purge may leave: the safety backups, plus any path the caller names and justifies. */
-const unexplained = (list, allowed = []) => list.filter((line) => !SAFETY_BACKUP.test(line) && !allowed.includes(line.slice(2)));
+const unexplained = (list, allowed = []) => list.filter((line) => !SAFETY_BACKUP.test(line)
+  && !WINDOWS_POWERSHELL_NOISE?.test(line) && !allowed.includes(line.slice(2)));
 
 test('setup then --purge returns a populated HOME to its pre-setup fingerprint', (t) => {
   const s = sandbox(t);
