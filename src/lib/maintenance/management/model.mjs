@@ -132,7 +132,7 @@ export const PLACEMENT_CONDITIONS = Object.freeze([
   'definitions-differ', 'superseded-revision', 'recovery-receipt-open',
   'credential-mechanism-not-checked', 'source-scan-incomplete', 'reproducible-cache',
   'orphaned-process',
-  'host-alignment-required',
+  'host-alignment-required', 'project-root-unavailable',
 ]);
 export const CONDITION_LABELS = Object.freeze({
   'healthy': 'Healthy',
@@ -147,6 +147,7 @@ export const CONDITION_LABELS = Object.freeze({
   'reproducible-cache': 'Reproducible cache',
   'orphaned-process': 'Orphaned process',
   'host-alignment-required': 'Host realignment required',
+  'project-root-unavailable': 'Project root unavailable',
 });
 export const GUIDANCE_LANES = Object.freeze(['apply', 'steps', 'decision', 'update', 'recovery']);
 export const GUIDANCE_LANE_LABELS = Object.freeze({

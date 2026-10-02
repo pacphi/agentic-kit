@@ -1043,10 +1043,13 @@ function managementProvider({
     throw new TypeError('an injected maintenance service requires an explicit managementOptions.controlRoot');
   }
   return async () => {
-    const [{ createManagementService }, maintenanceService, collector] = await Promise.all([
-      import('./maintenance/management/service.mjs'), getMaintenance(), getSystem(),
+    const [{ createManagementService }, { collectHookEvidence }, maintenanceService, collector] = await Promise.all([
+      import('./maintenance/management/service.mjs'), import('./maintenance/management/hook-evidence.mjs'),
+      getMaintenance(), getSystem(),
     ]);
-    return createManagementService({ maintenance: maintenanceService, collector, ...shared, ...managementOptions });
+    return createManagementService({
+      maintenance: maintenanceService, collector, hookEvidence: collectHookEvidence, ...shared, ...managementOptions,
+    });
   };
 }
 

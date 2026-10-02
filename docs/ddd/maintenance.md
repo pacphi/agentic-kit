@@ -36,7 +36,12 @@ keeps owning model facts, sources, and lifecycle diffs — Maintenance consumes 
 consumer, and storage evidence and adds exactly one Managed removal operation.
 [Hook configuration assurance](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/hook-configuration-assurance.md) keeps owning hook occurrences and
 behavior identity — Maintenance joins its sanitized read model into `hook`-kind placements without
-gaining healing authority.
+gaining healing authority. A hook's scope follows its source kind: administrator-managed is `system`,
+a repository's own settings are `project`, and everything else is `user`. The read model has no paths,
+so a repository hook takes its project from a server-private placement context built from the same
+audit run (`hook-evidence.mjs`); it is never serialized, and a hook whose root it cannot resolve stays
+`user` with the `project-root-unavailable` condition. Hooks are not shadow-eligible: hosts merge them
+additively.
 
 Dashboard Delivery owns the authenticated loopback boundary and accessible interactions.
 Maintenance owns the application service used by both the CLI and **System > Maintenance**.

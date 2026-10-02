@@ -36,6 +36,7 @@ function detectCurrentEnvironments({
 
 /**
  * @param {{ maintenance: any, collector: any, modelStore?: any, hookReadModel?: any,
+ *   hookPlacementContext?: any, hookEvidence?: (() => Promise<any>) | null,
  *   loadConfig: () => any, saveConfig: (cfg: any) => void, controlRoot: string,
  *   fsImpl?: typeof fs, now?: () => number, installationKey: string,
  *   platform?: string, env?: NodeJS.ProcessEnv, walk?: Function,
@@ -44,7 +45,8 @@ function detectCurrentEnvironments({
  *   providerOptions?: object }} options
  */
 export function buildManagementContext({
-  maintenance, collector, modelStore = null, hookReadModel = null, loadConfig, saveConfig, controlRoot,
+  maintenance, collector, modelStore = null, hookReadModel = null, hookPlacementContext = null, hookEvidence = null,
+  loadConfig, saveConfig, controlRoot,
   fsImpl = fs, now = Date.now, installationKey, platform = process.platform, env = process.env,
   walk = undefined, paths = {}, wslDistributions = [], osImpl = os,
   collectIntegrationFacts, providerOptions = {},
@@ -59,7 +61,8 @@ export function buildManagementContext({
 
   const nowDate = () => new Date(now());
   const ctx = {
-    maintenance, collector, modelStore, hookReadModel, loadConfig, saveConfig, controlRoot, managementRoot,
+    maintenance, collector, modelStore, hookReadModel, hookPlacementContext, hookEvidence,
+    loadConfig, saveConfig, controlRoot, managementRoot,
     transactionsRoot, fsImpl, now, installationKey, platform, env, walk, paths,
     environments, environmentId, collectIntegrationFacts, providerOptions,
     dispositionStore: createDispositionStore({ root: managementRoot, fsImpl, now: nowDate }),

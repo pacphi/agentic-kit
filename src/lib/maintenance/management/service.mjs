@@ -54,6 +54,7 @@ function freezeUnlessPathCarrying(name, fn) {
 
 /**
  * @param {{ maintenance?: any, collector?: any, modelStore?: any, hookReadModel?: any,
+ *   hookPlacementContext?: any, hookEvidence?: () => Promise<{ hookReadModel: any, hookPlacementContext: any }>,
  *   loadConfig?: () => any, saveConfig?: (cfg: any) => void, controlRoot?: string,
  *   fsImpl?: typeof fs, now?: () => number, installationKey?: string,
  *   platform?: string, env?: NodeJS.ProcessEnv, walk?: Function,
@@ -62,6 +63,7 @@ function freezeUnlessPathCarrying(name, fn) {
  */
 export function createManagementService({
   maintenance = null, collector = null, modelStore = null, hookReadModel = null,
+  hookPlacementContext = null, hookEvidence = null,
   loadConfig = loadKitConfig, saveConfig = saveKitConfig, controlRoot = maintenanceControlDir(),
   fsImpl = fs, now = Date.now, installationKey = undefined, platform = process.platform,
   env = process.env, walk = walkTree, paths = DEFAULT_PATHS,
@@ -79,6 +81,8 @@ export function createManagementService({
     collector: resolvedCollector,
     modelStore,
     hookReadModel,
+    hookPlacementContext,
+    hookEvidence,
     loadConfig,
     saveConfig,
     controlRoot,

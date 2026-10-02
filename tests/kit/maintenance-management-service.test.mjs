@@ -129,7 +129,7 @@ const HERMETIC_PROVIDER_OPTIONS = Object.freeze({
  * model snapshots never leak into the projected inventory). */
 function buildHarness(t, {
   footprint = lightpandaFootprint(), discovery = {}, paths = null, env = {}, collectorRead = null, walk = undefined,
-  controlRoot: providedControlRoot = null,
+  controlRoot: providedControlRoot = null, hookEvidence = null, hookReadModel = null,
 } = {}) {
   // A caller simulating a restart (M1b) passes the SAME controlRoot a prior
   // buildHarness() call returned: every store below is derived from it, so a
@@ -174,6 +174,8 @@ function buildHarness(t, {
     maintenance,
     collector,
     modelStore: EMPTY_MODEL_STORE,
+    ...(hookEvidence ? { hookEvidence } : {}),
+    ...(hookReadModel ? { hookReadModel } : {}),
     loadConfig: () => structuredClone(config),
     saveConfig: (next) => { config = structuredClone(next); },
     controlRoot,
@@ -235,6 +237,65 @@ test('INV-001: refreshInventory builds a valid inventory and persists it as last
   assert.equal(report.scanRequired, false);
   assert.equal(report.inventoryId, inventoryId);
   assert.equal(report.placementCount, 1);
+});
+
+// ── hooks (#309): the inventory takes hook evidence from a provider the caller supplies ──
+
+const HOOK_ROOT = path.join(os.tmpdir(), 'ak-hook-wiring', 'app');
+const hookModel = () => ({
+  definitionGroups: [{
+    behaviorId: 'claude-stop-A', host: 'claude', lifecyclePoint: 'Stop', handlerKind: 'command',
+    placements: [
+      { occurrenceId: 'occ-user', source: { label: 'Mine', kind: 'global' }, selectionState: 'selected' },
+      { occurrenceId: 'occ-project', source: { label: 'Theirs', kind: 'project' }, selectionState: 'selected' },
+    ],
+  }],
+  findings: [], observations: [],
+});
+const hookContext = (id) => (id === 'occ-project' ? { projectRoot: HOOK_ROOT } : null);
+
+const hookRows = (service, scope = 'across') => service.inventory({ scope, limit: 100 }).groups
+  .flatMap((group) => group.placements).filter((row) => row.kind === 'hook');
+
+test('HOOK-001: a hook evidence provider runs once per refresh, and its project hook is filed under its repository', async (t) => {
+  let runs = 0;
+  const h = buildHarness(t, { hookEvidence: async () => { runs++; return { hookReadModel: hookModel(), hookPlacementContext: hookContext }; } });
+  await h.service.refreshInventory();
+  assert.equal(runs, 1);
+  const rows = hookRows(h.service);
+  assert.equal(rows.length, 2);
+  const scopes = Object.fromEntries(rows.map((row) => [row.displayName, row.scope.value]));
+  assert.deepEqual(scopes, { 'Stop Mine': 'user', 'Stop Theirs': 'project' });
+  // Under the Projects lens, inside that repository, beside its host's Hooks.
+  const [project] = hookRows(h.service, 'project');
+  assert.equal(project.displayName, 'Stop Theirs');
+  assert.ok(project.projectId, 'the project hook names its repository');
+  assert.equal(project.breadcrumb.at(-1), 'Hooks');
+  assert.ok(project.breadcrumb.length > 2, 'the repository is part of the breadcrumb');
+  assert.deepEqual(hookRows(h.service, 'user').map((row) => row.displayName), ['Stop Mine']);
+  assert.equal(JSON.stringify(h.service.inventory({ limit: 100 })).includes(HOOK_ROOT), false, 'the repository path stays server-side');
+  await h.service.refreshInventory();
+  assert.equal(runs, 2, 'each refresh runs the provider again');
+});
+
+test('HOOK-002: a hook audit that throws leaves hooks out of that refresh and does not fail the inventory', async (t) => {
+  const h = buildHarness(t, { hookEvidence: async () => { throw new Error('audit exploded'); } });
+  const { inventoryId } = await h.service.refreshInventory();
+  assert.ok(isOpaqueId(inventoryId, 'inv'));
+  assert.deepEqual(hookRows(h.service), []);
+  assert.equal((await h.service.report()).placementCount, 1, 'the rest of the inventory is intact');
+});
+
+test('HOOK-003: an injected read model wins over the provider, and without a context its project hooks stay user scope', async (t) => {
+  let runs = 0;
+  const h = buildHarness(t, {
+    hookReadModel: hookModel(),
+    hookEvidence: async () => { runs++; return { hookReadModel: null, hookPlacementContext: null }; },
+  });
+  await h.service.refreshInventory();
+  assert.equal(runs, 0);
+  const rows = hookRows(h.service);
+  assert.deepEqual(rows.map((row) => row.scope.value), ['user', 'user']);
 });
 
 test('the facade has no refreshRecipes method: recipe refresh has no user-reachable path (ADR-0048)', async (t) => {

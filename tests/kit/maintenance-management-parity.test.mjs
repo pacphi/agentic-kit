@@ -518,7 +518,12 @@ function d1BroadHookReadModel() {
   return {
     definitionGroups: [{
       behaviorId: 'codex-session-start-A', host: 'codex', lifecyclePoint: 'SessionStart', handlerKind: 'command',
-      placements: [{ occurrenceId: 'occ-1', source: { label: 'AutoMemory' }, selectionState: 'selected' }],
+      placements: [
+        { occurrenceId: 'occ-1', source: { label: 'AutoMemory' }, selectionState: 'selected' },
+        // A hook read from the repository's own settings: it must be filed under that repository.
+        { occurrenceId: 'occ-project', source: { label: 'ProjectStop', kind: 'project' }, selectionState: 'selected' },
+        { occurrenceId: 'occ-managed', source: { label: 'ManagedStop', kind: 'managed' }, selectionState: 'selected' },
+      ],
     }],
     findings: [], observations: [],
   };
@@ -538,6 +543,7 @@ test('D1 broad guard: every mapper together, from realistic (non-sentinel) shape
   const footprint = d1BroadFootprint();
   const inputs = withCompleteSourceCoverage({
     footprint, hookReadModel: d1BroadHookReadModel(), modelSnapshot: d1BroadModelSnapshot(),
+    hookPlacementContext: (id) => (id === 'occ-project' ? { projectRoot: footprint.projects.projects[0].path } : null),
     discovery: { instructionFiles: [{ projectPath: footprint.projects.projects[0].path, host: 'claude', name: 'CLAUDE.md' }] },
     environment: { platform: 'darwin' }, installationKey: KEY, now: NOW,
   });
@@ -546,6 +552,9 @@ test('D1 broad guard: every mapper together, from realistic (non-sentinel) shape
 
   const projectPlacementsMissingId = inventory.placements.filter((p) => p.administrativeScope === 'project' && !p.projectId);
   assert.equal(projectPlacementsMissingId.length, 0);
+  const hooks = inventory.placements.filter((p) => p.kind === 'hook');
+  assert.deepEqual(hooks.map((p) => p.administrativeScope).sort(), ['project', 'system', 'user'],
+    'the guard inventory carries a user, a project and a system hook');
 
   assert.ok(!inventory.sourceFingerprint.includes('/Users'));
   assert.match(inventory.sourceFingerprint, /^[0-9a-f]{64}$/);

@@ -195,6 +195,21 @@ function projectionSourceCoverage(ctx, rawCoverage) {
  * locators; never persists on its own — the caller decides whether to keep
  * a partial result (it never does).
  */
+/** The hook evidence for one refresh: the injected read model and context, or one run of the provider
+ *  (`hookEvidence`) when a caller supplies one. A failing audit leaves hooks out of this refresh, as they
+ *  were before the provider existed, and never fails the inventory. */
+async function resolveHookEvidence(ctx) {
+  if (ctx.hookReadModel || typeof ctx.hookEvidence !== 'function') {
+    return { hookReadModel: ctx.hookReadModel, hookPlacementContext: ctx.hookPlacementContext };
+  }
+  try {
+    const evidence = await ctx.hookEvidence();
+    return { hookReadModel: evidence?.hookReadModel ?? null, hookPlacementContext: evidence?.hookPlacementContext ?? null };
+  } catch {
+    return { hookReadModel: null, hookPlacementContext: null };
+  }
+}
+
 async function gatherAndProject(ctx, { deep }) {
   if (deep) await ctx.collector.refreshDeep();
   const footprint = await ctx.collector.read();
@@ -211,11 +226,13 @@ async function gatherAndProject(ctx, { deep }) {
   const { providers, detections } = await resolveProviderEvidence(ctx, footprint);
   const modelStorage = buildModelStorage(modelSnapshot, detections);
   const sourceCoverage = projectionSourceCoverage(ctx, rawSourceCoverage);
+  const hookEvidence = await resolveHookEvidence(ctx);
 
   const { inventory: projected, privateLocators } = buildManagementInventory({
     footprint,
     modelSnapshot,
-    hookReadModel: ctx.hookReadModel,
+    hookReadModel: hookEvidence.hookReadModel,
+    hookPlacementContext: hookEvidence.hookPlacementContext,
     providerDetections,
     receipts,
     sourceCoverage,
