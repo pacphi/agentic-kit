@@ -239,7 +239,8 @@ function jsonPayload(outcome) {
 async function resolveManagement(deps) {
   if (deps.management) return deps.management;
   const { createManagementService } = await import('../lib/maintenance/management/service.mjs');
-  return createManagementService();
+  const { collectHookEvidence } = await import('../lib/maintenance/management/hook-evidence.mjs');
+  return createManagementService({ hookEvidence: collectHookEvidence });
 }
 
 // ── report: read-only findings from the last measurement, optionally ───────
@@ -285,7 +286,10 @@ const refreshSummary = ({ strength, ok: succeeded, stages }) => ({
 async function defaultStages({ pkgRoot, deps, collector, service }) {
   const cwd = deps.cwd ?? process.cwd();
   const management = deps.management
-    ?? (await import('../lib/maintenance/management/service.mjs')).createManagementService({ collector, maintenance: service });
+    ?? (await import('../lib/maintenance/management/service.mjs')).createManagementService({
+      collector, maintenance: service,
+      hookEvidence: (await import('../lib/maintenance/management/hook-evidence.mjs')).collectHookEvidence,
+    });
   return cliRefreshStages({ cwd, pkgRoot, deps: { collector, maintenance: service, management } });
 }
 

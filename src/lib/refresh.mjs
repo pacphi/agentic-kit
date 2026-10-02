@@ -196,6 +196,7 @@ export function cliRefreshStages({ cwd = process.cwd(), pkgRoot, deps = {} }) {
   const management = once(async () => deps.management
     ?? (await import('./maintenance/management/service.mjs')).createManagementService({
       collector: await collector(), maintenance: await maintenance(),
+      hookEvidence: (await import('./maintenance/management/hook-evidence.mjs')).collectHookEvidence,
     }));
 
   return {

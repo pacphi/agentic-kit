@@ -48,6 +48,10 @@
 //                                 result: { models[], bindings[] }.
 //   hookReadModel                  buildHookDashboardReadModel() result:
 //                                 { definitionGroups[], findings[] }.
+//   hookPlacementContext           (occurrenceId) => { projectRoot } | null, built from
+//                                 the raw audit records (hook-evidence.mjs). Server-
+//                                 private: the read model has no paths. Project-kind
+//                                 hooks take their repository from it.
 //   providerDetections              adapters/facts.mjs normalizeIntegrationFacts()
 //                                 shape: { providers: { [id]: { configured,
 //                                 reachable, billing, credentialPresent } } }.
@@ -111,6 +115,7 @@ import { assertion, scorecardFor } from './evidence.mjs';
 import { detectEnvironments, currentEnvironmentId } from './environments.mjs';
 import { deriveDependencyEdges } from './dependencies.mjs';
 import { classifyConflicts } from './conflicts.mjs';
+import { hookProjectRoots, hookScopeForKind } from './hook-scope.mjs';
 import { createBuilder, finalizePlacement, hostLabel, scrubTechnicalDetails } from './projection-builder.mjs';
 import {
   deriveSubmoduleEdges, mapDiscoveryProjectInstructionFiles, mapInstructionFiles, mapProjects,
@@ -393,6 +398,19 @@ function hookConditionFor({ group, placement, findings, keyGroups }) {
   return { conditions: [differs ? 'definitions-differ' : 'healthy'], technicalDetails };
 }
 
+/** A hook's scope and repository from its source kind and the private placement context. A project kind
+ *  whose root is unknown or not in the registry stays user scope, flagged, rather than being filed in a
+ *  repository nothing proved. */
+function hookPlacementScope(placement, { projects, hookPlacementContext }) {
+  const scope = hookScopeForKind(placement.source?.kind);
+  if (scope !== 'project') return { scope, projectEntry: null, rootUnavailable: false };
+  const root = hookPlacementContext?.(placement.occurrenceId)?.projectRoot;
+  const projectEntry = root ? projects.get(root) ?? null : null;
+  return projectEntry
+    ? { scope, projectEntry, rootUnavailable: false }
+    : { scope: 'user', projectEntry: null, rootUnavailable: true };
+}
+
 function mapHooks(builder, hookReadModel, ctx) {
   const { installationKey, now, environmentId } = ctx;
   const findings = [...(hookReadModel?.findings ?? []), ...(hookReadModel?.observations ?? [])];
@@ -414,8 +432,10 @@ function mapHooks(builder, hookReadModel, ctx) {
         definitionDigest: verifiedBehaviorId,
       }, installationKey);
       builder.upsertResource(resourceId, { kind: 'hook', displayName, namespace: group.host });
+      const { scope, projectEntry, rootUnavailable } = hookPlacementScope(placement, ctx);
+      const projectId = projectEntry?.projectId ?? null;
       const placementId = placementIdentity({
-        resourceId, environmentId, administrativeScope: 'user', locationSelector: placement.occurrenceId,
+        resourceId, environmentId, administrativeScope: scope, projectId, locationSelector: placement.occurrenceId,
       }, installationKey);
       const artifactId = artifactIdentity({ carrier: 'config-selector', locator: placement.occurrenceId }, installationKey);
       builder.upsertArtifact(artifactId, { carrier: 'config-selector', label: `${hostLabel(group.host)} hooks configuration` });
@@ -424,10 +444,11 @@ function mapHooks(builder, hookReadModel, ctx) {
       }, installationKey);
       builder.addBinding({
         bindingId, placementId, artifactId, consumerKind: 'host', consumerLabel: hostLabel(group.host),
-        mechanism: 'host-hooks', enabled: placement.selectionState !== 'not-selected', effectiveScope: 'user',
+        mechanism: 'host-hooks', enabled: placement.selectionState !== 'not-selected', effectiveScope: scope,
         grade: 'verified', affectedByProposedAction: false,
       });
       const { conditions, technicalDetails } = hookConditionFor({ group, placement, findings, keyGroups });
+      if (rootUnavailable) conditions.push('project-root-unavailable');
       // A verified behaviorFingerprint is real content-equivalence evidence:
       // two occurrences carrying the same one are byte-identical definitions
       // (feeding conflicts.mjs's shared-artifact/duplicate-placement pair
@@ -441,8 +462,8 @@ function mapHooks(builder, hookReadModel, ctx) {
         });
       }
       finalizePlacement(builder, {
-        placementId, resourceId, environmentId, administrativeScope: 'user',
-        locationBreadcrumb: [hostLabel(group.host), 'Hooks'], artifactIds: [artifactId],
+        placementId, resourceId, environmentId, administrativeScope: scope, projectId,
+        locationBreadcrumb: [...(projectEntry?.breadcrumb ?? []), hostLabel(group.host), 'Hooks'], artifactIds: [artifactId],
         consumerBindingIds: [bindingId], conditions,
         evidenceScorecard: scorecardFor([
           assertion({
@@ -456,6 +477,7 @@ function mapHooks(builder, hookReadModel, ctx) {
         ]),
         displayName, kind: 'hook', hostNamespace: group.host, consumerHosts: [group.host], technicalDetails,
         versions: verifiedBehaviorId ? { contentDigest: verifiedBehaviorId } : {},
+        ...(projectEntry ? { extra: projectPresentation(projectEntry) } : {}),
       });
     }
   }
@@ -973,9 +995,9 @@ function resolveEnvironments(environment, installationKey) {
   return { environments, environmentId };
 }
 
-function buildContext({ installationKey, now, environmentId, projects, discovery }) {
+function buildContext({ installationKey, now, environmentId, projects, discovery, hookPlacementContext }) {
   return {
-    installationKey, now, environmentId, projects,
+    installationKey, now, environmentId, projects, hookPlacementContext,
     pluginEvidence: discovery.pluginEvidence ?? {},
     dependencyProbes: discovery.dependencyProbes ?? [],
     installResourceKinds: discovery.installResourceKinds ?? {},
@@ -1056,13 +1078,13 @@ function assembleInventoryShell(builder, { environments, sourceCoverage, footpri
  * fact came from the caller. See the module header for the accepted shape of
  * each option.
  *
- * @param {{ footprint?: *, modelSnapshot?: *, hookReadModel?: *, providerDetections?: *,
+ * @param {{ footprint?: *, modelSnapshot?: *, hookReadModel?: *, hookPlacementContext?: *, providerDetections?: *,
  *           receipts?: Array<*>, sourceCoverage?: Array<*>, discovery?: *,
  *           environment?: *, installationKey?: string, now?: () => number }} [options]
  * @returns {{ inventory: object, privateLocators: Map<string, object> }}
  */
 export function buildManagementInventory({
-  footprint = {}, modelSnapshot = null, hookReadModel = null, providerDetections = null,
+  footprint = {}, modelSnapshot = null, hookReadModel = null, hookPlacementContext = null, providerDetections = null,
   receipts = [], sourceCoverage = [], discovery = {}, environment = undefined, installationKey = undefined,
   now = Date.now,
 } = {}) {
@@ -1079,7 +1101,8 @@ export function buildManagementInventory({
   // null one. Filled in from the presence's own lexical root before catalog
   // mapping runs, so mapCatalogGroup's ordinary registry lookup finds it.
   registerFallbackProjectPaths(projects, [...projectPathsIn(footprint.catalog),
-    ...(discovery.hostAlignment?.entries ?? []).map(entry => entry.project).filter(Boolean)], { installationKey });
+    ...(discovery.hostAlignment?.entries ?? []).map(entry => entry.project).filter(Boolean),
+    ...hookProjectRoots(hookReadModel, hookPlacementContext)], { installationKey });
   enrichProjectPresentation(builder, projects,
     [...(footprint?.projects?.projects ?? []), ...(footprint?.projects?.discoveryProjects ?? [])], { installationKey });
   // Add presentation evidence after identity assignment; a better label must
@@ -1088,7 +1111,7 @@ export function buildManagementInventory({
     const entry = /** @type {{ projectKind?: string } | undefined} */ (projects.get(row.path));
     if (entry && (!entry.projectKind || entry.projectKind === 'unknown') && ['git', 'folder', 'worktree', 'unknown'].includes(row.projectKind)) entry.projectKind = row.projectKind;
   }
-  const ctx = buildContext({ installationKey, now, environmentId, projects, discovery });
+  const ctx = buildContext({ installationKey, now, environmentId, projects, discovery, hookPlacementContext });
 
   runMappingStages(builder, {
     footprint, hookReadModel, modelSnapshot, providerDetections, discovery, byProjectId,

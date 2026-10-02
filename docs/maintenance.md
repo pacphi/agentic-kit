@@ -129,6 +129,26 @@ distinct installations once, even when a relationship links to one from another 
 Resource kinds include Skill, MCP registration, Plugin, Hook, Instruction file, Agent, Command,
 Host adapter, Executable, Runtime, Model, Provider configuration, Cache, Credential, and Storage.
 
+### Hooks
+
+Hooks appear in the Inventory where their host reads them. Each refresh runs the same read-only hook
+audit as `ak audit hooks` once, and files every hook by its source:
+
+| Source | Scope |
+| --- | --- |
+| Claude's administrator-managed settings | System |
+| Your own settings, plugin caches, user-level OpenCode configuration and plugins, external adapter manifests | User |
+| A repository's `.claude/settings.json` and `settings.local.json`, `.codex/hooks.json` and `.codex/config.toml`, `opencode.json` and `.opencode/plugins` | Projects, inside that repository |
+
+A repository hook whose repository cannot be resolved stays under User and carries the **Project
+root unavailable** condition, so it is never filed in a repository nothing proved. Hosts run hooks
+from every scope additively, so a user hook and a project hook with the same name are never shown as
+one shadowing the other. The audit covers the working directory and the Git repositories the project
+census knows. Hooks that Claude plugins enable only for a project still show under User, because
+Claude's audit ignores the per-install plugin scope. If the audit cannot run, that refresh leaves
+hooks out and the rest of the Inventory is unchanged. Repository paths stay on the server; the
+Inventory carries only the opaque repository identity. Healing a hook is still `ak heal hooks`.
+
 ### Views, facets, search, and sorting
 
 - **Curated views** include All resources, Can apply here, Steps available, Decisions to make,

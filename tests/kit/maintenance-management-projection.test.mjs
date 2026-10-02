@@ -373,6 +373,113 @@ test('a hook the host has not selected carries a disabled condition, not silence
   assert.deepEqual(inventory.placements[0].conditions, ['disabled']);
 });
 
+// ── hook scope: where the host reads a hook decides its scope and repository ──
+
+/** One definition group whose placements differ only by their source kind, so each is found by its label. */
+const hookModelOf = (placements, host = 'claude') => ({
+  definitionGroups: [{
+    behaviorId: `${host}-session-start-A`, host, lifecyclePoint: 'SessionStart', handlerKind: 'command', placements,
+  }],
+  findings: [], observations: [],
+});
+const hookAt = (occurrenceId, label, kind) => ({
+  occurrenceId, source: { label, ...(kind === undefined ? {} : { kind }) }, selectionState: 'selected',
+});
+const hookRoots = (roots) => (occurrenceId) => (roots[occurrenceId] ? { projectRoot: roots[occurrenceId] } : null);
+const hookNamed = (inventory, label) => inventory.placements.find((p) => p.displayName === `SessionStart ${label}`);
+
+test('hook scope follows where the host reads the hook: system, user and project', () => {
+  const hookReadModel = hookModelOf([
+    hookAt('occ-global', 'Global', 'global'),
+    hookAt('occ-managed', 'Managed', 'managed'),
+    hookAt('occ-project', 'Project', 'project'),
+    hookAt('occ-inline', 'Inline', 'project-inline'),
+    hookAt('occ-plugin', 'Plugin', 'plugin-cache'),
+    hookAt('occ-adapter', 'Adapter', 'external-adapter-manifest'),
+    hookAt('occ-nokind', 'Unlabelled'),
+    hookAt('occ-novel', 'Novel', 'a-kind-added-later'),
+  ]);
+  const { inventory } = invoke({
+    footprint: {}, hookReadModel,
+    hookPlacementContext: hookRoots({ 'occ-project': '/work/app', 'occ-inline': '/work/app' }),
+  });
+  const scopes = Object.fromEntries(inventory.placements.map((p) => [p.displayName.replace('SessionStart ', ''), p.administrativeScope]));
+  assert.deepEqual(scopes, {
+    Global: 'user', Managed: 'system', Project: 'project', Inline: 'project',
+    Plugin: 'user', Adapter: 'user', Unlabelled: 'user', Novel: 'user',
+  });
+  // Only the project placements name a repository, and the two in one repository name the same one.
+  for (const placement of inventory.placements) {
+    assert.equal(Object.hasOwn(placement, 'projectId'), placement.administrativeScope === 'project', placement.displayName);
+  }
+  const project = hookNamed(inventory, 'Project');
+  assert.ok(isOpaqueId(project.projectId, 'prj'));
+  assert.equal(hookNamed(inventory, 'Inline').projectId, project.projectId);
+  assert.deepEqual(project.locationBreadcrumb.slice(-2), ['Claude', 'Hooks']);
+  assert.ok(project.locationBreadcrumb.length > 2, 'the repository comes first in the breadcrumb');
+  assert.ok(Array.isArray(project.projectBreadcrumb), 'the project presentation travels with the placement');
+  assert.deepEqual(hookNamed(inventory, 'Managed').locationBreadcrumb, ['Claude', 'Hooks']);
+  assert.deepEqual(hookNamed(inventory, 'Global').locationBreadcrumb, ['Claude', 'Hooks']);
+  // The binding's effective scope is the placement's own, never a stale 'user'.
+  for (const placement of inventory.placements) {
+    const bindings = inventory.consumerBindings.filter((b) => placement.consumerBindingIds.includes(b.bindingId));
+    assert.ok(bindings.length > 0);
+    assert.ok(bindings.every((b) => b.effectiveScope === placement.administrativeScope), placement.displayName);
+  }
+  assert.ok(inventory.placements.every((p) => !p.conditions.includes('project-root-unavailable')));
+});
+
+test('a project hook with no resolvable root stays user scope and says why, instead of landing in a guessed repository', () => {
+  const hookReadModel = hookModelOf([
+    hookAt('occ-known', 'Known', 'project'),
+    hookAt('occ-lost', 'Lost', 'project'),
+  ]);
+  const withContext = invoke({
+    footprint: {}, hookReadModel, hookPlacementContext: hookRoots({ 'occ-known': '/work/app' }),
+  }).inventory;
+  assert.equal(hookNamed(withContext, 'Known').administrativeScope, 'project');
+  const lost = hookNamed(withContext, 'Lost');
+  assert.equal(lost.administrativeScope, 'user');
+  assert.equal(Object.hasOwn(lost, 'projectId'), false);
+  assert.deepEqual(lost.conditions, ['healthy', 'project-root-unavailable']);
+
+  // No context at all (an older caller that passes only the read model) degrades the same way.
+  const withoutContext = invoke({ footprint: {}, hookReadModel }).inventory;
+  for (const placement of withoutContext.placements) {
+    assert.equal(placement.administrativeScope, 'user');
+    assert.deepEqual(placement.conditions, ['healthy', 'project-root-unavailable']);
+  }
+});
+
+test('hooks in two repositories get two project ids, and hooks in one repository share one', () => {
+  const hookReadModel = hookModelOf([
+    hookAt('occ-a1', 'A1', 'project'), hookAt('occ-a2', 'A2', 'project-inline'), hookAt('occ-b', 'B', 'project'),
+  ]);
+  const { inventory } = invoke({
+    footprint: {}, hookReadModel,
+    hookPlacementContext: hookRoots({ 'occ-a1': '/work/a', 'occ-a2': '/work/a', 'occ-b': '/work/b' }),
+  });
+  const id = (label) => hookNamed(inventory, label).projectId;
+  assert.equal(id('A1'), id('A2'));
+  assert.notEqual(id('A1'), id('B'));
+  assert.equal(new Set([id('A1'), id('A2'), id('B')]).size, 2);
+});
+
+test('a user hook and a project hook of the same name are not a shadowed override', () => {
+  // Hosts run hooks from every scope additively, so neither replaces the other.
+  const hookReadModel = hookModelOf([hookAt('occ-user', 'Notify', 'global'), hookAt('occ-project', 'Notify', 'project')]);
+  const { inventory } = invoke({
+    footprint: {}, hookReadModel, hookPlacementContext: hookRoots({ 'occ-project': '/work/app' }),
+  });
+  assert.deepEqual(inventory.placements.map((p) => p.administrativeScope).sort(), ['project', 'user']);
+  assert.equal(inventory.conflictSets.some((c) => c.kind === 'shadowed-override'), false);
+
+  const placements = ['project', 'user'].map((scope) => placement({
+    placementId: `plc_${scope}`, kind: 'hook', displayName: 'Notify', consumerHosts: ['claude'], administrativeScope: scope,
+  }));
+  assert.deepEqual(classifyConflicts({ placements, dependencyEdges: [] }, { installationKey: KEY }), []);
+});
+
 test('MNT-INV-008: model rows carry provider, digest, storage, consumers, and activeUse', () => {
   const modelSnapshot = {
     models: [{

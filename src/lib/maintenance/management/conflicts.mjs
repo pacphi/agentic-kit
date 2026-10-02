@@ -103,8 +103,11 @@ function sameNameDifferentDefinitionGroups(placements) {
  *  machine- or system-scope one, for the kinds a host resolves by nearest
  *  scope. Cross-host precedence is never inferred. */
 const SCOPE_RANK = Object.freeze({ system: 0, machine: 1, user: 2, project: 3 });
+// `hook` is not here on purpose: hosts merge hooks from every scope additively, so a user hook and a
+// project hook of the same name both run and neither overrides the other. A project scope alone does not
+// prove an override (docs/maintenance.md).
 const SHADOW_ELIGIBLE_KINDS = new Set([
-  'skill', 'instruction-context-file', 'mcp-registration', 'hook', 'command-prompt', 'agent',
+  'skill', 'instruction-context-file', 'mcp-registration', 'command-prompt', 'agent',
 ]);
 
 function shadowGroups(placements) {

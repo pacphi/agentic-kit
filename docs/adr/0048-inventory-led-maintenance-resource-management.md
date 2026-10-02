@@ -7,6 +7,21 @@
   two dashboard scan controls with one Refresh control; its three visible choices start the
   shared staged POST operation. D-15 moves the human usability, screen-reader, and
   cross-platform evaluation gates to v5; automated checks do not satisfy them.
+- **Update note (2026-10-02):** Hook placements now carry their real scope. Until now `mapHooks`
+  labelled every hook User and no production caller passed a hook read model, so the Inventory showed
+  no hooks. The scope comes from the audit record's source kind: Claude's administrator-managed
+  settings are **System**, the first `system` placement the projection has produced; a repository's
+  own settings, `.codex/` files, and OpenCode project config and plugins are **Project**, with that
+  repository's `projectId` and breadcrumb; everything else, and any kind not recognized, stays User.
+  The public read model stays path-free. A server-private placement context
+  (`hookPlacementContext(occurrenceId) → { projectRoot } | null`, built from the same audit run in
+  `hook-evidence.mjs`) names the repository and is never serialized; a repository hook whose root is
+  unknown stays User with the `project-root-unavailable` condition. The dashboard, refresh and
+  `ak maintain` paths now pass a `hookEvidence` provider that runs the audit once per inventory
+  refresh. `hook` leaves the shadow-eligible kinds, because hosts merge hooks from every scope
+  additively. Hook placement IDs change with scope and `projectId`; hooks were never in a production
+  inventory, so no stored disposition or receipt refers to one. See
+  [the plan](../plans/2026-10-01-prereq-maintenance-hook-scope.md).
 - **Earlier update:** 2026-09-28 — Branch 6b gives this ADR's two scan controls CLI equivalents:
   `ak maintain --refresh` and `ak maintain --refresh=machine` (`src/lib/refresh.mjs`'s
   `--refresh[=live|machine]`, `ak status --help` for the shared stages). The `scan` verb, the
