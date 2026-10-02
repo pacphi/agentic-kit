@@ -2710,12 +2710,13 @@
       "mapping": "mapped",
       "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row formerly named the broken platform setup command (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
       "adjustment": "The codex-mcp status row now points to AQE's supported aqe init --auto --with-codex --codex-guidance compact flow and notes the separate 3.14.4 Codex asset gap (agentic-qe#755). ak does not run platform setup or write AQE's Codex registration.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 761; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 761; no release contains it yet" },
+        { "date": "2026-10-02", "event": "dispatched", "note": "fix released in agentic-qe 3.14.5; the ak-side adjustment was already present (src/commands/status/sections/codex-mcp.mjs) and is covered by tests/kit/status-command.test.mjs; branch upstream/proffesor-for-testing-agentic-qe-757" }
       ]
     },
     {
