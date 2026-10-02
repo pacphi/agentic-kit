@@ -1584,7 +1584,12 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        {
+          "date": "2026-10-02",
+          "event": "commented",
+          "note": "evidence on 3.48.0 that backup covers memory.db only; proposed backing up both stores per source or a coverage warning (issuecomment-5962425868)"
+        }
       ]
     },
     {
@@ -1661,7 +1666,12 @@
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "watching", "note": "re-checked: still reproduces on 3.46.1 (memory delete tombstones memory.db only; the agentdb-memory.db mirror stays active)" }
+        { "date": "2026-09-27", "event": "watching", "note": "re-checked: still reproduces on 3.46.1 (memory delete tombstones memory.db only; the agentdb-memory.db mirror stays active)" },
+        {
+          "date": "2026-10-02",
+          "event": "commented",
+          "note": "confirmed the delete fix on 3.48.0 (both stores 0 active rows after memory delete); purge and the two residual items not tested (issuecomment-5962425662)"
+        }
       ]
     },
     {
