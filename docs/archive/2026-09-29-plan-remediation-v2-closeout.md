@@ -2,10 +2,10 @@
 
 ## Status and authority
 
-Active under the confirmed [develop execution plan](../plans/2026-09-28-remediation-v2-develop-execution.md).
+Active under the confirmed [develop execution plan](2026-09-28-plan-remediation-v2-develop-execution.md).
 Base: `develop@88ce597f`, incorporating reviewed V1–V6 and the main watcher reconciliation.
 All 13 develop CI checks passed. Source scope remains the 189 Appendix A and 57 Appendix B
-entries in [the program](../plans/2026-09-28-remediation-program-v2.md). New release, installation,
+entries in [the program](2026-09-28-plan-remediation-program-v2.md). New release, installation,
 real-store merge, deletion, personal-memory writes and future #239 work remain outside this
 implementation authority. The final develop → main PR stays open for human review.
 

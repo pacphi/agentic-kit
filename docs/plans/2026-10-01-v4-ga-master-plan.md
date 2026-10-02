@@ -32,7 +32,7 @@ has the same columns: Backlog, Ready, In progress, In review and Done.
 - **Epics stay within one major version.** An epic lives on the board where most of its work
   lands.
 - **Each card is one branch and one PR.** The PR says `Closes #N`. Execution follows
-  [remediation v2's standing rules](2026-09-28-remediation-program-v2.md#5-standing-rules-carried-from-v1).
+  [remediation v2's standing rules](../archive/2026-09-28-plan-remediation-program-v2.md#5-standing-rules-carried-from-v1).
 
 ## Labels and milestones
 
@@ -275,9 +275,9 @@ Exit codes: `0` means success, `1` an error (the message says which), `2` a usag
   - [A: the dangling Ruflo reference pointer](2026-10-01-prereq-ruflo-reference-pointer.md);
   - [B: Intelligence writes into projects](2026-10-01-prereq-intelligence-no-project-writes.md);
   - [C: hook scope in the Maintenance inventory](2026-10-01-prereq-maintenance-hook-scope.md).
-- [Remediation program v2](2026-09-28-remediation-program-v2.md), its
-  [develop execution plan](2026-09-28-remediation-v2-develop-execution.md), and the
-  [issues 237–239 decision log](2026-09-26-issues-237-238-239-verification-and-decisions.md).
+- [Remediation program v2](../archive/2026-09-28-plan-remediation-program-v2.md), its
+  [develop execution plan](../archive/2026-09-28-plan-remediation-v2-develop-execution.md), and the
+  [issues 237–239 decision log](../archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md).
 - The upstream registry (`src/lib/hook-audit/agentic-dependency-constraints.json`) and its report
   (`node scripts/upstream-watch.mjs report`).
 - [v5 planning sources](../proposals/v5-planning-sources.md).

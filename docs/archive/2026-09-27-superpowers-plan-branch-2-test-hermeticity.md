@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22.13+ ESM (`node:test`, `node:child_process`, `node:crypto`), Playwright (`tests/ui`), pnpm in CI (never in this worktree).
 
-**Spec:** [Remediation program, Branch 2](../plans/2026-09-26-remediation-program.md#branch-2-fixtest-hermeticity); [audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md) Open items ("Needs the maintainer's action": the dashboard server's hermeticity guard gap; "Carried from the earlier stages": spawn tests inheriting `XDG_*`, UI suite outside `test:ui`; "Not run": the memory-routing live test uses the real home folder); SDD ledger deferred minors `hermeticity-suite-writes-enclosing-repo`, `hermeticity-temp-dir-leaks`, the `host-readiness.mjs` flake and the MNT-UX-007 flake.
+**Spec:** [Remediation program, Branch 2](2026-09-26-plan-remediation-program.md#branch-2-fixtest-hermeticity); [audit record](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) Open items ("Needs the maintainer's action": the dashboard server's hermeticity guard gap; "Carried from the earlier stages": spawn tests inheriting `XDG_*`, UI suite outside `test:ui`; "Not run": the memory-routing live test uses the real home folder); SDD ledger deferred minors `hermeticity-suite-writes-enclosing-repo`, `hermeticity-temp-dir-leaks`, the `host-readiness.mjs` flake and the MNT-UX-007 flake.
 
 ## Global Constraints
 

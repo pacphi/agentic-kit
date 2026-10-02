@@ -1,4 +1,4 @@
-// Decision A (docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md,
+// Decision A (docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md,
 // addendum): ak facilitates and monitors what Ruflo does; it does not run a
 // parallel copy. The standalone global `agentdb` ak used to install for
 // `ak x harvest` was a worse duplicate of the copy Ruflo bundles, its install was

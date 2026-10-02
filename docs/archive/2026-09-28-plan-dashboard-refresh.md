@@ -4,7 +4,7 @@
 
 **Implemented; final integration gates pending** — Captured 2026-09-29 after `d2c1833b`. Tasks 6c-1 through 6c-5, the live-view follow-up, native plain-folder proof, and the paused Activity timestamp handoff passed scoped independent reviews. The branch incorporates green `develop@af825c9f`. Full branch gates, whole-branch review and feature PR CI remain at this archival capture; this status does not claim a merge or release.
 
-Implement the deferred 6c work in order, with one reviewed task and unit commit at a time. The [remediation program](../plans/2026-09-28-remediation-program-v2.md) and [6b handoff](2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md) define the contracts. A passing exact-head develop CI gate precedes production edits. Tests use sandbox state and injected services; final branch gates and integration belong to the controller.
+Implement the deferred 6c work in order, with one reviewed task and unit commit at a time. The [remediation program](2026-09-28-plan-remediation-program-v2.md) and [6b handoff](2026-09-28-superpowers-plan-branch-6b-one-refresh-flag.md) define the contracts. A passing exact-head develop CI gate precedes production edits. Tests use sandbox state and injected services; final branch gates and integration belong to the controller.
 
 | Task | Dependency | Code and proof |
 | --- | --- | --- |

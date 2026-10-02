@@ -50,7 +50,7 @@ Exact writer claims for the initial slice:
 - [ ] Map original plan gates and retained 246-row remediation scope matrix to merged,
   inherited, upstream-blocked and approval-pending evidence without repeating completed work.
   All identifiers now have a disposition in the
-  [M1 successor ledger](2026-09-30-completion-m1-closeout-ledger.md); final gate receipts remain.
+  [M1 successor ledger](2026-09-30-plan-completion-m1-closeout-ledger.md); final gate receipts remain.
 - [ ] Carry release/install, real-data and cleanup gates as open until separately approved.
 
 The original eight source plans and snapshots are preserved. P00's entire reconciliation is
@@ -160,7 +160,7 @@ package passes; no retirement or automatic dispatch was performed here.
 
 **Executed with Option A approval:** acquisition and named rebuild passed; stock native
 macOS proof established busy startup/preservation but failed its shutdown-marker gate.
-The [dated receipt](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) distinguishes released
+The [dated receipt](2026-09-30-aqe-m1-mcp-lock-proof.md) distinguishes released
 artifact results from a passing matched source-module proposal control. No installed
 artifact was patched, and no release/platform-wide fix or issue closure is claimed.
 The subsequent Option A approved issue publication only: AQE #801 was posted at

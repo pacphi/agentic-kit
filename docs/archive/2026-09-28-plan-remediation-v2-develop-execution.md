@@ -9,13 +9,13 @@
 **2026-10-02 close-out:** Phase E, the separately gated operational completion, is carried by
 the exit-release cards: the maintainer's machine jobs (#318) and the publication of
 `4.0.0-alpha.61` (#320), which still needs explicit release authorization. The release is
-checked through `npx`, not a global install ([ledger](2026-10-01-v4-supersession-ledger.md), exit items 8 and 9). This plan
+checked through `npx`, not a global install ([ledger](../plans/2026-10-01-v4-supersession-ledger.md), exit items 8 and 9). This plan
 is archived by the card #317, and the text below stays as it was written.
 
 **2026-09-30 current update:** final PR #285 merged on 2026-09-29 at 22:06:48 UTC
 as main `0511d575`, with the same tree as reviewed develop `04e3de3c`.
 Phase D's final integration action is complete. Phase E remains separately gated;
-the [M1 successor ledger](2026-09-30-completion-m1-closeout-ledger.md) retains its
+the [M1 successor ledger](2026-09-30-plan-completion-m1-closeout-ledger.md) retains its
 open timing, conformance and operational conditions. The prior dated checkpoint follows.
 
 **Active and confirmed** — the maintainer approved this execution plan on 2026-09-28.
@@ -29,11 +29,11 @@ are integrated through `develop@88ce597f444d487a34d9871a447cf8942f76f760` with a
 13 develop CI checks passing. V7 guard and evidence units are independently accepted;
 V7 shared integration, independent reviews and all nine local gates passed at
 `795a0f7266de0bf6a04358359b75a1ad1b609e1d`; closeout PR CI and integration remain pending.
-The [246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md),
-[integration receipt](../archive/2026-09-29-remediation-v2-integration-evidence.md),
-[ordered rulings](../archive/2026-09-29-remediation-v2-rulings.md),
-[Windows evidence](../archive/2026-09-29-windows-ci-evidence.md) and
-[AQE proof](../archive/2026-09-29-aqe-released-artifact-receipt.md) retain the limits.
+The [246-row scope matrix](2026-09-29-remediation-v2-scope-matrix.md),
+[integration receipt](2026-09-29-remediation-v2-integration-evidence.md),
+[ordered rulings](2026-09-29-remediation-v2-rulings.md),
+[Windows evidence](2026-09-29-windows-ci-evidence.md) and
+[AQE proof](2026-09-29-aqe-released-artifact-receipt.md) retain the limits.
 The dated 19:20 UTC three-PR timing snapshot includes a 358-second Windows leg.
 The controller will refresh that separate gate after closeout PR CI.
 The final develop → main PR and human approval remain pending. This plan stays
@@ -49,7 +49,7 @@ Agentic QE supplies scoped quality work through its real installed tools.
 
 **Tech stack:** Node.js ES modules, existing zero-runtime-dependency CLI, GitHub Actions.
 
-**Spec:** [Remediation program v2](2026-09-28-remediation-program-v2.md), including every
+**Spec:** [Remediation program v2](2026-09-28-plan-remediation-program-v2.md), including every
 Appendix A/B row and its referenced v1 plans, rulings and evidence.
 
 ## Confirmed decisions and authority

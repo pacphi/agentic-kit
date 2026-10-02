@@ -1,4 +1,4 @@
-// Decision 3 (docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md):
+// Decision 3 (docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md):
 // one recognizer for every host decides which AQE MCP registrations ak may edit.
 // Accepted: AQE's own programs started exactly as AQE starts its MCP server.
 import { test } from 'node:test';

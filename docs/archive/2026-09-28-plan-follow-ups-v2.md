@@ -24,7 +24,7 @@ CI, including the corrected Windows identity fixtures, and squash integration
 remain pending at capture. This archive does not claim main merge, release,
 installation or operational cleanup.
 
-The [remediation program V4](../plans/2026-09-28-remediation-program-v2.md#v4-fixfollow-ups-v2-every-small-product-cli-and-upstream-item) defines scope. The [archived Branch 9 plan](2026-09-28-superpowers-plan-branch-9-follow-ups.md) supplies task details. Paths below name current source seams and focused test targets. After an explicit directory prefix, subsequent bare filenames in the same cell use that directory. A new test named below is a proposed file. Later implementers must verify dependencies before editing.
+The [remediation program V4](2026-09-28-plan-remediation-program-v2.md#v4-fixfollow-ups-v2-every-small-product-cli-and-upstream-item) defines scope. The [archived Branch 9 plan](2026-09-28-superpowers-plan-branch-9-follow-ups.md) supplies task details. Paths below name current source seams and focused test targets. After an explicit directory prefix, subsequent bare filenames in the same cell use that directory. A new test named below is a proposed file. Later implementers must verify dependencies before editing.
 
 | Row | Source or artifact mapping | Focused proof and prerequisite |
 | --- | --- | --- |

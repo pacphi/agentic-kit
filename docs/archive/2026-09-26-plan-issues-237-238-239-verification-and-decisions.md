@@ -3,7 +3,7 @@
 ## Status
 
 Active. This is the standing decision log for the remediation program: v1's branches appended
-their "Implementation status" entries here, and [remediation program v2](2026-09-28-remediation-program-v2.md)
+their "Implementation status" entries here, and [remediation program v2](2026-09-28-plan-remediation-program-v2.md)
 continues to cite and append to it (its own §1 decisions are numbered separately, D-1 onward). It
 archives alongside the program plans once v2 completes.
 
@@ -936,7 +936,7 @@ changed in this wave:
 #### Remediation program Branch 1 (`fix/imported-rollout-origins`, 2026-09-27)
 
 Added after the fact. This branch was built from `be1c1d47` for the
-[remediation program](2026-09-26-remediation-program.md), not on
+[remediation program](2026-09-26-plan-remediation-program.md), not on
 `integration/237-238`, and it is not merged. It implements ADR-0060 §3 for project discovery: a Codex
 rollout imported from a Claude Code transcript gives a folder no project, Codex host or Desktop
 origin, and discovery counts it in `importedExcluded`, which the System KPI note shows. A read-only
@@ -949,7 +949,7 @@ with the old origins. What remains is listed under Open items.
 #### Remediation program Branch 4 (`feat/upstream-watch-live`, 2026-09-27)
 
 Added after the fact, like Branch 1: built on `main` (rebased onto `5f5ca175`) for the
-[remediation program](2026-09-26-remediation-program.md), not merged. The
+[remediation program](2026-09-26-plan-remediation-program.md), not merged. The
 decisions are under "Branch 4 decisions" below.
 
 - **Release confirmation:** a release counts only when its tag contains the merged fixing pull
@@ -983,7 +983,7 @@ decisions are under "Branch 4 decisions" below.
 #### Remediation program Branch 5 (`fix/aqe-store-integrity`, 2026-09-27)
 
 Added after the fact, like Branch 1: built on `main` (rebased onto `88e26999`) for the
-[remediation program](2026-09-26-remediation-program.md), not merged. The
+[remediation program](2026-09-26-plan-remediation-program.md), not merged. The
 decisions are under "Branch 5 decisions" below; the design is
 [ADR-0062](../adr/0062-aqe-project-store-integrity.md).
 
@@ -1032,9 +1032,9 @@ decisions are under "Branch 5 decisions" below; the design is
 #### Remediation program Branch 9 (`fix/follow-ups`, 2026-09-28)
 
 Built from `82d1211b` (#253; main was at v4.0.0-alpha.59, `b84b5a7e`, immediately before it) for the
-[remediation program](2026-09-26-remediation-program.md), in parallel with
+[remediation program](2026-09-26-plan-remediation-program.md), in parallel with
 Branch 6b; not merged. The plan is
-[docs/archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md](../archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md).
+[docs/archive/2026-09-28-superpowers-plan-branch-9-follow-ups.md](2026-09-28-superpowers-plan-branch-9-follow-ups.md).
 The maintainer closed the branch after its first four tasks (2026-09-28); Tasks 5–14, the
 added-scope items N-1–N-5 and everything in that plan's "Deferred until 6b merges" table move to
 the next remediation program.
@@ -1868,7 +1868,7 @@ this branch. The upstream watch (6.19–6.21) landed here as eight commits whose
 the table: `24ddc42` (ships the constraint registry with ak, which the table did not list), `07c2694`
 (6.19), `47acb1b` (6.20), `3f0a7fe` (the `upstream-status` skill, not listed), `357f465` (6.21),
 `de88fdd`, `5d7698a` and `184b14c`. Every other item moved to the
-[remediation program plan](2026-09-26-remediation-program.md): 6.22, 6.1, 6.2,
+[remediation program plan](2026-09-26-plan-remediation-program.md): 6.22, 6.1, 6.2,
 6.23, 6.25 and 6.26 are Branch 3's items 1–6; 6.3, 6.4, 6.5, 6.18 and 6.24 are Branch 5's items 1–5;
 6.6 and 6.7 are Branch 6a's items 1–2; 6.8–6.16 are Branch 6b's items 1–9 and 6.17 its item 11.
 The order constraints above still hold across those branches.
@@ -2561,7 +2561,7 @@ branch acceptance or completion of the separately dispatched live-view work.
 ### Remediation program v2 close-out (2026-10-02)
 
 Remediation program v2 closes with the exit release `4.0.0-alpha.61`
-([supersession ledger](2026-10-01-v4-supersession-ledger.md), exit item 7). This is the v2 summary
+([supersession ledger](../plans/2026-10-01-v4-supersession-ledger.md), exit item 7). This is the v2 summary
 entry that the plan's V7 (point 3) and the ledger's "Log close-out" row call for. It records what
 closed, where the open items went, and the evidence for the one definition-of-done item that was
 still waiting on a real event.
@@ -2569,9 +2569,9 @@ still waiting on a real event.
 **What v2 delivered.** V1–V7 were integrated into `develop` and reached `main` through #285, merged
 on 2026-09-29 at 22:06:48 UTC as `0511d575`, with the same tree as the reviewed `develop` at
 `04e3de3c` (see the Status section of the
-[develop execution plan](2026-09-28-remediation-v2-develop-execution.md)). The
-[246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md) maps every historical
-row. The [M1 closeout ledger](2026-09-30-completion-m1-closeout-ledger.md) is its row-by-row map,
+[develop execution plan](2026-09-28-plan-remediation-v2-develop-execution.md)). The
+[246-row scope matrix](2026-09-29-remediation-v2-scope-matrix.md) maps every historical
+row. The [M1 closeout ledger](2026-09-30-plan-completion-m1-closeout-ledger.md) is its row-by-row map,
 and the supersession ledger decides the dispositions (the ledger's gap **G11**).
 
 **Where the open items went.** Each is an exit item of the v4 program, with a card on the v4.0.0

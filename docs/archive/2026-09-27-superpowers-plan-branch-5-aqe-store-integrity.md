@@ -6,7 +6,7 @@
 
 **Architecture:** Four slices in the worktree `../agentic-kit-b5`, each by a fresh implementer, one unit commit per behavior change, test first. AQE facts come from the installed 3.14.4 source (`AQE/` = `$(npm root -g)/agentic-qe`). Store-touching behavior is proven only in disposable environments; the only real-machine step for implementers is a read-only preview on copies. The real merge of the nine stray stores is the controller's pass with the released build.
 
-**Spec:** [program plan, Branch 5](../plans/2026-09-26-remediation-program.md#branch-5-fixaqe-store-integrity); [audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md) Addendum 3 items 2, 3, 5, 6, decisions 3, 7, 10 (13 landed in #248, so its open decision is dropped); the SDD ledger's investigations `inv-aqe-audit-chain` (agentic-qe#753) and `inv-aqe-rvf-flag-vector-space` (agentic-qe#754); `briefs/common.md`.
+**Spec:** [program plan, Branch 5](2026-09-26-plan-remediation-program.md#branch-5-fixaqe-store-integrity); [audit record](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) Addendum 3 items 2, 3, 5, 6, decisions 3, 7, 10 (13 landed in #248, so its open decision is dropped); the SDD ledger's investigations `inv-aqe-audit-chain` (agentic-qe#753) and `inv-aqe-rvf-flag-vector-space` (agentic-qe#754); `briefs/common.md`.
 
 ## Maintainer decisions (2026-09-27)
 

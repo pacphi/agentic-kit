@@ -4,7 +4,7 @@
 
 ## Status
 
-Superseded (2026-09-28) by [remediation program v2](2026-09-28-remediation-program-v2.md), which
+Superseded (2026-09-28) by [remediation program v2](2026-09-28-plan-remediation-program-v2.md), which
 finishes everything this plan left open (Branch 0's final steps and the decision-gate backlog).
 Most branches here did merge (#241, #244–#250, #252, #253, #258–#261, #263). Kept in `docs/plans/`
 rather than archived because v2 and the decision log below still cite it by name; it archives
@@ -16,7 +16,7 @@ alongside v2's own plan once v2's docs-taxonomy branch runs (v2 §3, `V2`).
 
 **Tech Stack:** Node 22+/26 ESM CLI (`bin/agentic-kit.mjs`), `node:test`, Playwright UI harness (`tests/ui`), GitHub CLI, npm registry, Ruflo 3.4x, Agentic QE 3.14.x.
 
-**Spec:** [Issues 237–239 verification and decisions](2026-09-26-issues-237-238-239-verification-and-decisions.md) (decisions 1–9, Addenda 1–3 and the implementation-status open items), [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md), and [the upstream watch](../upstream-watch.md).
+**Spec:** [Issues 237–239 verification and decisions](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) (decisions 1–9, Addenda 1–3 and the implementation-status open items), [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md), and [the upstream watch](../upstream-watch.md).
 
 ## Global Constraints
 

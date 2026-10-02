@@ -15,8 +15,8 @@ fixtures or `npm pack` tarballs in the scratch area, never from a real install.
 3.46.1 (`$(npm root -g)/ruflo/node_modules/@claude-flow/cli/dist/src`, written below as `CLI/`),
 SQLite through `src/lib/sqlite.mjs`.
 
-**Spec:** [program plan, Branch 3](../plans/2026-09-26-remediation-program.md#branch-3-featruflo-support-window),
-[audit record](../plans/2026-09-26-issues-237-238-239-verification-and-decisions.md) (Addendum 2
+**Spec:** [program plan, Branch 3](2026-09-26-plan-remediation-program.md#branch-3-featruflo-support-window),
+[audit record](2026-09-26-plan-issues-237-238-239-verification-and-decisions.md) (Addendum 2
 Problem 2, Addendum 3 Items 1 and 6, "Ruflo support window", "Ruflo 3.46.0", "Retroactive upstream
 sweep"), the SDD ledger's maintainer decisions B3-D1 to B3-D4, and the binding brief
 `.superpowers/sdd/2026-09-26-remediation-program/briefs/common.md` in the main checkout.

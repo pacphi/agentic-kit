@@ -84,5 +84,5 @@ The complete conformance gate failed on a separately identified upstream shutdow
 Keep the original issue criteria, installed-target and other-platform gates explicit; do not
 silently substitute a passing source control for a passing published package or introduce
 an unrelated feature blocker. #240 remains open. The approved local probe was executed;
-M1 itself is not complete. See the [M1 execution plan](../plans/2026-09-30-completion-m1-execution.md)
-and [successor ledger](../plans/2026-09-30-completion-m1-closeout-ledger.md).
+M1 itself is not complete. See the [M1 execution plan](2026-09-30-plan-completion-m1-execution.md)
+and [successor ledger](2026-09-30-plan-completion-m1-closeout-ledger.md).

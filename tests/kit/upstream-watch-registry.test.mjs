@@ -307,7 +307,7 @@ test('every registered id is in a watched repository, spelled canonically', () =
 // even before any source cites it (the citation guard cannot see it then).
 // The audit record's list of filed upstream evidence is the source of truth.
 test('every upstream thread the audit record lists as filed is registered', () => {
-  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8');
+  const audit = fs.readFileSync('docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md', 'utf8');
   const start = audit.indexOf('### Item 6 — new upstream evidence');
   const item6 = audit.slice(start, audit.indexOf('\n### ', start + 1));
   const filed = [...new Set(ids(item6))];
@@ -317,7 +317,7 @@ test('every upstream thread the audit record lists as filed is registered', () =
 });
 
 test('the audit record carries the Branch 4 decisions in decision format', () => {
-  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const audit = fs.readFileSync('docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
   const start = audit.indexOf('## Branch 4 decisions');
   assert.ok(start > 0);
   const next = audit.indexOf('\n## ', start + 1);
@@ -343,7 +343,7 @@ test('an invalid support window invalidates the registry', () => {
 });
 
 test('the audit record carries the Branch 5 decisions in decision format', () => {
-  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const audit = fs.readFileSync('docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
   const start = audit.indexOf('## Branch 5 decisions');
   assert.ok(start > 0);
   const next = audit.indexOf('\n## ', start + 1);
@@ -356,7 +356,7 @@ test('the audit record carries the Branch 5 decisions in decision format', () =>
 });
 
 test('the audit record carries decision 15 in decision format', () => {
-  const audit = fs.readFileSync('docs/plans/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const audit = fs.readFileSync('docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
   const start = audit.indexOf('## Decision 15 ');
   assert.ok(start > 0);
   const section = audit.slice(start);

@@ -31,7 +31,7 @@ rereview. Releases, global installation and the aggregate main merge remain sepa
 
 ## Contract and dependencies
 
-The [v2 scope](../plans/2026-09-28-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.
+The [v2 scope](2026-09-28-plan-remediation-program-v2.md#v5-testrunner-hygiene-suites-that-clean-up-after-themselves) inherits [archived Branch 9](2026-09-28-superpowers-plan-branch-9-follow-ups.md) Tasks 5, 7 and 10–13, under B9-R1–R8. V1 is integrated at the baseline. V4/V6 must coordinate before changing environment-helper consumers. Worktree ownership is limited to this branch; shared manifests remain the integration owner's responsibility.
 
 The [cleanup design](2026-09-28-research-test-temp-folder-cleanup.md) selects B9-R5's explicit list-only fallback. Task 11 must not interpret a dead PID, empty process group, empty registry or empty handle scan as proof of abandonment. Task 12 must keep the interrupted root even after its known child exits on list-only platforms. This conditions the archived example's removal assertion; it does not relax B9-R5.
 
