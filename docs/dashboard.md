@@ -908,6 +908,17 @@ where that local information may be viewed. System deliberately shows absolute p
 breakdown that hides where the bytes live answers nothing — behind the same token-gated loopback
 delivery as every other route.
 
+Viewing a project's Intelligence reads that project's `.claude-flow/` files and writes nothing
+into the project's own files. When the project is your home folder, the only thing written inside it
+is the kit's cache folder described next. The history behind the
+patterns-learned sparkline is agentic-kit's own cache, one file per project under
+`intel-history/` in the kit's cache folder (`$XDG_CACHE_HOME/agentic-kit` or `~/.cache/agentic-kit`
+on macOS and Linux, `%LOCALAPPDATA%\agentic-kit\cache` on Windows). It is private to you and safe to
+delete; it grows again from the next change. A `.claude-flow/health-history.json` left in a project
+by an earlier version is still shown until the cache has its own history, is never changed, and can
+be deleted by hand. If the cache cannot be written, the sparkline stops growing and the dashboard
+prints `[dashboard] intelligence watcher failed:` once to its terminal.
+
 Models adds a second privacy boundary. The explicit local CLI can show exact model evidence, while
 `/api/models` requires the already-existing private model scope key and returns
 `privacy.projection: owner-visible-v2`. The loopback, token-gated operator view shows bounded exact

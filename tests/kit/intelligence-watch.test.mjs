@@ -1,9 +1,19 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { IntelligenceWatch } from '../../src/lib/live/intelligence-watch.mjs';
+import { healthRingPath } from '../../src/lib/dashboard/intel-history.mjs';
+import { distinctErrorReporter } from '../../src/lib/dashboard/watch-errors.mjs';
+import { cacheDir } from '../../src/lib/paths.mjs';
+import { sandboxHome, snapshot } from './helpers/home-sandbox.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
+
+// The real readers cache the health ring under the kit's cache folder: pin it (and every other
+// home-relative base) inside a throwaway home so no test here writes the machine's real ~/.cache.
+// paths.mjs snapshots the home when it loads, and sandboxHome() also pins every XDG base.
+const home = sandboxHome('ak-intel-watch');
+after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 3 }));
 
 const sandbox = () => tempDir('ak-intel-watch');
 
@@ -332,13 +342,10 @@ test('start() is idempotent and stop() invokes the injected clearInterval exactl
   watcher.stop(); // safe no-op when already stopped
 });
 
-test('end-to-end: real intel-history.mjs readers wired against the default project paths', () => {
-  const dir = sandbox();
-  const statsFile = path.join(dir, '.claude-flow', 'neural', 'stats.json');
-  fs.mkdirSync(path.dirname(statsFile), { recursive: true });
-  fs.writeFileSync(statsFile, JSON.stringify({
-    patternsLearned: 3, trajectoriesRecorded: 5, signalsProcessed: 7, lastAdaptation: 123,
-  }));
+const STATS = { patternsLearned: 3, trajectoriesRecorded: 5, signalsProcessed: 7, lastAdaptation: 123 };
+
+/** One real flush of a watcher on `dir` (real intel-history readers, fake clock and timer). */
+function flushOnce(dir, extra = {}) {
   const clock = makeClock(0);
   const timer = fakeTimer();
   const updates = [];
@@ -349,19 +356,98 @@ test('end-to-end: real intel-history.mjs readers wired against the default proje
     clearInterval: timer.clearInterval,
     now: clock.now,
     onUpdate: (combined) => updates.push(combined),
+    ...extra,
   });
-
   watcher.start();
   clock.advance(1_500);
   timer.fire();
+  return updates;
+}
+
+test('end-to-end: real intel-history.mjs readers wired against the default project paths', () => {
+  const dir = sandbox();
+  const statsFile = path.join(dir, '.claude-flow', 'neural', 'stats.json');
+  fs.mkdirSync(path.dirname(statsFile), { recursive: true });
+  fs.writeFileSync(statsFile, JSON.stringify(STATS));
+
+  const updates = flushOnce(dir);
 
   assert.equal(updates.length, 1);
   assert.equal(updates[0].globalStats.patternsLearned, 3);
   assert.deepEqual(updates[0].patternStore, []);
 
-  const ringFile = path.join(dir, '.claude-flow', 'health-history.json');
-  const ring = JSON.parse(fs.readFileSync(ringFile, 'utf8'));
+  // The sample lands in the kit's cache, and nothing is written into the project.
+  const ring = JSON.parse(fs.readFileSync(healthRingPath(dir), 'utf8'));
+  assert.equal(ring.project, dir);
   assert.equal(ring.samples.length, 1);
   assert.equal(ring.samples[0].patternsLearned, 3);
   assert.equal(typeof ring.samples[0].ts, 'number');
+  assert.equal(fs.existsSync(path.join(dir, '.claude-flow', 'health-history.json')), false);
+  assert.deepEqual(updates[0].healthRing, ring.samples, 'the update carries the cached ring');
 });
+
+test('a flush with an older project ring keeps that history in the update and leaves the project untouched', () => {
+  const dir = sandbox();
+  const write = (rel, data) => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), JSON.stringify(data));
+  };
+  write('.claude-flow/neural/stats.json', STATS);
+  write('.claude-flow/health-history.json', { samples: [{ ts: 1, patternsLearned: 1, trajectoriesRecorded: 0, signalsProcessed: 0 }] });
+  const before = snapshot(dir);
+
+  const updates = flushOnce(dir);
+
+  assert.deepEqual(snapshot(dir), before, 'every byte of the project is unchanged');
+  assert.deepEqual(updates[0].healthRing.map((sample) => sample.patternsLearned), [1, 3]);
+});
+
+test('home as the project: a flush changes nothing under the home except the kit cache', () => {
+  // `learningScope: 'user'` rows have the home folder as their path, so the watcher's project is the home
+  // itself and the cache folder sits inside it.
+  write(path.join(home, '.claude-flow', 'neural', 'stats.json'), STATS);
+  write(path.join(home, '.claude', 'CLAUDE.md'), '# mine\n');
+  const before = snapshot(home);
+
+  const updates = flushOnce(home);
+
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].globalStats.patternsLearned, 3);
+  const cache = path.relative(home, path.join(cacheDir(), 'intel-history')).split(path.sep).join('/');
+  const after = snapshot(home);
+  const changed = [...after].filter(([key, hash]) => before.get(key) !== hash).map(([key]) => key.split(path.sep).join('/'));
+  assert.ok(changed.some((key) => key.startsWith(`${cache}/`)), `the ring was written under ${cache}: ${changed}`);
+  assert.deepEqual(changed.filter((key) => !key.startsWith(`${cache}/`) && !cache.startsWith(`${key}/`) && key !== cache), [],
+    'nothing else under the home changed');
+  assert.deepEqual([...before.keys()].filter((key) => !after.has(key)), [], 'nothing under the home was removed');
+  assert.equal(fs.existsSync(path.join(home, '.claude-flow', 'health-history.json')), false);
+  assert.equal(JSON.parse(fs.readFileSync(healthRingPath(home), 'utf8')).project, fs.realpathSync(home));
+});
+
+test('a cache that cannot be written reaches onError once per distinct failure, and the update is still sent', (t) => {
+  const dir = sandbox();
+  write(path.join(dir, '.claude-flow', 'neural', 'stats.json'), STATS);
+  const blocker = path.join(sandbox(), 'not-a-folder');
+  fs.writeFileSync(blocker, '');
+  const keys = ['XDG_CACHE_HOME', 'LOCALAPPDATA'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  t.after(() => { for (const key of keys) process.env[key] = previous[key]; });
+  for (const key of keys) process.env[key] = path.join(blocker, 'cache'); // a folder cannot be made below a file
+
+  const lines = [];
+  const onError = distinctErrorReporter('watcher failed:', (...args) => lines.push(args));
+  const first = flushOnce(dir, { onError });
+  assert.equal(first.length, 1, 'the dashboard still gets its update');
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0][0], 'watcher failed:');
+  assert.ok(lines[0][1] instanceof Error);
+  flushOnce(dir, { onError });
+  assert.equal(lines.length, 1, 'the same failure is not reported again');
+  assert.deepEqual(fs.readdirSync(dir), ['.claude-flow']);
+  assert.deepEqual(fs.readdirSync(path.join(dir, '.claude-flow')), ['neural']);
+});
+
+function write(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data));
+}
