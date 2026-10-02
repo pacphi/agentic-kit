@@ -2557,3 +2557,52 @@ and cross-platform evaluation gates move to v5. The V4 offline retry change is o
 separate unmerged branch; this V3 source retains ADR-0063 Known limitations item 1.
 This entry records V3 task 6c-5's source-bound documentation integration, not final
 branch acceptance or completion of the separately dispatched live-view work.
+
+### Remediation program v2 close-out (2026-10-02)
+
+Remediation program v2 closes with the exit release `4.0.0-alpha.61`
+([supersession ledger](2026-10-01-v4-supersession-ledger.md), exit item 7). This is the v2 summary
+entry that the plan's V7 (point 3) and the ledger's "Log close-out" row call for. It records what
+closed, where the open items went, and the evidence for the one definition-of-done item that was
+still waiting on a real event.
+
+**What v2 delivered.** V1–V7 were integrated into `develop` and reached `main` through #285, merged
+on 2026-09-29 at 22:06:48 UTC as `0511d575`, with the same tree as the reviewed `develop` at
+`04e3de3c` (see the Status section of the
+[develop execution plan](2026-09-28-remediation-v2-develop-execution.md)). The
+[246-row scope matrix](../archive/2026-09-29-remediation-v2-scope-matrix.md) maps every historical
+row. The [M1 closeout ledger](2026-09-30-completion-m1-closeout-ledger.md) is its row-by-row map,
+and the supersession ledger decides the dispositions (the ledger's gap **G11**).
+
+**Where the open items went.** Each is an exit item of the v4 program, with a card on the v4.0.0
+board: #262, the Windows timing rule (exit item 6); #240 and #271, both closed (items 5 and 4); the
+maintainer's machine jobs (item 8); and the publication of `alpha.61` (item 9). The ledger carries
+the upstream pull requests #286–#288 as upstream-dependent items.
+
+**DoD-3: the first dispatch is recorded.** The definition of done's upstream-watch item (v2 §6,
+item 6, labelled DoD-3 in the ledger and the scope matrix) said the first real dispatch would be
+recorded when a release fired one, and that `events.ndjson` held no `fired` records. The read-back
+is at M1L:51-60. [Scheduled watch run 36729784908](https://github.com/pacphi/agentic-kit/actions/runs/36729784908)
+succeeded on `main` at `0511d575` on 2026-09-30 at 14:31:40Z. Its retained ledger had 58 records, at
+blob `c9045d3870b1fc885d1fae7405af6abdfd393d5c`, including three `fired` records at 14:31:47Z, for
+AQE issues #735, #528 and #532, each with a returned session URL. The run's logs prove the push of commit
+`4704a5838905cb5b4bf9f13d28e0a468c10ec6e6`, and the
+[GitHub notice](https://github.com/pacphi/agentic-kit/commit/4704a5838905cb5b4bf9f13d28e0a468c10ec6e6#commitcomment-202780857)
+on it was read back (bot author, created 14:32:50Z).
+
+This establishes recorded session creation, ledger publication and notice posting. It does not
+establish subscriber delivery or completed routine work. No matching open upstream-prefixed kit pull
+request was present at that read, so the outcomes are unverified, and nothing is claimed beyond the
+records.
+
+**Attended time: not instrumented.** v2 planned under 4 attended hours, against about 28 for v1
+(v2's Goal paragraph and §4). No attended-time total was recorded, and none is claimed.
+
+**One criterion dropped.** v2 §6, item 5 no longer requires the global `ak` to match the latest
+release. The releases approved in D-2 still count, but `alpha.61` is the exit release and is checked
+through `npx @pacphi/agentic-kit@4.0.0-alpha.61 --version` (ledger exit item 9), with no global
+install.
+
+**What this entry does not claim.** As of this entry, the cards for #262, the maintainer's machine
+jobs (#318) and the publication of `alpha.61` (#320) are open. The entry claims none of the Windows
+timing evidence, the machine jobs or the release.

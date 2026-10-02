@@ -4,6 +4,18 @@
 
 ## Status
 
+**2026-10-02 close-out:** remediation v2 closes with the exit release `4.0.0-alpha.61`
+([supersession ledger](2026-10-01-v4-supersession-ledger.md), exit item 7). What it left open is carried by cards on the
+v4.0.0 board, and the ledger holds the dispositions. The [decision log](2026-09-26-issues-237-238-239-verification-and-decisions.md)
+has v2's summary entry, which records DoD-3, attended time and the dropped global-match
+criterion. This plan is archived by the card #317, and the text below stays as it was written.
+
+**2026-09-30 current update:** #285 merged into main as `0511d575`; its tree equals
+the reviewed final develop tree. V1–V7 delivery is retained, not replayed. This plan
+remains active for M1 timing, conformance and separately gated operational closeout.
+The [M1 successor ledger](2026-09-30-completion-m1-closeout-ledger.md) maps all 246
+historical rows and all eight completion clauses. The dated checkpoint below is historical.
+
 Active under the maintainer-confirmed [develop execution plan](2026-09-28-remediation-v2-develop-execution.md)
 (2026-09-28). V1 #267 and V2 #264/#266/#269 are delivered; #262 still needs residual
 Windows timing evidence. #251 is done, and the alpha.60 release commit is on `main`.
@@ -460,8 +472,8 @@ Two of the issues punted from v1 are new capability, not remediation. They start
    - the footprint snapshot has the current schema;
    - the stray store is handled as D-7 decides;
    - the temp backlog is removed.
-5. The releases approved in D-2 are published, and the global `ak` matches the latest one.
-6. The upstream watch is live and quiet: N-5 is merged, #240 is closed or its evidence is posted, and the scheduled run has nothing waiting on us. The first real dispatch is recorded when a release fires one; today `events.ndjson` on `upstream-watch-ledger` holds 0 `fired` records.
+5. The releases approved in D-2 are published. *(2026-10-02: the second clause, "the global `ak` matches the latest one", is dropped. `alpha.61` is the exit release, and it is checked through `npx`, with no global install; see the ledger's D-2 row.)*
+6. The upstream watch is live and quiet: N-5 is merged, #240 is closed or its evidence is posted, and the scheduled run has nothing waiting on us. The first real dispatch is recorded when a release fires one; today `events.ndjson` on `upstream-watch-ledger` holds 0 `fired` records. *(2026-10-02: recorded in the decision log's v2 close-out entry, from the read-back at M1L:51-60.)*
 7. Locally, only `main` and the two v5 branches (D-9) remain, with no v2 worktree or scratch folder left behind.
 8. The plans and the decision log are archived per the taxonomy, the auto-memory is current, and the ledger records v2's attended time.
 
