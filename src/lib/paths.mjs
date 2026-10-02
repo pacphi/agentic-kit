@@ -25,6 +25,18 @@ export function stateBase({ env = process.env, home: h = home, platform = proces
   if (platform === 'win32') return env.LOCALAPPDATA || p.join(h, 'AppData', 'Local');
   return xdgBase('XDG_STATE_HOME', p.join(h, '.local', 'state'), { env, p });
 }
+/** The user's cache base: XDG on POSIX, %LOCALAPPDATA% on Windows (the base stateBase() uses there). */
+export function cacheBase({ env = process.env, home: h = home, platform = process.platform, p = path } = {}) {
+  if (platform === 'win32') return env.LOCALAPPDATA || p.join(h, 'AppData', 'Local');
+  return xdgBase('XDG_CACHE_HOME', p.join(h, '.cache'), { env, p });
+}
+/** The kit's cache of derived data it can rebuild: `<cache base>/agentic-kit` on macOS and Linux, and
+ *  `%LOCALAPPDATA%\agentic-kit\cache` on Windows, where stateBase() already owns `…\agentic-kit`. */
+export function cacheDir(opts = {}) {
+  const { platform = process.platform, p = path } = opts;
+  const base = cacheBase(opts);
+  return platform === 'win32' ? p.join(base, 'agentic-kit', 'cache') : p.join(base, 'agentic-kit');
+}
 export const configDir = () => path.join(configBase(), 'agentic-kit');
 export const telemetryDir = () => path.join(configDir(), 'telemetry');
 export const hookHealingTransactionsDir = () => path.join(stateBase(), 'agentic-kit', 'hook-healing');

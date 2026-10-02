@@ -192,7 +192,8 @@ current checkout and present that state as historical.
 Owns read-only trend projections over ruflo/agentic-qe's own project-level learning state: the
 neural pattern store, its lifetime learned-pattern counter, reasoning-graph size samples, and the
 machine-health sample ring. It uses bounded readers for the supported `.claude-flow/*` shapes, independently of
-Observability's canonical event model, and may append its own deduplicated health-history ring.
+Observability's canonical event model, and appends its own deduplicated health-history ring to agentic-kit's
+cache, never inside a project.
 It carries no session, actor or lifecycle identity and grades no per-field evidence confidence. Learning-scope and
 Desktop-origin qualifiers belong to the picker projection, not its time-series evidence.
 
