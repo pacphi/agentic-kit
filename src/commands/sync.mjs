@@ -48,7 +48,7 @@ import { confirmCodexMcpRepairs, reconcileCodexMcp } from '../lib/codex-mcp-reco
 import { alignHosts } from './x/host-align.mjs';
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
 import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
-import { reconcileAqePin, recordAqePinProject } from '../lib/aqe-project-pin.mjs';
+import { retireAqePin, recordAqePinProject } from '../lib/aqe-project-pin.mjs';
 import { rememberLiveCheck, embeddingCheckOutcome } from '../lib/live-check-evidence.mjs';
 
 async function askCodexRepair(question) {
@@ -738,14 +738,16 @@ export const SYNC_STEPS = [
       recordApplyFailure(ctx.state, 'aqe-embedding', projection);
     },
   },
-  // B5-D1: pin AQE to the project root (three absolute keys, receipted) so a
-  // command, hook or MCP server started in a subfolder uses the root's store.
-  // Remembered in kit.json so `ak uninstall` can release it from any folder.
+  // B5-D1 (retired, agentic-qe#735): released agentic-qe (>=3.14.5) resolves the
+  // project root, memory database and storage folder from a subfolder on its own,
+  // so ak no longer pins AQE_PROJECT_ROOT, AQE_MEMORY_PATH or AQE_STORAGE_PATH.
+  // This step releases a pin an older ak version left behind when that is safe (AQE new
+  // enough and no stray store below the root, ADR-0062); otherwise it keeps that pin converged.
   {
     id: 'aqe-pin',
     when: (subs, flags, cfg) => cfg.aqe !== false && subs.has('aqe-pin'),
     run: async (ctx) => {
-      const pin = reconcileAqePin(ctx.cfg, ctx.cwd);
+      const pin = retireAqePin(ctx.cfg, ctx.cwd);
       ctx.report('AQE project pin', pin);
       recordApplyFailure(ctx.state, 'aqe-pin', pin);
       if (recordAqePinProject(ctx.cfg, pin.root)) saveKitConfig(ctx.cfg);

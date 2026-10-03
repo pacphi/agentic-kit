@@ -59,7 +59,30 @@ release) — are simply abandoned, not migrated. They are inert; delete them by 
 
 `--refresh`'s name and default did not change; its scope grew (see [ADR-0063](adr/0063-evidence-store-and-refresh-vocabulary.md)).
 
+## 2026-10-03: AQE is no longer pinned to the project root
+
+AQE 3.14.5 fixed [agentic-qe#735](https://github.com/proffesor-for-testing/agentic-qe/issues/735):
+a command, hook or MCP server started in a subfolder now finds the project root, the memory
+database and the storage folder on its own. `ak sync` and `ak setup` no longer write the
+`AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH` and `AQE_STORAGE_PATH` pin, and `ak status` no longer reports
+on it.
+
+A pin an earlier version wrote is released by `ak sync` only when that is safe, because AQE uses the
+nearest `.agentic-qe`:
+
+- AQE must be 3.14.5 or later. With an older or unknown version the pin stays.
+- No stray `.agentic-qe` store may exist below the project root. With one, the pin stays, because
+  without it an AQE run from that folder adopts the stray. Merge the strays with
+  `ak x aqe-store merge`, or remove them, and run `ak sync`.
+
+While a pin is kept, `ak status` shows one `aqe-pin` row that says why. Releasing a pin puts back
+what each file held before, as described in the 2026-09-27 entry below; `ak uninstall` always
+releases it.
+
 ## 2026-09-27: AQE is pinned to the project root
+
+> Superseded on 2026-10-03: agentic-kit no longer writes this pin. This entry describes what an
+> earlier version wrote, which `ak sync` releases under the rules above.
 
 AQE used to create a new `.agentic-qe` store in whatever folder a command, hook or MCP server
 started in. `ak sync` and `ak setup` now pin AQE to the project root in projects that have

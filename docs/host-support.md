@@ -181,13 +181,15 @@ not close that evidence gap.
 | Default route projection | Yes | Yes | No |
 | QE-Court routed seat | Full routed role | Supported, with the integrated stall risk below | May call QE tools, but cannot be an AQE provider-backed seat |
 | Subscription-provider embeddings | Not supported | Not supported | Not applicable |
-| One project store (AQE pin) | `.claude/settings.local.json` env and the `.mcp.json` AQE entry | The project `.codex/config.toml` AQE MCP env and `[shell_environment_policy.set]` | Not pinned (agentic-kit does not set up AQE for OpenCode) |
+| One project store from a subfolder | AQE 3.14.5 or later finds the project root itself; agentic-kit writes no pin | Same | Not applicable (agentic-kit does not set up AQE for OpenCode) |
 
-Agentic-kit pins `AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH` and `AQE_STORAGE_PATH` to the project root,
-so an AQE command, hook or MCP server started in a subfolder uses the project's store instead of
-creating its own. A `.mcp.json` or project `.codex/config.toml` that git tracks is not pinned,
-because a committed absolute path would not exist on a teammate's machine. `ak x aqe-store merge` merges stores AQE made in subfolders before the pin
-([ADR-0062](adr/0062-aqe-project-store-integrity.md)).
+AQE 3.14.5 and later find the project root, memory database and storage folder from a subfolder on
+their own, so an AQE command, hook or MCP server started in a subfolder uses the project's store.
+Agentic-kit writes no pin. AQE uses the nearest `.agentic-qe`, so a stray store left in a subfolder
+by an older AQE is still adopted there: `ak status` lists such strays, and `ak x aqe-store merge`
+merges them into the project store ([ADR-0062](adr/0062-aqe-project-store-integrity.md)). A pin an
+older agentic-kit wrote is kept while AQE is older than 3.14.5 or a stray store exists, and released
+by `ak sync` once neither applies.
 
 The OpenCode boundary is precise: AQE can provision OpenCode agents, skills, MCP,
 and permissions, but OpenCode is not a built-in AQE LLM-provider type. Agentic-kit

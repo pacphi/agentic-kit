@@ -187,8 +187,8 @@ test('stray stores are reported for information only, grouped by owner, with no 
   for (const pattern of expectations) assert.ok(strays.some((r) => pattern.test(r.message)), `${pattern}`);
   assert.ok(strays.every((r) => /leaves|report/.test(r.message)), 'each row says ak does not touch it');
   const aqe = strays.find((r) => /stray AQE/.test(r.message));
-  assert.match(aqe.message, /without ak's pin to the project root/);
-  assert.match(aqe.message, /AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH/);
+  assert.match(aqe.message, /adopts them, because AQE uses the nearest \.agentic-qe/);
+  assert.match(aqe.message, /writes learning there that this project's hosts never read/);
 });
 
 test('stray AQE stores with a memory.db are a hand fix naming the merge command; empty folders stay information', async (t) => {
