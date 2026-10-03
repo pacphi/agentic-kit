@@ -43,6 +43,14 @@ const CONTRACTS = {
       /`doneWhen`, `mapping`,\s+`kitImpact`, `adjustment`, `status` of `watching`, `constraintIds`/,
       /separate local change/i, /explicit-user-approval-required/],
   },
+  'ak-verify': {
+    triggers: [/^.*\bverify\b/i, /completion gate/i],
+    gates: [/never plain `node --test`/i, /never `pnpm` inside a worktree/i, /unset\s+`FORCE_COLOR`/,
+      /AQE_EMBEDDER_\*/, /relative\s+`XDG_\*`/, /node scripts\/run-tests\.mjs focus/,
+      /node_modules\/\.bin\/tsc -p tsconfig\.json/, /node scripts\/build-check\.mjs/,
+      /tests\/kit\/docs-layout\.test\.mjs/, /test:ui/, /never sweep `\$TMPDIR`/i,
+      /report it as skipped, never as passed/i, /pass, fail or skipped/i],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
