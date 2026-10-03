@@ -1,7 +1,10 @@
 name: release
 
-# Publishes to npm when a version tag is pushed (v4.0.0, v4.1.0-alpha.1, …),
-# then creates the matching GitHub Release with auto-generated notes.
+# Publishes to npm when a version tag is pushed (v4.0.0, v4.0.0-beta.1, v4.1.0-alpha.1, …),
+# then creates the matching GitHub Release with auto-generated notes. The dist-tag comes from
+# scripts/release-dist-tag.mjs: betas -> beta, other prereleases -> next, releases -> latest.
+# A manual run (workflow_dispatch) is a dry run only: it runs the tests and `publish --dry-run`
+# for the checked-out version, and never publishes or creates a GitHub Release.
 # Uses the NPM_TOKEN repository secret via NODE_AUTH_TOKEN. Configure a valid
 # granular package-publish token with appropriate 2FA capability and expiry;
 # secret validity is a release-owner check, not a property of this workflow.
@@ -9,6 +12,7 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,6 +34,7 @@ jobs:
         run: pnpm test
 
       - name: Tag ↔ package.json version guard
+        if: github.event_name == 'push'
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
@@ -43,16 +48,21 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          # prereleases (…-alpha.N) go to the 'next' dist-tag; releases to 'latest'
-          case "$(node -p "require('./package.json').version")" in
-            *-*) pnpm publish --provenance --access public --tag next --no-git-checks ;;
-            *)   pnpm publish --provenance --access public --no-git-checks ;;
-          esac
+          VERSION=$(node -p "require('./package.json').version")
+          DIST_TAG=$(node scripts/release-dist-tag.mjs "$VERSION")
+          echo "publishing $VERSION on dist-tag '$DIST_TAG'"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            pnpm publish --provenance --access public --tag "$DIST_TAG" --no-git-checks
+          else
+            # manual run: nothing is published (no provenance, no registry write)
+            pnpm publish --dry-run --access public --tag "$DIST_TAG" --no-git-checks
+          fi
 
   # Runs only after a successful npm publish, so a Release object never exists
   # for a version that didn't actually ship.
   github-release:
     needs: publish
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
