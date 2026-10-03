@@ -44,9 +44,13 @@ added to a thread we already know. If the target repository is unclear, ask; nev
    (`tests/kit/helpers/home-sandbox.mjs`; read it, `CLAUDE_FLOW_DB_PATH` is one). Run
    `mkdir <folder>/home`, then pass every key in that list other than `HOME` as its own `-u`:
    `env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME -u <each other key> HOME=<folder>/home <command>`.
+   Run `<command>` from a folder inside the disposable folder, never from a checkout: the tool
+   under test writes into the project it runs in whatever `HOME` is. So `mkdir <folder>/proj`,
+   run `git init` in that subfolder and `cd` into it first.
    Before anything writes, assert `HOME` and every XDG path resolve under the disposable folder:
-   run the same check as `ak-verify` step 5, from this repository's root with the same `env`
-   prefix, and stop if a path is outside the folder or any other key is set.
+   run the same check as `ak-verify` step 5 with the same `env` prefix, and stop if a path is
+   outside the folder or any other key is set. Only that assertion runs from this repository's
+   root, since it reads `tests/kit/helpers/home-sandbox.mjs`.
    Record expected against actual output. If it does not reproduce, stop and report; do not file from memory.
 4. Read the upstream's issue template or CONTRIBUTING file and follow its form. Draft to the
    upstream issue standard, in friendly, appreciative language that assumes good faith:

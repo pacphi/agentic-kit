@@ -64,6 +64,11 @@ first and report from it; a claim of "done" without this list is not a claim.
    is set, not unset; pass every key in that list other than `HOME` as its own `-u` (unsetting
    a key that is not set is harmless). Run as
    `env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME -u <each other key> HOME=<folder>/home <command>`.
+   Run `<command>` from a folder inside the disposable folder, never from a checkout: `ak` writes
+   into the project it runs in (`.claude`, `.mcp.json`, `CLAUDE.md`, `AGENTS.md`) whatever `HOME`
+   is. So `mkdir <folder>/proj`, run `git init` in that subfolder and `cd` into it first; the
+   disposable folder itself stays outside any repository. Only the assertion below runs from the
+   repository root, since it reads `tests/kit/helpers/home-sandbox.mjs`.
    Before any `ak` write, assert `HOME` and every XDG path resolve under the disposable folder:
    from the repository root, with that same `env` prefix, run
    `node --input-type=module -e "import os from 'node:os';import {INHERITED_STATE_KEYS as K} from './tests/kit/helpers/home-sandbox.mjs';console.log(os.homedir());for(const k of K)console.log(k,process.env[k]??'(unset)')"`.

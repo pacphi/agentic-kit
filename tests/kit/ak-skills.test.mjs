@@ -60,7 +60,11 @@ const CONTRACTS = {
       /`INHERITED_STATE_KEYS`\s+\(`tests\/kit\/helpers\/home-sandbox\.mjs`;\s+read\s+it/,
       /`mkdir <folder>\/home`,\s+then\s+pass\s+every\s+key\s+in\s+that\s+list\s+other\s+than\s+`HOME`\s+as\s+its\s+own\s+`-u`/,
       /-u XDG_CACHE_HOME -u <each other key> HOME=<folder>\/home <command>/,
-      /the\s+same\s+check\s+as\s+`ak-verify`\s+step\s+5/, /never\s+`pnpm`\s+in\s+a\s+worktree/],
+      /the\s+same\s+check\s+as\s+`ak-verify`\s+step\s+5/, /never\s+`pnpm`\s+in\s+a\s+worktree/,
+      // The tool under test writes into the project it runs in, whatever HOME is.
+      /Run\s+`<command>`\s+from\s+a\s+folder\s+inside\s+the\s+disposable\s+folder,\s+never\s+from\s+a\s+checkout:\s+the\s+tool\s+under\s+test\s+writes\s+into\s+the\s+project\s+it\s+runs\s+in\s+whatever\s+`HOME`\s+is/,
+      /`mkdir\s+<folder>\/proj`,\s+run\s+`git\s+init`\s+in\s+that\s+subfolder\s+and\s+`cd`\s+into\s+it\s+first/,
+      /Only\s+that\s+assertion\s+runs\s+from\s+this\s+repository's\s+root,\s+since\s+it\s+reads\s+`tests\/kit\/helpers\/home-sandbox\.mjs`/],
   },
   'ak-resume': {
     triggers: [/\bresume\b/i, /where are we/i],
@@ -97,7 +101,11 @@ const CONTRACTS = {
       /-u XDG_CACHE_HOME -u <each other key> HOME=<folder>\/home <command>/,
       /import \{INHERITED_STATE_KEYS as K\} from '\.\/tests\/kit\/helpers\/home-sandbox\.mjs';console\.log\(os\.homedir\(\)\);for\(const k of K\)console\.log\(k,process\.env\[k\]\?\?'\(unset\)'\)/,
       /any\s+other\s+key\s+prints\s+a\s+value/,
-      /finish\s+with\s+`ak-docs-gate`\s+for\s+the\s+alignment\s+half/],
+      /finish\s+with\s+`ak-docs-gate`\s+for\s+the\s+alignment\s+half/,
+      // `ak` writes into the project it runs in (the nearest `.git`): a disposable HOME alone still writes the checkout.
+      /Run\s+`<command>`\s+from\s+a\s+folder\s+inside\s+the\s+disposable\s+folder,\s+never\s+from\s+a\s+checkout:\s+`ak`\s+writes\s+into\s+the\s+project\s+it\s+runs\s+in\s+\(`\.claude`,\s+`\.mcp\.json`,\s+`CLAUDE\.md`,\s+`AGENTS\.md`\)\s+whatever\s+`HOME`\s+is/,
+      /`mkdir\s+<folder>\/proj`,\s+run\s+`git\s+init`\s+in\s+that\s+subfolder\s+and\s+`cd`\s+into\s+it\s+first/,
+      /Only\s+the\s+assertion\s+below\s+runs\s+from\s+the\s+repository\s+root,\s+since\s+it\s+reads\s+`tests\/kit\/helpers\/home-sandbox\.mjs`/],
   },
   'ak-pricing-refresh': {
     triggers: [/refresh pricing/i, /model pricing/i],
