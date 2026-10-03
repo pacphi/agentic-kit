@@ -74,6 +74,14 @@ const CONTRACTS = {
       /mktemp -d "\$\{TMPDIR:-\/tmp\}\/ak-verify\.XXXXXX"/, /os\.homedir\(\)/,
       /git\s+worktree\s+list/],
   },
+  'ak-pricing-refresh': {
+    triggers: [/refresh pricing/i, /model pricing/i],
+    gates: [/cite\s+a\s+source/i, /PRICES_AS_OF/, /cache.read/i, /never open a pull request without/i,
+      /untrusted\s+data/i, /primary\s+source/i, /moved\s+to\s+`prior`/, /never\s+deleted/i,
+      /only\s+on\s+the\s+maintainer's\s+decision/i, /stop\s+and\s+report/i, /change\s+nothing/i,
+      /node scripts\/run-tests\.mjs focus/, /`ak-verify`/, /model,\s+field,\s+old,\s+new,\s+source/i,
+      /never\s+`pnpm`\s+inside\s+a\s+worktree/i, /names\s+the\s+branch\s+and\s+the\s+PR\s+title/i],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
