@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { distTag } from '../../scripts/release-dist-tag.mjs';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
 const WORKFLOW = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-const SCRIPT = new URL('../../scripts/release-dist-tag.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../../scripts/release-dist-tag.mjs', import.meta.url));
 
 test('betas publish on the beta tag and never on next or latest', () => {
   for (const version of ['4.0.0-beta.1', '4.0.0-beta.4', '4.1.0-beta.2', '5.0.0-beta']) {
