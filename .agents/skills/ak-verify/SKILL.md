@@ -13,14 +13,18 @@ first and report from it; a claim of "done" without this list is not a claim.
 ## Preflight
 
 1. `git rev-parse --show-toplevel`, `git branch --show-current` and `git status --short`. Note
-   the commit under test. If you are in a checkout another session uses, run read-only checks
-   only and say so.
-2. Check the environment: `env | grep -E '^(FORCE_COLOR|AQE_EMBEDDER_|XDG_)'`. Before any command
-   below, unset `FORCE_COLOR`, unset `AQE_EMBEDDER_*`, and unset every relative `XDG_*`
-   value (for example `env -u FORCE_COLOR -u XDG_STATE_HOME <command>`). Leaked values break tests
-   that read plain text and real paths.
+   the commit under test. Run `git worktree list`: if this checkout is one another session
+   uses (its branch is checked out there, or the maintainer says so), run read-only checks only
+   and say so.
+2. Check the environment: `env | grep -E '^(FORCE_COLOR|AQE_EMBEDDER_|XDG_)'`. The runner deletes
+   `FORCE_COLOR` itself, but not `AQE_EMBEDDER_*` or `XDG_*`, and checks outside the runner get
+   none of that. Before any command below, unset `FORCE_COLOR`, unset `AQE_EMBEDDER_*`, and unset every relative `XDG_*`
+   value. `env -u` takes literal names, not globs: take each name from the `env | grep` output
+   and pass it as its own `-u` (for example `env -u FORCE_COLOR -u AQE_EMBEDDER_X -u XDG_STATE_HOME <command>`).
+   An XDG value is relative when it does not start with `/`.
 3. In a worktree, `node_modules` must be a link to the main checkout's (`ls -ld node_modules`).
-   If it is missing, stop and ask the maintainer to set it up; do not install anything.
+   If it is missing, stop and ask the maintainer to set it up; do not create it or install anything.
+   Mark every check that needs it skipped, with that reason.
 
 ## Steps
 
@@ -33,14 +37,30 @@ first and report from it; a claim of "done" without this list is not a claim.
    `node_modules/.bin/tsc -p tsconfig.json`, `node_modules/.bin/eslint .`,
    `node_modules/.bin/eslint src bin --rule 'complexity: [2, 50]'`, `node_modules/.bin/markdownlint`
    with the globs of the `lint:md` script in `package.json`, and `node scripts/build-check.mjs`.
+   For a change to docs, also run `lint:links:internal` (a `lychee --offline` script in
+   `package.json`); with no `lychee`, it is skipped.
 3. Full unit suite for a non-trivial change: `node scripts/run-tests.mjs unit` (what `pnpm test`
-   runs). Read its exit code: 2 means the temp base is inside a git repository, 3 means real
-   user state changed, 4 means temporary folders were left behind; each lists the paths.
+   runs). The runner fingerprints real user state before and after. Its exit code is the failing
+   command's own code first, otherwise 2 (unsafe temp base such as one inside a git repository
+   or the home directory, failed run-owner or hold setup, or bad usage), 3 (real user state
+   changed) or 4 (temporary folders left behind); each lists the paths. An exit 3 or 4 is a FAIL
+   reported with the listed paths, not retried or cleaned up.
+   "Concurrent writers" lines are files a live Claude Code, Ruflo or AQE session wrote during
+   the run; they do not fail a local run (CI and `AK_TRIPWIRE_STRICT=1` do fail on them). Report
+   them as a note, and never as a pass over a nonzero exit.
 4. Dashboard or UI changes add `node scripts/run-tests.mjs ui` (`pnpm run test:ui` in a main
-   checkout) and a screenshot of the changed view. Needs Chrome; if it cannot launch, it is skipped.
-5. Anything that runs `ak` for real uses a disposable home: create the folder, then
-   `env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME HOME=<folder>/home ...`,
-   and assert `HOME` and every XDG path resolve under it before any `ak` write.
+   checkout) and a screenshot of the changed view, saved under the scratchpad or a disposable
+   folder, never in the repository. It passes when the view renders the change without errors.
+   Needs Chrome; if it cannot launch, it is skipped.
+5. Anything that runs `ak` for real uses a disposable home. Create the folder outside any git
+   repository and not directly under `~`: `mktemp -d "${TMPDIR:-/tmp}/ak-verify.XXXXXX"` makes it
+   (the template form is needed because macOS `mktemp -d` ignores `TMPDIR` without one), then
+   `mkdir <folder>/home`. Run as
+   `env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME HOME=<folder>/home <command>`.
+   Before any `ak` write, assert `HOME` and every XDG path resolve under the disposable folder:
+   run `env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME HOME=<folder>/home node -e "const os=require('os');console.log(process.env.HOME,os.homedir())"`
+   and stop if either path is outside the folder. Leave the folder for the maintainer to remove
+   by its literal path.
 6. When a check fails, read the failure, fix the cause in code you own and rerun that check and
    every check after it. Never edit a test to make it pass or loosen a threshold.
 
@@ -48,8 +68,8 @@ first and report from it; a claim of "done" without this list is not a claim.
 
 - Never plain `node --test`: it lacks the runner's real-state tripwire and temp-root checks. Use
   `node scripts/run-tests.mjs`.
-- Never `pnpm` inside a worktree: it tries to delete the linked `node_modules`. Use the runner and
-  `node_modules/.bin/*`.
+- Never `pnpm` inside a worktree: it has deleted, or tried to delete, the linked `node_modules`
+  (per the maintainer's notes). Use the runner and `node_modules/.bin/*`.
 - Never sweep `$TMPDIR` or delete `ak-*` folders by pattern. The runner removes only its own root;
   leftovers are listed for the maintainer, who removes literal paths one per call.
 - A check that cannot run (missing link, no Chrome, no `lychee`, no network) is skipped: report it as skipped, never as passed,
@@ -59,6 +79,7 @@ first and report from it; a claim of "done" without this list is not a claim.
 ## Done
 
 End with a plain list, one line per check, in the order run: pass, fail or skipped, the exact
-command, and for a failure the first error line; then the commit the results belong to. Say
+command and its key output line (the test summary for a pass, the first error line for a
+failure, "skipped: reason" for a skip); then the commit the results belong to. Say
 "gate green" only when nothing is failed and every skipped check was named and accepted by the
 maintainer.

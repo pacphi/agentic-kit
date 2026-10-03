@@ -49,7 +49,14 @@ const CONTRACTS = {
       /AQE_EMBEDDER_\*/, /relative\s+`XDG_\*`/, /node scripts\/run-tests\.mjs focus/,
       /node_modules\/\.bin\/tsc -p tsconfig\.json/, /node scripts\/build-check\.mjs/,
       /tests\/kit\/docs-layout\.test\.mjs/, /test:ui/, /never sweep `\$TMPDIR`/i,
-      /report it as skipped, never as passed/i, /pass, fail or skipped/i],
+      /report it as skipped, never as passed/i, /pass, fail or skipped/i,
+      /concurrent\s+writers/i, /do\s+not\s+fail\s+a\s+local\s+run/i,
+      /exit\s+3\s+or\s+4\s+is\s+a\s+FAIL/, /not\s+retried\s+or\s+cleaned\s+up/i,
+      /`env -u` takes literal names/i, /does\s+not\s+start\s+with\s+`\/`/i,
+      /env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME/,
+      /assert\s+`HOME`\s+and\s+every\s+XDG\s+path\s+resolve\s+under\s+the\s+disposable\s+folder/i,
+      /mktemp -d "\$\{TMPDIR:-\/tmp\}\/ak-verify\.XXXXXX"/, /os\.homedir\(\)/,
+      /git\s+worktree\s+list/],
   },
 };
 
