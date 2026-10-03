@@ -92,6 +92,16 @@ const CONTRACTS = {
       /current\s+state\s+only/i, /not\s+complete\s+until/i, /ask\s+whether\s+to\s+update\s+its\s+status\s+and\s+date/i,
       /never\s+`pnpm`\s+inside\s+a\s+worktree/i, /Done,\s+pending\s+archive/],
   },
+  'ak-worktree-sweep': {
+    triggers: [/\bsweep\b/i, /worktree sprawl/i],
+    gates: [/one\s+removal\s+per\s+call/i, /literal\s+absolute\s+path/i, /never\s+[^.]*directly\s+under\s+(`~`|~)/i,
+      /hand\s+[^.]*one\s+command/i, /another\s+session/i, /`git worktree list`/, /`git branch -vv`/,
+      /ls -d \.\.\/agentic-kit\*/, /git -C <path> status --porcelain/, /possibly\s+(merged|abandoned)/i,
+      /never\s+removes?\s+a\s+folder\s+that\s+is\s+not\s+a\s+registered\s+worktree/i,
+      /without\s+`--force`/i, /git branch --merged/, /--not --remotes/, /gh pr list --state merged --head/,
+      /inconclusive[^.]*(leave|left)/i, /never\s+sweep\s+`\$TMPDIR`/i, /never\s+`pnpm`\s+inside\s+a\s+worktree/i,
+      /re-?check[^.]*right\s+before/i, /what\s+was\s+removed\s+and\s+what\s+was\s+left/i],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
