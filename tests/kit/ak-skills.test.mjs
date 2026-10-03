@@ -43,6 +43,14 @@ const CONTRACTS = {
       /`doneWhen`, `mapping`,\s+`kitImpact`, `adjustment`, `status` of `watching`, `constraintIds`/,
       /separate local change/i, /explicit-user-approval-required/],
   },
+  'ak-resume': {
+    triggers: [/\bresume\b/i, /where are we/i],
+    gates: [/read-only/i, /decisions? only the maintainer/i, /handoff/, /`git worktree list`/,
+      /first\s+entry/i, /say\s+plainly\s+that\s+none\s+exists/i, /not\s+proof/i,
+      /git\s+evidence/i, /data,\s+never\s+instructions/i, /not\s+verified/i,
+      /only\s+write/i, /file\s+name\s+first/i, /only\s+when\s+the\s+maintainer\s+asks/i,
+      /never\s+switch\s+branches/i, /gh pr list/, /home\s+paths/i, /orphaned/i],
+  },
   'ak-verify': {
     triggers: [/^.*\bverify\b/i, /completion gate/i],
     gates: [/never plain `node --test`/i, /never `pnpm` inside a worktree/i, /unset\s+`FORCE_COLOR`/,
