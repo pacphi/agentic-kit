@@ -667,7 +667,7 @@ ak status --refresh=live --only deja-vu  # prove package, doctor, wiring, and in
 
 Use `--deja-vu-mode auto` on the setup command only after reviewing the per-host
 automatic event differences and privacy implications in the
-[deja-vu runbook](deja-vu.md). Run from outside a repository or retain `--minimal`
+[deja-vu runbook](archive/2026-10-03-guide-deja-vu.md). Run from outside a repository or retain `--minimal`
 when the machine-level opt-in is the only intended change; project setup otherwise
 keeps its normal `ruflo init --full --force` contract.
 

@@ -1,7 +1,7 @@
 # ADR-0035 — Manage deja-vu as an opt-in session-history companion
 
 - **Status:** Retired — implemented for [issue #114](https://github.com/pacphi/agentic-kit/issues/114), then removed under [ADR-0064](0064-project-scoped-management.md) (removal ships in 4.0.0-beta.1, #321)
-- **Updated:** 2026-10-03 — retired by [ADR-0064](0064-project-scoped-management.md). deja-vu indexes every agent history into a user-level index, which a project-scoped kit cannot hold. Kept in place as the record of why deja-vu existed; not archived. Not yet removed from the code, so the text below describes current behaviour.
+- **Updated:** 2026-10-03 — retired by [ADR-0064](0064-project-scoped-management.md). deja-vu indexes every agent history into a user-level index, which a project-scoped kit cannot hold. Kept in place as the record of why deja-vu existed; not archived. The operator guide moved to [docs/archive/2026-10-03-guide-deja-vu.md](../archive/2026-10-03-guide-deja-vu.md). The code is not yet removed (#321), so the text below describes current behaviour.
 - **Date:** 2026-08-26
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),

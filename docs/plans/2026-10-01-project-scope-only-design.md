@@ -543,7 +543,7 @@ project-only kit. It is removed in P0, on the new line.
     proposal (ADR-0022) still needs it.
 - **Flags.** `--with-deja-vu`, `--deja-vu-mode`, `--no-deja-vu`, `--remove-deja-vu` and
   `--purge-deja-vu-data` are removed. They fail as unknown flags.
-- **Docs.** `docs/deja-vu.md` and ADR-0035 move to `docs/archive/`, with ADR-0035 marked
+- **Docs.** `docs/archive/2026-10-03-guide-deja-vu.md` and ADR-0035 move to `docs/archive/`, with ADR-0035 marked
   superseded. The guides lose their deja-vu sections.
 - **Usage history.** No Usage or telemetry code names deja-vu. Old `mcp__deja-vu__*` rows age out of
   the window, and the tool-family map tags them "retired".

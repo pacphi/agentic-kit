@@ -110,7 +110,7 @@ on disk is not brought into Agentic Kit's ownership.
 The preflight discloses that deja-vu reads coding-agent histories and creates a
 plaintext derived search index. Redaction is best effort, and recalled history
 is untrusted evidence rather than instruction. Review the complete
-[deja-vu runbook](deja-vu.md) before accepting this optional scope.
+[deja-vu runbook](archive/2026-10-03-guide-deja-vu.md) before accepting this optional scope.
 
 ## What project setup changes
 

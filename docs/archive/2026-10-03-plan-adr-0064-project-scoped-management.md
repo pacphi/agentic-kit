@@ -16,7 +16,7 @@ goes) is carried in the pull request description.
 
 **Tech Stack:** Markdown in `docs/adr/`, `node:test` in `tests/kit/`, `markdownlint` and `lychee` for checks.
 
-**Spec:** [2026-10-01-project-scope-only-design.md](2026-10-01-project-scope-only-design.md) (decisions 1–11, "The rule", "What this replaces") and [section C of the supersession ledger](2026-10-01-v4-supersession-ledger.md) (the per-ADR table; gap G3 fixes the number at 0064).
+**Spec:** [2026-10-01-project-scope-only-design.md](../plans/2026-10-01-project-scope-only-design.md) (decisions 1–11, "The rule", "What this replaces") and [section C of the supersession ledger](../plans/2026-10-01-v4-supersession-ledger.md) (the per-ADR table; gap G3 fixes the number at 0064).
 
 ## Global Constraints
 

@@ -20,7 +20,6 @@
     "!claude/**/.claude/**",
     "!claude/**/.agentic-qe/**",
     "!claude/**/.claude-flow/**",
-    "docs/deja-vu.md",
     "docs/dashboard.md",
     "docs/host-support.md",
     "docs/hooks.md",

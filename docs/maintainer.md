@@ -95,7 +95,7 @@ docs/
 ```
 
 **Published tarball** = the `files` whitelist in `package.json`:
-`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/deja-vu.md`, `docs/dashboard.md`, `docs/host-support.md`, `docs/hooks.md`,
+`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/dashboard.md`, `docs/host-support.md`, `docs/hooks.md`,
 `docs/installation.md`, `docs/models.md`, `docs/telemetry.md`, `docs/providers.md`, `docs/setup.md`, `docs/aqe-embeddings.md`,
 `docs/maintenance.md`, `docs/troubleshooting.md`, `docs/upgrading.md`, `docs/codex-statusline.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,
