@@ -24,19 +24,19 @@ test-*.log
 # repo writes these. They are NOT source (see CLAUDE.md "Dogfooding artifacts are not
 # source"); never commit them. The authored instruction files (CLAUDE.md for claude,
 # AGENTS.md for codex) ARE tracked; only their generated dirs (.claude/, .agents/) and
-# local overrides (.codex/) are ignored. The one exception is the authored
-# upstream-status maintainer skill, tracked for both hosts.
+# local overrides (.codex/) are ignored. The authored maintainer skills are the exception:
+# every ak-* skill folder is tracked for both hosts (docs/maintainer.md, "Maintainer skills").
 .agentic-qe/
 .ruvnet-brain/
 .harness/
 **/.claude/*
 !/.claude/skills/
 /.claude/skills/*
-!/.claude/skills/upstream-status/
+!/.claude/skills/ak-*/
 **/.agents/*
 !/.agents/skills/
 /.agents/skills/*
-!/.agents/skills/upstream-status/
+!/.agents/skills/ak-*/
 .codex/
 .mcp.json
 # ak's receipts and backups beside the gitignored .mcp.json (AQE pin: aqe-project-pin.mjs;

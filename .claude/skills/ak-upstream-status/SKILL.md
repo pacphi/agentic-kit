@@ -1,5 +1,5 @@
 ---
-name: upstream-status
+name: ak-upstream-status
 description: Report agentic-kit's outstanding upstream status from its upstream registry (threads filed, commented on or cited in Ruflo, Agentic QE, AgentDB, RuVector, RuvNet Brain, Codex, Claude Code, OpenCode and agent-browser). Use when the maintainer asks for an upstream report, upstream status, what is waiting on upstream, or which upstream fixes are ready.
 ---
 
