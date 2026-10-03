@@ -84,6 +84,14 @@ const CONTRACTS = {
       /`RETIRED_MODELS`[^.]*ask\s+the\s+maintainer\s+first,\s+naming\s+the\s+model\s+id\s+and\s+the\s+withdrawal\s+URL/i,
       /`CACHE_WRITE_1H_MULTIPLIER`/],
   },
+  'ak-docs-gate': {
+    triggers: [/docs gate/i, /docs (alignment|check)/i],
+    gates: [/never\s+move\s+an\s+ADR/i, /never\s+create\s+a\s+folder\s+under\s+`docs\/`/i, /lower.case/i,
+      /node scripts\/docs-relocate\.mjs/, /--dry-run/, /node scripts\/run-tests\.mjs focus tests\/kit\/docs-layout\.test\.mjs/,
+      /never\s+delete\s+a\s+doc/i, /names\s+the\s+files/i, /one\s+row\s+per\s+file/i, /docs\/archive\/README\.md/,
+      /current\s+state\s+only/i, /not\s+complete\s+until/i, /ask\s+whether\s+to\s+update\s+its\s+status\s+and\s+date/i,
+      /never\s+`pnpm`\s+inside\s+a\s+worktree/i, /Done,\s+pending\s+archive/],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
