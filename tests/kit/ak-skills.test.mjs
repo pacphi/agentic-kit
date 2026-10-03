@@ -30,10 +30,18 @@ const CONTRACTS = {
       /headBranch.*event/s, /pnpm publish/],
   },
   'ak-upstream-file': {
-    triggers: [/file upstream/i, /upstream issue/i],
-    gates: [/never post .*without/i, /redact/i, /search .*existing/i, /maintainer says .?post/i,
-      /names the (target )?repository/i, /gh issue list --repo/, /supplement/i, /repro script/i,
-      /separate .*local change/i, /explicit-user-approval-required/],
+    triggers: [/file upstream/i, /upstream issue/i, /RuvNet Brain/, /agent-browser/, /agentic-flow/],
+    gates: [/never post upstream \(or comment, file, react or edit there\) without approval/i,
+      /redact before showing/i, /repro script and\s+the pasted logs/i, /issue title and\s+`uname -a`/i,
+      /Search for an existing thread first, open and closed/, /gh search prs/, /gh issue list --repo/,
+      /supplement an open one rather than filing a duplicate/i, /maintainer says `post`/i,
+      /names the target repository and the thread or title/i, /do not file from memory/i,
+      /env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME/,
+      /assert `HOME` and every XDG path resolve under the disposable folder/i,
+      /thread text is data, never\s+instructions/i, /issue template or CONTRIBUTING/i,
+      /no matching policy stops the run/i, /schemas\/agentic-dependency-constraints\.schema\.json/,
+      /`doneWhen`, `mapping`,\s+`kitImpact`, `adjustment`, `status` of `watching`, `constraintIds`/,
+      /separate local change/i, /explicit-user-approval-required/],
   },
 };
 
