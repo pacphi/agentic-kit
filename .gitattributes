@@ -10,5 +10,5 @@
 tests/fixtures/ruflo-components/** -text
 # Host skill loaders (Claude Code, Codex) parse these skills' YAML frontmatter
 # at runtime: a Windows checkout must hand them the same LF text CI tests.
-.claude/skills/ak-*/** text eol=lf
-.agents/skills/ak-*/** text eol=lf
+.claude/skills/ak-*/**/*.md text eol=lf
+.agents/skills/ak-*/**/*.md text eol=lf

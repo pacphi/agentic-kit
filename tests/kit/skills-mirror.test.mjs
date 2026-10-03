@@ -20,7 +20,7 @@ test('copies an ak- skill to the Codex folder, normalizing CRLF, and a second ru
   assert.deepEqual(first.changed.sort(), ['.agents/skills/ak-ship/SKILL.md', '.agents/skills/ak-ship/notes/extra.md']);
   assert.deepEqual(first.problems, []);
   assert.equal(read(root, '.agents/skills/ak-ship/SKILL.md'), '---\nname: ak-ship\n---\nbody\n');
-  assert.deepEqual(mirrorSkills({ root }), { changed: [], problems: [] });
+  assert.deepEqual(mirrorSkills({ root }), { changed: [], removed: [], problems: [] });
 });
 
 test('--check reports a differing copy and writes nothing', (t) => {
@@ -43,7 +43,7 @@ test('an ak- skill that exists only for Codex is a problem and is never deleted'
 test('generated skills without the prefix are never mirrored', (t) => {
   const root = tempDir('ak-mirror', t);
   put(root, '.claude/skills/a11y-ally/SKILL.md', 'generated\n');
-  assert.deepEqual(mirrorSkills({ root }), { changed: [], problems: [] });
+  assert.deepEqual(mirrorSkills({ root }), { changed: [], removed: [], problems: [] });
   assert.equal(fs.existsSync(path.join(root, '.agents/skills/a11y-ally')), false);
 });
 
@@ -53,16 +53,28 @@ test('a skill folder without SKILL.md is a problem', (t) => {
   assert.match(mirrorSkills({ root }).problems.join('\n'), /ak-empty has no SKILL\.md/);
 });
 
-test('a stale file inside a mirrored skill is removed, and only reported with --check', (t) => {
+test('a stale file inside a mirrored skill is a problem with --check; a write run removes it and reports it as removed', (t) => {
   const root = tempDir('ak-mirror', t);
   put(root, '.claude/skills/ak-ship/SKILL.md', 'a\n');
   put(root, '.agents/skills/ak-ship/SKILL.md', 'a\n');
   put(root, '.agents/skills/ak-ship/old.md', 'stale\n');
   const checked = mirrorSkills({ root, check: true });
   assert.match(checked.problems.join('\n'), /\.agents\/skills\/ak-ship\/old\.md is not in \.claude\/skills\/ak-ship/);
+  assert.deepEqual(checked.removed, []);
   assert.equal(fs.existsSync(path.join(root, '.agents/skills/ak-ship/old.md')), true);
-  mirrorSkills({ root });
+  // The write run fixes the drift, so the removal is a change it made, not a problem left behind.
+  assert.deepEqual(mirrorSkills({ root }), { changed: [], removed: ['.agents/skills/ak-ship/old.md'], problems: [] });
   assert.equal(fs.existsSync(path.join(root, '.agents/skills/ak-ship/old.md')), false);
+});
+
+test('main exits 0 after a write run removes a stale file, and --check then passes', (t) => {
+  const root = tempDir('ak-mirror', t);
+  put(root, '.claude/skills/ak-ship/SKILL.md', 'a\n');
+  put(root, '.agents/skills/ak-ship/SKILL.md', 'a\n');
+  put(root, '.agents/skills/ak-ship/old.md', 'stale\n');
+  assert.equal(main(['--check'], root), 1);
+  assert.equal(main([], root), 0);
+  assert.equal(main(['--check'], root), 0);
 });
 
 test('main returns 1 for --check drift, 0 once mirrored, and 2 for an unknown flag', (t) => {
@@ -72,4 +84,12 @@ test('main returns 1 for --check drift, 0 once mirrored, and 2 for an unknown fl
   assert.equal(main([], root), 0);
   assert.equal(main(['--check'], root), 0);
   assert.equal(main(['--bogus'], root), 2);
+});
+
+// `skills-mirror.mjs check` (dashes forgotten) must not quietly run as a write.
+test('main rejects a positional argument with the usage message and writes nothing', (t) => {
+  const root = tempDir('ak-mirror', t);
+  put(root, '.claude/skills/ak-ship/SKILL.md', 'a\n');
+  for (const argv of [['check'], ['--check', 'extra'], ['ak-ship']]) assert.equal(main(argv, root), 2, argv.join(' '));
+  assert.equal(fs.existsSync(path.join(root, '.agents')), false);
 });

@@ -31,13 +31,15 @@ const skillNames = (root) => (fs.existsSync(root)
   : []);
 
 /**
+ * A stale copy is a problem for --check (the copies differ) and a removal for a write run (fixed).
  * @param {{root?: string, check?: boolean}} [options]
- * @returns {{changed: string[], problems: string[]}}
+ * @returns {{changed: string[], removed: string[], problems: string[]}}
  */
 export function mirrorSkills({ root = process.cwd(), check = false } = {}) {
   const src = path.join(root, SOURCE);
   const dst = path.join(root, TARGET);
   const changed = [];
+  const removed = [];
   const problems = [];
   const sources = skillNames(src);
   for (const name of skillNames(dst)) {
@@ -52,8 +54,12 @@ export function mirrorSkills({ root = process.cwd(), check = false } = {}) {
     }
     const want = files(from);
     for (const extra of files(to).filter((file) => !want.includes(file))) {
-      problems.push(`${TARGET}/${name}/${extra} is not in ${SOURCE}/${name}`);
-      if (!check) fs.rmSync(path.join(to, extra));
+      if (check) {
+        problems.push(`${TARGET}/${name}/${extra} is not in ${SOURCE}/${name}`);
+        continue;
+      }
+      fs.rmSync(path.join(to, extra));
+      removed.push(`${TARGET}/${name}/${extra}`);
     }
     for (const file of want) {
       const content = bytes(path.join(from, file));
@@ -65,18 +71,20 @@ export function mirrorSkills({ root = process.cwd(), check = false } = {}) {
       fs.writeFileSync(target, content);
     }
   }
-  return { changed, problems };
+  return { changed, removed, problems };
 }
 
 export function main(argv, root = process.cwd()) {
-  const flags = argv.filter((arg) => arg.startsWith('-'));
-  if (flags.some((flag) => flag !== '--check')) {
+  // Any other argument, a positional one included (`check` without its dashes), is a usage error,
+  // never a write run.
+  if (argv.some((arg) => arg !== '--check')) {
     console.error('usage: skills-mirror.mjs [--check]');
     return 2;
   }
-  const check = flags.includes('--check');
-  const { changed, problems } = mirrorSkills({ root, check });
+  const check = argv.includes('--check');
+  const { changed, removed, problems } = mirrorSkills({ root, check });
   for (const file of changed) console.log(`${check ? 'differs' : 'wrote'} ${file}`);
+  for (const file of removed) console.log(`removed ${file}`);
   for (const problem of problems) console.error(problem);
   return problems.length || (check && changed.length) ? 1 : 0;
 }

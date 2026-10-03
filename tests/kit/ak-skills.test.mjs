@@ -175,7 +175,7 @@ test('each skill has matching frontmatter, a trigger description and a bounded s
 });
 
 test('Claude and Codex get identical skills', () => {
-  assert.deepEqual(mirrorSkills({ check: true }), { changed: [], problems: [] });
+  assert.deepEqual(mirrorSkills({ check: true }), { changed: [], removed: [], problems: [] });
   for (const name of Object.keys(CONTRACTS)) {
     assert.equal(readText(path(HOSTS[1], name)), readText(path(HOSTS[0], name)), name);
   }
@@ -208,6 +208,19 @@ test('every ak- SKILL.md checks out with LF line endings on every platform', () 
       assert.match(out.stdout, /: eol: lf$/m, `${path(host, name)} must be pinned to LF in .gitattributes`);
     }
   }
+});
+
+// The LF pin covers Markdown only: a future image or binary beside a skill must not be forced to text.
+test('the LF pin covers every ak- Markdown file and forces no other file to text', () => {
+  for (const host of HOSTS) {
+    assert.match(git('check-attr', 'eol', '--', `${host}/ak-ship/notes/extra.md`).stdout, /: eol: lf$/m);
+    assert.match(git('check-attr', 'text', '--', `${host}/ak-ship/logo.png`).stdout, /: text: unspecified$/m);
+  }
+});
+
+test('the markdown lint scripts lint the ak- skills', () => {
+  const scripts = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts;
+  for (const name of ['lint:md', 'lint:md:fix']) assert.match(scripts[name], /"\.claude\/skills\/ak-\*\/SKILL\.md"/, name);
 });
 
 test('only ak- folders are exempt from the generated-file ignores', () => {
