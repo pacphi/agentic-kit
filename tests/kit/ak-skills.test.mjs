@@ -29,6 +29,12 @@ const CONTRACTS = {
       /node scripts\/run-tests\.mjs unit/, /rev-parse HEAD.*origin\/main/s, /git tag -a v<version> -m "v<version>" origin\/main/,
       /headBranch.*event/s, /pnpm publish/],
   },
+  'ak-upstream-file': {
+    triggers: [/file upstream/i, /upstream issue/i],
+    gates: [/never post .*without/i, /redact/i, /search .*existing/i, /maintainer says .?post/i,
+      /names the (target )?repository/i, /gh issue list --repo/, /supplement/i, /repro script/i,
+      /separate .*local change/i, /explicit-user-approval-required/],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
