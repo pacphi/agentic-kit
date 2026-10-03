@@ -98,7 +98,7 @@ const CONTRACTS = {
     // description already says "clean up worktrees" and "what can I delete".
     gates: [/One\s+removal\s+per\s+call:\s+list\s+the\s+literal\s+target/,
       /no\s+loops,\s+no\s+globs,\s+no\s+`xargs`,\s+no\s+`git branch -D`\s+over\s+a\s+list/,
-      /Every\s+removal\s+needs\s+a\s+yes\s+naming\s+the\s+literal\s+absolute\s+path\s+or\s+branch/,
+      /Every\s+removal\s+needs\s+its\s+own\s+yes\s+naming\s+the\s+literal\s+absolute\s+path\s+or\s+branch/,
       /`git branch -D`\s+needs\s+a\s+yes\s+naming\s+the\s+branch\s+and\s+`-D`/, /A\s+general\s+"clean\s+up"\s+is\s+not\s+a\s+yes/,
       /Remove\s+only\s+on\s+a\s+yes\s+that\s+names\s+the\s+literal\s+absolute\s+path\s+or\s+branch\s+\(a\s+general\s+"clean\s+up"\s+is\s+not\s+a\s+yes\)/,
       /never\s+`rm -Rf`s\s+anything,\s+never\s+touches\s+a\s+path\s+directly\s+under\s+`~`\s+or\s+`\/`/,
@@ -106,24 +106,36 @@ const CONTRACTS = {
       /`main`\s+branch,\s+this\s+session's\s+own\s+worktree\s+and\s+any\s+checkout\s+another\s+session\s+uses\s+are\s+never\s+candidates/,
       /Never\s+touch,\s+switch\s+branches\s+in\s+or\s+write\s+to\s+the\s+checkout\s+another\s+session\s+uses;\s+every\s+`status`\s+runs\s+with\s+`--no-optional-locks`/,
       /`git worktree list`/, /`git branch -vv`/, /`ls -d <main checkout's parent>\/agentic-kit\*`/,
-      /resolving\s+both\s+sides\s+with\s+`realpath`/, /`git -C <path> --no-optional-locks status --porcelain --ignored`/,
-      /`git -C <path> reflog -1 --date=iso`/,
+      /resolving\s+both\s+sides\s+with\s+`realpath`/,
+      /`git\s+-C\s+<path>\s+--no-optional-locks\s+status\s+--porcelain\s+--ignored`/,
+      /`git\s+-C\s+<path>\s+reflog\s+-1\s+--date=iso`/, /an\s+entry\s+within\s+the\s+last\s+3\s+days\s+in\s+either\s+reflog/,
       /Any\s+`!!`\s+entry\s+other\s+than\s+the\s+`node_modules`\s+symlink\s+\(`!! node_modules`\s+with\s+no\s+trailing\s+slash[^)]*\)\s+makes\s+a\s+row\s+that\s+is\s+not\s+live\s+"ask":\s+the\s+question\s+names\s+each\s+entry/,
       /symlinks\s+are\s+reported,\s+never\s+followed/,
       /Any\s+live\s+signal\s+wins,\s+except\s+that\s+a\s+branch\s+whose\s+tip\s+equals\s+the\s+`headRefOid`\s+of\s+a\s+PR\s+merged\s+into\s+`main`\s+is\s+"possibly\s+squash-merged,\s+ask"/,
+      // The exception exists for the branch's "commits on no remote ref"; it must never lift the
+      // worktree's own signals, the HEAD reflog above all (the test for another session's checkout).
+      /That\s+exception\s+lifts\s+only\s+the\s+branch's\s+own\s+signals\s+\(commits\s+on\s+no\s+remote\s+ref,\s+its\s+branch\s+reflog\),\s+and\s+inconclusive\s+beats\s+it/,
+      /it\s+never\s+lifts\s+a\s+worktree's\s+signals:\s+a\s+worktree\s+with\s+any\s+live\s+signal\s+of\s+its\s+own,\s+including\s+its\s+HEAD\s+reflog,\s+is\s+left,\s+and\s+its\s+branch\s+waits\s+for\s+it/,
       /checked\s+out\s+in\s+a\s+worktree\s+other\s+than\s+the\s+one\s+being\s+removed/, /Possibly\s+merged:/,
       /Possibly\s+abandoned:/, /merged\s+PR\s+with\s+`baseRefName`\s+`main`/,
       /`gh pr list --state merged --head <branch> --json number,headRefOid,baseRefName`/, /`git branch --merged main`/,
       /`git log <branch> --not --remotes --oneline`/,
       /Claim\s+"nothing\s+unpushed"\s+only\s+when\s+`git ls-remote --heads origin <branch>`\s+prints\s+the\s+SHA\s+of\s+`git rev-parse origin\/<branch>`/,
-      /`git merge-base --is-ancestor <branch> origin\/main`/, /fails\s+only\s+when\s+the\s+upstream\s+is\s+gone\s+or\s+unset/,
+      /`git merge-base --is-ancestor <branch> origin\/main`/,
+      /show\s+`git\s+fetch\s+--prune\s+--dry-run`\s+before\s+asking,\s+since\s+a\s+pruned\s+stale\s+ref\s+may\s+hold\s+the\s+last\s+copy\s+of\s+commits/,
+      /`git\s+branch\s+-d\s+<branch>`\s+checks\s+the\s+upstream\s+or,\s+when\s+that\s+is\s+gone\s+or\s+unset,\s+the\s+HEAD\s+of\s+the\s+checkout\s+running\s+the\s+command\s+\(not\s+`main`\)/,
+      /fails\s+only\s+when\s+the\s+upstream\s+is\s+gone\s+or\s+unset/,
       /`git branch -D <branch>`\s+skips\s+git's\s+merge\s+check:\s+use\s+it\s+only\s+for\s+a\s+"possibly\s+squash-merged"\s+branch[^.]*only\s+on\s+a\s+yes\s+that\s+names\s+both\s+the\s+branch\s+and\s+`-D`/,
       /without\s+`--force`/,
-      /re-check\s+that\s+target\s+right\s+before\s+each\s+call:\s+the\s+same\s+`--no-optional-locks status --porcelain --ignored`\s+output\s+the\s+maintainer\s+approved/,
+      /One\s+removal\s+per\s+call,\s+each\s+on\s+its\s+own\s+yes,\s+a\s+worktree\s+before\s+its\s+branch/,
+      /re-check\s+that\s+target\s+right\s+before\s+each\s+call:\s+the\s+same\s+`--no-optional-locks\s+status\s+--porcelain\s+--ignored`\s+output\s+the\s+maintainer\s+approved/,
       /show\s+the\s+`git worktree prune --dry-run -v`\s+list,\s+then\s+hand\s+the\s+maintainer\s+`git worktree prune -v`\s+and\s+do\s+not\s+run\s+it/,
       /`git -C <folder> rev-parse --show-toplevel`\s+equals\s+`realpath <folder>`/,
-      /`git -C <folder> --no-optional-locks status --porcelain --ignored`/,
-      /`git -C <folder> log --branches --not --remotes --oneline`/, /`git -C <folder> stash list`/,
+      /if\s+`ls\s+-A\s+<folder>`\s+prints\s+nothing\s+it\s+is\s+empty:\s+skip\s+the\s+git\s+checks/,
+      /`git\s+-C\s+<folder>\s+--no-optional-locks\s+status\s+--porcelain\s+--ignored`/,
+      // HEAD too: a commit made on a detached HEAD is on no branch, so `--branches` alone misses it.
+      /`git\s+-C\s+<folder>\s+log\s+--branches\s+HEAD\s+--not\s+--remotes\s+--oneline`/, /`git -C <folder> stash list`/,
+      /evidence,\s+not\s+proof:\s+that\s+clone's\s+remote\s+refs\s+may\s+be\s+stale/,
       /If\s+any\s+check\s+fails,\s+only\s+list\s+the\s+folder/,
       /`rmdir`\s+for\s+an\s+empty\s+folder,\s+`rm -Rf`\s+only\s+on\s+that\s+literal\s+absolute\s+path,\s+never\s+on\s+a\s+path\s+directly\s+under\s+`~`\s+or\s+`\/`/,
       /hand\s+the\s+maintainer\s+one\s+command\s+with\s+literal\s+absolute\s+paths[^.]*and\s+do\s+not\s+run\s+it/,
@@ -225,8 +237,10 @@ test('ak-upstream-status names every report group the watcher can produce', () =
 test('ak-worktree-sweep states its precedence once and never runs a plain status', () => {
   const text = readText(path(HOSTS[0], 'ak-worktree-sweep'));
   assert.equal(text.match(/live\s+signal\s+wins/gi)?.length, 1);
-  assert.doesNotMatch(text, /(?<!--no-optional-locks )status --porcelain/);
-  assert.doesNotMatch(text, /status --porcelain(?! --ignored)/);
+  assert.doesNotMatch(text, /(?<!--no-optional-locks\s+)status\s+--porcelain/);
+  assert.doesNotMatch(text, /status\s+--porcelain(?!\s+--ignored)/);
+  // A bare `git status` or `git -C <path> status` takes the same index lock.
+  assert.doesNotMatch(text, /\bgit\s+(?:-C\s+\S+\s+)?status\b/);
 });
 
 // #213 and #240 are already registry entries; nothing says they still migrate.
