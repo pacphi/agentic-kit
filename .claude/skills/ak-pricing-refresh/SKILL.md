@@ -16,7 +16,8 @@ makes it.
 1. `git worktree list` and `git branch --show-current`. Work only in a worktree this session
    created; never edit in a checkout another session uses. Create one from fresh `main`:
    `git fetch origin && git worktree add ../agentic-kit-wt-pricing-<date> -b chore/model-pricing-<date> origin/main`.
-   Stop and report if `main` cannot be fetched or the path exists. Follow the `node_modules` link
+   The path must be a sibling folder that does not exist yet. Stop and report if it exists or
+   `main` cannot be fetched. Follow the `node_modules` link
    step in `.claude/skills/ak-verify/SKILL.md` before running tests there.
 2. Read the data before searching: `src/lib/pricing.mjs` (`PRICES`, `PRICES_AS_OF`, the comments
    per entry), `MODEL_CATALOG` and `MODEL_CATALOG_VERIFIED` in `src/lib/routing.mjs`, the dated
@@ -38,18 +39,22 @@ makes it.
 2. List candidates: models on the vendor pages that `PRICES` lacks, and listed models whose
    input, output, cache-read or cache-write rate differs. A page that cannot be read (a 403) is
    reported as unverified; do not infer from the failure.
-3. Edit `src/lib/pricing.mjs` on the branch. Rules the file's own tests rely on:
+3. Edit `src/lib/pricing.mjs` on the branch. Rules for this file:
    - A new model gets its own key. Never price it as its predecessor: a key matches by
      token-boundary prefix, so a new model without its own key silently takes an older rate
      (Opus 5.5 was once billed as Opus 5, a 94% overstatement), or the fallback rate when the id
      is not a prefix of anything.
    - Cache-read prices need their own key: when the vendor's cache-read rate is not the
      module default, set `cacheReadMultiplier` on that entry from the published cache-read price
-     divided by the input price. Do the same check for cache writes.
+     divided by the input price. Do the same check for cache writes. Anthropic's 1-hour write tier
+     (2x input) is the module constant `CACHE_WRITE_1H_MULTIPLIER`, not a per-entry field.
    - Give a changed or new entry its own `asOf` (the date you read the source).
    - A superseded model keeps its price key; history is read forever. In `MODEL_CATALOG` it is
-     moved to `prior`, never deleted, and called retired only when a vendor source announces a
-     withdrawal (then the retirement list in `src/lib/routing.mjs` applies, with that citation).
+     moved to `prior`; as this skill's own policy it is never deleted from the catalog without
+     the maintainer's yes. It is called retired only when a vendor source announces a
+     withdrawal. Before changing `RETIRED_MODELS`, ask the maintainer first, naming the model id
+     and the withdrawal URL: that list in `src/lib/routing.mjs` overrides users' pins at read
+     time. Edit it only after that yes.
    - Bump `PRICES_AS_OF` only when prices were re-verified from a primary source on that day,
      not when a single entry changed.
 4. Keep the bundled Anthropic record in `src/lib/model-inventory/discovery/anthropic-catalog.mjs`
@@ -74,7 +79,7 @@ makes it.
 - Never open a pull request without the maintainer's yes that names the branch and the PR title.
   Never push, post or comment without a yes naming that action. Commits stay local until then.
 - Never `pnpm` inside a worktree; use `node scripts/run-tests.mjs` and `node_modules/.bin/*`.
-- No default, tier or retirement changes without the maintainer's decision (steps 3 and 5).
+- No default, tier or `RETIRED_MODELS` changes without the maintainer's decision (steps 3 and 5).
 - If a precondition is false or no source can be reached: stop and report, change nothing.
 
 ## Done
