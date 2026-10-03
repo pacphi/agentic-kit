@@ -347,11 +347,12 @@ git checkout main && git pull --ff-only
 ## 6. Versioning (SemVer)
 
 `package.json` `version` is the single source of truth. The npm dist-tag is chosen
-**by the shape of the version string** in `release.yml`:
+**by the shape of the version string**, through `scripts/release-dist-tag.mjs`, which `release.yml` calls:
 
 | Version | Example | dist-tag | Meaning |
 |---------|---------|----------|---------|
-| Prerelease (`-…`) | `4.0.0-alpha.4` | **`next`** | Alpha/beta channel. `ak sync` on a prerelease install tracks `next` *and* `latest` |
+| Beta (`-beta.N`) | `4.0.0-beta.1` | **`beta`** | The project-scoped line. Installs that follow `next` or `latest` never update into it |
+| Other prerelease (`-…`) | `4.0.0-alpha.4`, `4.0.0-rc.1` | **`next`** | Alpha and release-candidate channel. `ak sync` on a prerelease install tracks `next` *and* `latest` |
 | Stable | `4.0.1` | **`latest`** | GA. Stable installs only ever follow `latest` |
 
 Bump rules while in the `4.0.0` alpha line:
@@ -440,7 +441,7 @@ if a release run fails on the guard, you tagged the wrong string.
 | Workflow | Trigger | What it does | Gate? |
 |----------|---------|--------------|-------|
 | **`ci.yml`** | push to `main`/`npm-kit`, any PR, `workflow_dispatch` | Matrix **3 OS × 3 Node** (ubuntu/macos/windows × 22/24/26): `pnpm test` + CLI smoke against a sandboxed `HOME` | PR merge signal |
-| **`release.yml`** | push tag `v*` | Test gate → **tag↔version guard** → `pnpm publish --provenance` (prerelease→`next`, stable→`latest`) → **GitHub Release** with generated notes (prerelease-flagged by version shape) | **Publishes** |
+| **`release.yml`** | push tag `v*`; `workflow_dispatch` (dry run only) | Test gate → **tag↔version guard** → `pnpm publish --provenance` (beta→`beta`, other prerelease→`next`, stable→`latest`) → **GitHub Release** with generated notes (prerelease-flagged by version shape). A manual run publishes nothing: it runs the tests and `publish --dry-run`, and skips the guard and the GitHub Release | **Publishes** |
 | **`nightly.yml`** | cron `17 6 * * *` (06:17 UTC), `workflow_dispatch` | Installs the **real latest** ruflo + agentic-qe via `npm -g`, runs `ak sync --no-upgrade` + deep proofs; fails on upstream drift in `natives`/`security` | Upstream-drift alarm |
 | **`dependabot.yml`** | weekly, Monday | Grouped bumps: `github-actions` (keeps action majors current) + `npm` (watchdog even though repo is zero-dep) | Opens PRs |
 
