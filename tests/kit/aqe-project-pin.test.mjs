@@ -3,8 +3,8 @@
 // AQE_STORAGE_PATH) in the three project files, each under a receipt (the project
 // Codex config holds two targets: the agentic-qe env table and
 // [shell_environment_policy.set]) — exercised directly here so release and
-// migration still work — but every production caller now passes `enabled: false`;
-// see the "ak no longer writes the pin" test below. Every test runs in its own
+// migration still work — but no production caller writes a new pin; sync and setup release
+// one an older ak wrote only when that is safe (tests/kit/aqe-pin-release-gate.test.mjs). Every test runs in its own
 // temporary project.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -318,11 +318,12 @@ test('ak no longer writes the pin: a project with .agentic-qe gets nothing new, 
   for (const file of [settings, mcp, codex]) assert.equal(fs.existsSync(`${file}${AQE_PIN_RECEIPT}`), false);
 });
 
-test('status reports no aqe-pin rows once the pin is dropped, even with a stale receipted pin present', async (t) => {
+test('status reports no aqe-pin rows once the pin can be released, even with a stale receipted pin present', async (t) => {
   const { root, write, cfg } = project(t);
   seedAll(write);
   reconcileAqePin(cfg, root);
-  const rows = await memoryPin.collect({ cwd: root, cfg: { ...cfg, aqe: true } });
+  const aqePin = { version: '3.14.7', find: () => ({ strays: [], complete: true }) };
+  const rows = await memoryPin.collect({ cwd: root, cfg: { ...cfg, aqe: true }, aqePin });
   const pinAwareRows = rows.filter((r) => r.subsystem === 'aqe-pin');
   assert.deepEqual(pinAwareRows, [], JSON.stringify(rows));
 });

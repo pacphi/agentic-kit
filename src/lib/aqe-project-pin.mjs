@@ -8,9 +8,11 @@
 // `.agentic-qe` there (upstream agentic-qe#735). Released agentic-qe (>=3.14.5)
 // resolves all three from a project-root search (.git or package.json boundary,
 // agentic-qe dist/kernel/project-root.js's findProjectRoot) on its own, so ak no
-// longer writes this pin: `reconcileAqePin`'s callers (sync, setup) now always
-// pass `enabled: false`. The write path below (`enabled: true` or the default
-// heuristic) stays only so a pin an older ak version wrote — absolute paths in the
+// longer writes a new pin. A pin an older ak wrote is released only when that is safe
+// (`aqePinReleaseGate`): findProjectRoot prefers the NEAREST `.agentic-qe` (AQE 3.10.4's nearest-store rule),
+// so a stray store below the root would be adopted once AQE_PROJECT_ROOT is gone, and AQE older
+// than the fix never resolved the root at all. Otherwise the pin stays, converged as before. The write path
+// below (`enabled: true` or the default heuristic) stays for that, and so a pin an older ak version wrote — absolute paths in the
 // project's `.claude/settings.local.json` env, the `.mcp.json` agentic-qe entry,
 // the project `.codex/config.toml` agentic-qe env and its
 // `[shell_environment_policy.set]` table, each under a receipt — is released back
@@ -25,6 +27,8 @@ import { aqeTomlEnvironment, shellEnvironmentSet } from './aqe-embedding-toml.mj
 import { recognizedAqeTransport, parseEmbeddingJson } from './aqe-embedding-transport.mjs';
 import { planOwnedEnv, applyOwnedEnv, jsonTopLevelEnvEditor, readRegularConfig } from './owned-env-projection.mjs';
 import { projectAqeDir, repoRoot } from './paths.mjs';
+import { installedVersion, cmpVersions } from './versions.mjs';
+import { findStrayMemoryStores } from './project-memory.mjs';
 
 export const AQE_PIN_RECEIPT = '.agentic-kit-aqe-pin.json';
 export const AQE_SHELL_PIN_RECEIPT = '.agentic-kit-aqe-shell-pin.json';
@@ -190,6 +194,67 @@ export function reconcileAqePin(cfg, cwd = process.cwd(), { dryRun = false, enab
 /** Whether ak holds a pin receipt in this project. */
 export function aqePinReceiptPresent(root) {
   return targets({ integrations: { hosts: {} } }, root, false, () => false).length > 0;
+}
+
+/** The first agentic-qe release that resolves its project root, memory database and storage
+ *  folder from a subfolder on its own (agentic-qe#735). */
+export const AQE_PIN_FIX_VERSION = '3.14.5';
+
+/** @typedef {{release: boolean, reason?: string, detail?: string, strays: string[]}} AqePinGate */
+/** @returns {AqePinGate} */
+const hold = (reason, detail, strays = []) => ({ release: false, reason, detail, strays });
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * Whether a pin ak wrote earlier can be released now. It can when AQE is new enough to find the
+ * project root itself AND no stray `.agentic-qe` store exists below the root: AQE prefers the
+ * nearest store, so a stray would be adopted the moment AQE_PROJECT_ROOT stops overriding it.
+ * A project holding no pin receipt has nothing to hold, and nothing is scanned.
+ * @param {string} root the repository root
+ * @param {{version?: string|null, find?: (root: string) => {strays: Array<{kind: string, path: string}>, complete: boolean}}} [options]
+ *   test seams: the installed agentic-qe version (null: unknown) and the stray finder
+ * @returns {AqePinGate}
+ */
+export function aqePinReleaseGate(root, { version, find = findStrayMemoryStores } = {}) {
+  if (!aqePinReceiptPresent(root)) return { release: true, strays: [] };
+  const installed = version === undefined ? installedVersion('agentic-qe') : version;
+  if (!installed) {
+    return hold('version-unknown', `agentic-qe is not installed or its version is unknown, and ak cannot tell whether it is ${AQE_PIN_FIX_VERSION} or later`);
+  }
+  if (cmpVersions(installed, AQE_PIN_FIX_VERSION) < 0) {
+    return hold('version-old', `agentic-qe ${installed} is older than ${AQE_PIN_FIX_VERSION}, the first release that finds the project root from a subfolder`);
+  }
+  const scan = find(root);
+  const strays = scan.strays.filter((s) => s.kind === 'aqe').map((s) => s.path);
+  if (strays.length) {
+    return hold('strays', `${plural(strays.length, 'stray AQE store')} below the project root (${strays.slice(0, 5).join(', ')}${strays.length > 5 ? ', …' : ''}) would be adopted by an AQE run from that folder once the pin is gone`, strays);
+  }
+  if (!scan.complete) return hold('scan-incomplete', 'ak could not scan every folder below the project root for stray AQE stores');
+  return { release: true, strays: [] };
+}
+
+/**
+ * Retire the pin for `ak sync`: write nothing new; release a pin an older ak wrote when the gate
+ * allows it, otherwise keep that pin converged exactly as before the retirement.
+ * @param {any} cfg @param {string} cwd @param {Parameters<typeof aqePinReleaseGate>[1]} [options]
+ */
+export function retireAqePin(cfg, cwd = process.cwd(), options = {}) {
+  const root = repoRoot(cwd);
+  if (root === null) return { ...reconcileAqePin(cfg, cwd, { enabled: false }), held: false };
+  const gate = aqePinReleaseGate(root, options);
+  if (gate.release) return { ...reconcileAqePin(cfg, cwd, { enabled: false }), held: false, gate };
+  const kept = reconcileAqePin(cfg, cwd, { enabled: true });
+  return { ...kept, held: true, gate, detail: `${kept.detail} (pin kept: ${gate.detail})` };
+}
+
+/** The reason a pin ak wrote is being kept in the project holding `cwd`, or null when there is none.
+ *  @param {string} cwd @param {Parameters<typeof aqePinReleaseGate>[1]} [options]
+ *  @returns {(AqePinGate & {root: string}) | null} */
+export function aqePinHold(cwd, options = {}) {
+  const root = repoRoot(cwd);
+  if (root === null) return null;
+  const gate = aqePinReleaseGate(root, options);
+  return gate.release ? null : { root, ...gate };
 }
 
 const owned = (cfg) => {

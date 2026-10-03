@@ -35,7 +35,7 @@ import { resolveAqeEmbedding } from '../lib/aqe-embedding-config.mjs';
 import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-embedding-setup.mjs';
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
 import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
-import { reconcileAqePin } from '../lib/aqe-project-pin.mjs';
+import { reconcileAqePin, recordAqePinProject, aqePinHold } from '../lib/aqe-project-pin.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
@@ -679,11 +679,13 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
   // B5-D1 (retired, agentic-qe#735): release any pin an older ak version left
   // before AQE regenerates its own env entries; released agentic-qe (>=3.14.5)
   // resolves its project root, memory database and storage folder on its own.
+  const pinKept = aqePinHold(root);   // a legacy pin that must stay (ADR-0062): put it back after init
   const unpinned = reconcileAqePin(cfg, root, { enabled: false });
   if (!unpinned.ok) { reportOutcome('AQE pin pre-init', unpinned); return false; }
   const aqe = await runCmd('aqe', args, { cwd: root, timeout: 300_000, env: resolveAqeEmbedding(cfg).env });
   const report = aqeInitReport({ code: aqe.code, withCodex, root, version: installedVersion('agentic-qe') });
   (report.level === 'ok' ? ok : warn)(report.text);
+  if (pinKept) restoreProjectAqePin(cfg, root, pinKept);
   const aqeUnexpected = removeUndisclosedPermissions(
     permCtx.permissionsFile, permCtx.permissionsBefore, permCtx.authorizedPermissions,
   );
@@ -692,6 +694,14 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
     return false;
   }
   return aqe.code === 0;
+}
+
+/** ADR-0062: AQE's init rewrote its env entries; put back the legacy pin that must stay. */
+function restoreProjectAqePin(cfg, root, kept) {
+  const pin = reconcileAqePin(cfg, root, { enabled: true });
+  if (!pin.ok) warn(`AQE pin not restored: ${pin.detail}`);
+  else ok(`AQE pin kept in ${pin.root ?? root} (${kept.detail})`);
+  if (recordAqePinProject(cfg, pin.root)) saveKitConfig(cfg);
 }
 
 /** The 'aqe-router' step's own report, plus the activity-routing table print

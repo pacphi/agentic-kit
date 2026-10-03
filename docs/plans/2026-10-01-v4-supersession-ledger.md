@@ -292,7 +292,7 @@ These are de-duplicated across all sources. Each becomes an `alpha.61` card.
 | Branch 4 open items | DL:1267-1281 | Six dispatches fired; draft PRs #286–#288 | Started | Unaffected | Exit-critical (record DoD-3); the PRs are upstream-dependent |
 | Codex `claude-flow` placeholder | DL:1990-1992 | Stops Codex re-importing Claude's MCP entry | Finished (#247) | Partly: becomes a register repair (P3) | Superseded in part; include it in the purge test |
 | B3-D2 | DL:1994-2022 | One-time cleanup of setup probe rows | Finished | Partly: `kit.json` goes; no migration code | Superseded (`alpha.61` only) |
-| B5-D1 + agentic-qe#735 | DL:2339-2411 | AQE pins in project settings, `.mcp.json` and project Codex config | Finished (#250) | Partly: in personal mode `.mcp.json` becomes local scope; receipts leave `kit.json` | Still needed → move in P1/P3 |
+| B5-D1 + agentic-qe#735 | DL:2339-2411 | AQE pins in project settings, `.mcp.json` and project Codex config | Finished (#250) | Retired 2026-10-03 (#436, ADR-0062): ak writes no new pin; a legacy pin is released only on AQE 3.14.5+ with no stray store. P1/P3 only release legacy receipts; `.mcp.json` still becomes local scope in personal mode | Superseded → release legacy receipts in P1/P3 (#335) |
 | B5-D4, B3-D2 backups | DL:2460-2484 | Merge archives and backups under `~/.local/state/agentic-kit/` | Finished (#250) | Partly: the purge deletes that folder | Exit-critical (keep or confirm) |
 | Branch 5 real-store jobs | DL:1027-1030 | Merge the stray store; confirm the pin | Decision pending | Unaffected | Exit-critical (or waive) |
 | #655, #755–#758 | DL:1003-1013 | AQE Codex guidance constraint; #755 has draft #287 | Deferred | Partly: per-project guidance | Upstream-dependent |

@@ -81,9 +81,9 @@ const STRAY_ROWS = [
   ['agentdb-rvf', (s) => `stray store ${listed(s)} (${sized(s)}): AgentDB's RVF backend default in the working directory; ${reportOnly(s)}`],
   ['ruvector', (s) => `stray store ${listed(s)} (${sized(s)}): RuVector's default store in the working directory; ${reportOnly(s)}`],
   ['aqe', (s) => `${s.length} stray AQE store${s.length === 1 ? '' : 's'} below the project root: ${listed(s)}; `
-    + `AQE made ${them(s)} when a command, hook or MCP server started in that folder without ak's pin to the project root `
-    + '(ak sync pinned AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH until agentic-qe 3.14.5 fixed subfolder '
-    + `resolution upstream, agentic-qe#735); ${aqeOutcome(s)}`],
+    + `an AQE command, hook or MCP server started in ${s.length === 1 ? 'that folder' : 'one of those folders'} adopts ${them(s)}, because AQE uses the nearest `
+    + '.agentic-qe, and writes learning there that this project\'s hosts never read; '
+    + `${aqeOutcome(s)}`],
 ];
 
 // A stray AQE folder with a memory.db holds learning the hosts never read, and
