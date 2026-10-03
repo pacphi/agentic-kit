@@ -19,7 +19,9 @@ const CONTRACTS = {
   'ak-ship': {
     triggers: [/"ship" with a PR number/i, /squash-merge/i],
     gates: [/only the (pull requests|PRs) the maintainer named/i, /one (removal|deletion) per call/i,
-      /ask which PR/i, /never merge/i, /minimumReleaseAge/],
+      /ask which PR/i, /never merge/i, /minimumReleaseAge/, /--match-head-commit/, /--required/,
+      /explicit yes before (any|each) deletion/i, /status --porcelain/, /never `--force`/i,
+      /worktree this session created/i, /every merge needs a yes/i],
   },
 };
 
