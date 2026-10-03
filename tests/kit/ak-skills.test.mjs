@@ -25,7 +25,9 @@ const CONTRACTS = {
   },
   'ak-release': {
     triggers: [/release next/i, /semantic (release|version)/i],
-    gates: [/separate approval/i, /never .*(--force|--no-verify)/i, /ask whether .*(alpha|beta)/i, /npm i -g/],
+    gates: [/separate approval/i, /never .*(--force|--no-verify)/i, /ask whether .*(alpha|beta|rc)/i, /npm i -g/,
+      /node scripts\/run-tests\.mjs unit/, /rev-parse HEAD.*origin\/main/s, /git tag -a v<version> -m "v<version>" origin\/main/,
+      /headBranch.*event/s, /pnpm publish/],
   },
 };
 

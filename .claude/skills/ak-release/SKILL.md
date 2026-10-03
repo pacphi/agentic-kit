@@ -27,34 +27,45 @@ merged to `main`. This skill does not merge feature PRs (use `ak-ship`).
 ## Steps
 
 1. Choose the version with the maintainer, by SemVer and the bump rules in `docs/maintainer.md`
-   section 6. Ask whether the next step is an alpha or a beta (`-alpha.N` goes to `next`,
-   `-beta.N` to the project-scoped `beta` line, a stable version to `latest`); never infer it.
-   Confirm the tag with `node scripts/release-dist-tag.mjs <version>` and show the result.
-2. Run the suite: `node scripts/run-tests.mjs` (never `pnpm` in a worktree). Stop if red.
+   section 6. Ask whether the next step is an alpha, a beta or an rc (`-alpha.N` and `-rc.N` go
+   to `next`, `-beta.N` to the project-scoped `beta` line, a stable version to `latest`); never
+   infer it. Confirm with `node scripts/release-dist-tag.mjs <version>` and show the result.
+2. Run the suite: `node scripts/run-tests.mjs unit` (the `pnpm test` script; never `pnpm` in a
+   worktree). Stop if red.
 3. Bump `version` in `package.json`, the only place it lives. Check
    `node bin/agentic-kit.mjs --version` prints it.
 4. Release commit `release: v<version>`. Recent releases landed through a pull request because
    `main` requires one: push a release branch and open the PR only after a yes, then hand the
-   merge to `ak-ship` (a release PR needs a fresh yes there). If the maintainer says pushing
-   `main` directly is allowed, that is its own approval; a rejected push is reported, never
-   worked around.
-5. With `main` at the merged release commit, create the annotated tag, matching exactly:
-   `git tag -a v<version> -m "v<version>"`. Show `git show v<version> --stat` and the dist-tag.
-6. Tag push, separate approval: name the tag, the commit and the dist-tag, then run
-   `git push origin v<version>` only after that yes. This starts the publish.
-7. Watch the publish, separate approval: `gh run list --workflow=release.yml --limit 1`, then
+   merge to `ak-ship` (a release PR needs a fresh yes there). Pushing `main` directly needs its
+   own yes that names this commit and this branch; a general "direct pushes are allowed" is not
+   that yes. A rejected push is reported, never worked around.
+5. Verify the commit before tagging, and again right before the tag-push approval:
+   `git fetch origin`, then `git rev-parse HEAD` must equal `git rev-parse origin/main` (or tag
+   `origin/main` explicitly), `node -p "require('./package.json').version"` must equal
+   `<version>`, and `git log -1 --format=%s origin/main` must be `release: v<version>`. If any
+   differs, stop and report. Never `git checkout main` in a worktree where it is held elsewhere.
+6. Create the annotated tag on the verified commit, matching exactly:
+   `git tag -a v<version> -m "v<version>" origin/main`. Show `git show v<version> --stat` and
+   the dist-tag.
+7. Tag push, separate approval: name the tag, the commit and the dist-tag, repeat the step 5
+   checks, then run `git push origin v<version>` only after that yes. This starts the publish
+   (`release.yml` runs `pnpm publish`; you never publish).
+8. Watch the publish, separate approval (cheap to give, it only reads):
+   `gh run list --workflow=release.yml --limit 5 --json databaseId,headBranch,event,status`.
+   Pick the run whose `headBranch` is `v<version>` and `event` is `push`, not an earlier run or
+   a `workflow_dispatch` dry run; if none appears yet, wait and list again. Then
    `gh run watch <run-id> --exit-status`. A failure on the tag-version guard or tests published
    nothing; report it and the fix options in `docs/maintainer.md` section 7, and do not move or
    delete the tag without a yes for that exact action.
-8. npm check, separate approval: `npm view @pacphi/agentic-kit dist-tags` and
-   `npm view @pacphi/agentic-kit@<version> version dist.tarball`. Allow about eight minutes
-   after the workflow reports success; a 404 on the tarball inside that window is registry lag,
-   not a failed publish, so wait and re-check.
-9. `gh release view v<version> --json tagName,isPrerelease` (the workflow creates it; do not
-   run `gh release create`). Prereleases must show `isPrerelease` true.
-10. Close the release epic and its items in the GitHub Project after a yes per target, with
+9. npm check, separate approval (also read-only and cheap): `npm view @pacphi/agentic-kit
+   dist-tags` and `npm view @pacphi/agentic-kit@<version> version dist.tarball`. Allow about
+   eight minutes after the workflow reports success; a 404 on the tarball inside that window is
+   registry lag, not a failed publish, so wait and re-check.
+10. `gh release view v<version> --json tagName,isPrerelease` (the workflow creates it; do not
+    run `gh release create`). Prereleases must show `isPrerelease` true.
+11. Close the release epic and its items in the GitHub Project after a yes per target, with
     `gh issue close <N> --comment "Released in v<version>"`; list the numbers first.
-11. Remind the maintainer that the global `ak` is the published npm copy, not the repo: run
+12. Remind the maintainer that the global `ak` is the published npm copy, not the repo: run
     `npm i -g @pacphi/agentic-kit@<dist-tag>`, then `ak sync`. Do not run it unasked.
 
 ## Gates
@@ -65,7 +76,7 @@ merged to `main`. This skill does not merge feature PRs (use `ak-ship`).
 - Never force-push, never `--force` a tag, never pass `--no-verify` or skip hooks.
 - Never delete or move a published tag, `npm unpublish` or `npm deprecate` without a yes naming
   that exact target. A published version is superseded, not republished.
-- A false precondition (dirty tree, red tests, stale base, tag and version mismatch) stops
+- A false precondition (dirty tree, red tests, stale base, HEAD not `origin/main`, tag and version mismatch) stops
   the release with a report. Do not improvise around it.
 - No secrets in output; if the workflow reports a bad npm token, tell the maintainer to fix it.
 
