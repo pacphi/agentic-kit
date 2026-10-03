@@ -40,9 +40,13 @@ added to a thread we already know. If the target repository is unclear, ask; nev
    thread that does not fix it is cited in the new issue. File new only when nothing fits.
 3. Reproduce the failure in a disposable folder with a disposable `HOME`, with the upstream
    version the maintainer names, and keep the repro script as a file. A HOME-only sandbox leaks
-   writes to the real `~/.config` through `XDG_*`, so run it as
-   `env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME HOME=<folder>/home <command>`.
-   Before anything writes, assert `HOME` and every XDG path resolve under the disposable folder.
+   writes to real per-user state through `XDG_*` and the other keys in `INHERITED_STATE_KEYS`
+   (`tests/kit/helpers/home-sandbox.mjs`; read it, `CLAUDE_FLOW_DB_PATH` is one). Run
+   `mkdir <folder>/home`, then pass every key in that list other than `HOME` as its own `-u`:
+   `env -u XDG_CONFIG_HOME -u XDG_STATE_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME -u <each other key> HOME=<folder>/home <command>`.
+   Before anything writes, assert `HOME` and every XDG path resolve under the disposable folder:
+   run the same check as `ak-verify` step 5, from this repository's root with the same `env`
+   prefix, and stop if a path is outside the folder or any other key is set.
    Record expected against actual output. If it does not reproduce, stop and report; do not file from memory.
 4. Read the upstream's issue template or CONTRIBUTING file and follow its form. Draft to the
    upstream issue standard, in friendly, appreciative language that assumes good faith:
@@ -72,7 +76,8 @@ added to a thread we already know. If the target repository is unclear, ask; nev
    file. Report the URL.
 9. Registry follow-up. A thread we file or comment on belongs in the `watch` list (see
    `docs/upstream-watch.md`, "One registry"). The watcher never changes the registry. Propose
-   the entry as a separate local change in a worktree this session created. Copy an existing
+   the entry as a separate local change in a worktree this session created (never `pnpm` in a
+   worktree; use `node scripts/run-tests.mjs`). Copy an existing
    entry of the same dependency as the template and read the schema
    (`docs/schemas/agentic-dependency-constraints.schema.json`). Every entry carries `id`, `url`,
    `kind`, `title`, `relation` of `filed` or `commented`, `dependency`, `doneWhen`, `mapping`,

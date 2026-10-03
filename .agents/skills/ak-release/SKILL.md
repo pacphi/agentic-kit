@@ -20,7 +20,8 @@ merged to `main`. This skill does not merge feature PRs (use `ak-ship`).
 2. `git fetch origin` and confirm the release base equals `origin/main`. Stop if it is behind,
    or if the contents the maintainer expects are not merged.
 3. Read the current version: `node -p "require('./package.json').version"`. Read
-   `docs/maintainer.md` sections 6 and 7 again if unsure; they are the source of truth.
+   `docs/maintainer.md` sections 6 and 7 again if unsure. Section 7's checklist pushes `main`
+   directly; the pull request path in step 4 is current practice.
 4. `gh run list --workflow=release.yml --limit 3` and `npm view @pacphi/agentic-kit dist-tags`
    to see what shipped last.
 
@@ -38,12 +39,17 @@ merged to `main`. This skill does not merge feature PRs (use `ak-ship`).
    `main` requires one: push a release branch and open the PR only after a yes, then hand the
    merge to `ak-ship` (a release PR needs a fresh yes there). Pushing `main` directly needs its
    own yes that names this commit and this branch; a general "direct pushes are allowed" is not
-   that yes. A rejected push is reported, never worked around.
+   that yes. A rejected push is reported, never worked around. `ak-ship`'s cleanup may remove
+   the release branch's worktree: run step 5 onward from a checkout `ak-ship` is not removing.
 5. Verify the commit before tagging, and again right before the tag-push approval:
    `git fetch origin`, then `git rev-parse HEAD` must equal `git rev-parse origin/main` (or tag
-   `origin/main` explicitly), `node -p "require('./package.json').version"` must equal
-   `<version>`, and `git log -1 --format=%s origin/main` must be `release: v<version>`. If any
-   differs, stop and report. Never `git checkout main` in a worktree where it is held elsewhere.
+   `origin/main` explicitly, as on the pull request path, where HEAD is the release branch).
+   Read the version from the commit being tagged, not the working tree:
+   `git show origin/main:package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version"`
+   must print `<version>`, and `git log -1 --format=%s origin/main` must be
+   `release: v<version>` or `release: v<version> (#<N>)`, where `<N>` is the release PR a squash
+   merge appends. If any differs, stop and report. Never `git checkout main` in a worktree where
+   it is held elsewhere.
 6. Create the annotated tag on the verified commit, matching exactly:
    `git tag -a v<version> -m "v<version>" origin/main`. Show `git show v<version> --stat` and
    the dist-tag.
@@ -76,7 +82,7 @@ merged to `main`. This skill does not merge feature PRs (use `ak-ship`).
 - Never force-push, never `--force` a tag, never pass `--no-verify` or skip hooks.
 - Never delete or move a published tag, `npm unpublish` or `npm deprecate` without a yes naming
   that exact target. A published version is superseded, not republished.
-- A false precondition (dirty tree, red tests, stale base, HEAD not `origin/main`, tag and version mismatch) stops
+- A false precondition (dirty tree, red tests, stale base, the commit to tag not `origin/main`, tag and version mismatch) stops
   the release with a report. Do not improvise around it.
 - No secrets in output; if the workflow reports a bad npm token, tell the maintainer to fix it.
 

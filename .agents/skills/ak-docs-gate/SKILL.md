@@ -44,13 +44,16 @@ has two halves: the layout rules, which a test enforces, and alignment, which on
    checked, even when none needed edits.
 3. New or renamed guide: it is listed in `docs/README.md` in the same change.
 4. ADRs: if an ADR describes behavior the change alters, do not edit it. Name the ADR and the claim,
-   and ask whether to update its status and date (ADRs are living plans). Edit only after a yes.
+   and ask whether to update its status and date. Edit only after a yes.
 5. Plans and specs: read the `## Status` of each file in `docs/plans/`. For a "Done, pending archive"
    file (or one the maintainer names), check it is not still cited by name from a live doc
    (`git grep -n <file name>`; a Superseded file stays while cited). Then propose the move:
    - Write a map file OUTSIDE the repository (for example in the scratchpad): one row per file,
-     `docs/plans/<name>.md`, a tab, `docs/archive/<name>.md`. The archive name matches
-     `YYYY-MM[-DD]-<origin>-<topic>.<ext>`; the destination must not exist.
+     the source path, a tab, the archive path. A plan `docs/plans/<date>-<topic>.md` becomes
+     `docs/archive/<date>-plan-<topic>.md`, and a spec `docs/plans/<date>-<topic>-design.md`
+     becomes `docs/archive/<date>-design-<topic>.md`: the name is
+     `YYYY-MM[-DD]-<origin>-<topic>.<ext>`, with the origins under "Naming convention" in
+     `docs/archive/README.md`. The destination must not exist.
    - Preview: `node scripts/docs-relocate.mjs --map <map file> --mentions --dry-run`. It writes
      nothing. It prints each path mention it would rewrite, a count of the Markdown links it would
      rewrite and in how many files, and links that are already broken. `--bare` also rewrites bare file names; use it only if the dry run shows it is needed.
