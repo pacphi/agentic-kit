@@ -16,6 +16,11 @@ const CONTRACTS = {
     triggers: [/upstream status/i, /upstream report/i],
     gates: [/explicit-user-approval-required/, /never (post|push|merge)/i, /fetchErrors/],
   },
+  'ak-ship': {
+    triggers: [/"ship" with a PR number/i, /squash-merge/i],
+    gates: [/only the (pull requests|PRs) the maintainer named/i, /one (removal|deletion) per call/i,
+      /ask which PR/i, /never merge/i, /minimumReleaseAge/],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
