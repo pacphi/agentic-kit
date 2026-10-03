@@ -1,29 +1,23 @@
-// B5-D1/B5-D1a: pin AQE to the project root. AQE finds its store three ways and each
-// falls back to the working directory: the project root (AQE_PROJECT_ROOT,
-// agentic-qe dist/kernel/project-root.js), the memory database (AQE_MEMORY_PATH,
-// dist/learning/embedder-identity-store.js, which never reads the root) and the
-// storage folder its token bootstrap creates (AQE_STORAGE_PATH,
-// dist/init/token-bootstrap.js). A command, hook or MCP server started in a
-// subfolder therefore made its own `.agentic-qe` there. ak writes all three as
-// absolute paths into the project's `.claude/settings.local.json` env, the
-// `.mcp.json` agentic-qe entry (recognized transports only), the project
-// `.codex/config.toml` agentic-qe env and (B5-D1b) that file's
-// `[shell_environment_policy.set]` table, which Codex applies to the commands and
-// hooks it runs; each under a receipt (the shell table has its own, since one
-// receipt holds one table's keys). AQE's own relative AQE_MEMORY_PATH is replaced
-// under the receipt; any other value ak did not write is preserved and reported as
-// a hand fix. The user-level Codex config is never pinned (it serves every project).
-// Files git tracks (`.mcp.json`, the project `.codex/config.toml`) are never pinned
-// (maintainer decision B5-M5): a committed absolute path would point teammates' AQE
-// at a path that does not exist on their machines. A pin ak wrote before the file
-// was tracked is released under its receipt; status shows a hand fix naming the
-// file. `.claude/settings.local.json` (never shared) is always pinned.
-// AQE's database-free mode (`aqe init --no-database`, AQE_MEMORY_BACKEND=memory)
-// still creates `.agentic-qe/config.yaml`, so the pin applies there too; its unified
-// memory ignores AQE_MEMORY_PATH in that mode (dist/kernel/unified-memory.js:140-143),
-// and a disposable 3.14.4 run with the pin created no memory.db (ADR-0062 §1).
-// Upstream: agentic-qe#735 (a subfolder run creates and adopts its own store);
-// once a released AQE resolves the project root from subfolders, the pin can go.
+// B5-D1/B5-D1a/B5-D1b (retired, agentic-qe#735): ak used to pin AQE to the project
+// root. AQE found its store three ways and each fell back to the working
+// directory: the project root (AQE_PROJECT_ROOT, agentic-qe dist/kernel/
+// project-root.js), the memory database (AQE_MEMORY_PATH, dist/learning/
+// embedder-identity-store.js, which never read the root) and the storage folder
+// its token bootstrap created (AQE_STORAGE_PATH, dist/init/token-bootstrap.js). A
+// command, hook or MCP server started in a subfolder therefore made its own
+// `.agentic-qe` there (upstream agentic-qe#735). Released agentic-qe (>=3.14.5)
+// resolves all three from a project-root search (.git or package.json boundary,
+// agentic-qe dist/kernel/project-root.js's findProjectRoot) on its own, so ak no
+// longer writes this pin: `reconcileAqePin`'s callers (sync, setup) now always
+// pass `enabled: false`. The write path below (`enabled: true` or the default
+// heuristic) stays only so a pin an older ak version wrote — absolute paths in the
+// project's `.claude/settings.local.json` env, the `.mcp.json` agentic-qe entry,
+// the project `.codex/config.toml` agentic-qe env and its
+// `[shell_environment_policy.set]` table, each under a receipt — is released back
+// to its receipted before-state on the next sync, setup, or `ak uninstall`
+// (releaseAqePins). Files git tracks (`.mcp.json`, the project `.codex/config.toml`)
+// were never pinned (maintainer decision B5-M5): a committed absolute path would
+// point teammates' AQE at a path that does not exist on their machines.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -167,10 +161,13 @@ function reconcileTarget(target, desired, dryRun) {
 }
 
 /**
- * Write (or, when `enabled` is false, release) the pin in the project that holds `cwd`.
- * Writes only inside a repository whose root has `.agentic-qe`; a release still runs
- * wherever a receipt exists. `ok` is false only when a write failed: a value ak
- * preserves is a hand fix (audit decision 13), not a failed sync.
+ * Retired (agentic-qe#735, fixed in released agentic-qe >=3.14.5): every current
+ * caller passes `enabled: false`, so this only releases a pin an older ak version
+ * wrote, wherever a receipt still exists. Passing `enabled: true` (or omitting it
+ * in a project whose `.agentic-qe` exists) still writes the pin; nothing calls it
+ * that way anymore outside this module's own tests.
+ * `ok` is false only when a write failed: a value ak preserves is a hand fix
+ * (audit decision 13), not a failed sync.
  * @param {any} cfg @param {string} cwd @param {{dryRun?: boolean, enabled?: boolean, tracks?: (root: string, file: string) => boolean}} [options]
  */
 export function reconcileAqePin(cfg, cwd = process.cwd(), { dryRun = false, enabled, tracks = gitTracks } = {}) {

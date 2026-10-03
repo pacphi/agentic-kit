@@ -1,8 +1,11 @@
-// B5-D1/B5-D1a/B5-D1b: AQE is pinned to the project root with three absolute values
-// (AQE_PROJECT_ROOT, AQE_MEMORY_PATH, AQE_STORAGE_PATH) in the three project
-// files, each under a receipt; the project Codex config holds two targets (the
-// agentic-qe env table and [shell_environment_policy.set]). Every test runs in its
-// own temporary project.
+// B5-D1/B5-D1a/B5-D1b (retired, agentic-qe#735): `reconcileAqePin` can still pin the
+// project root with three absolute values (AQE_PROJECT_ROOT, AQE_MEMORY_PATH,
+// AQE_STORAGE_PATH) in the three project files, each under a receipt (the project
+// Codex config holds two targets: the agentic-qe env table and
+// [shell_environment_policy.set]) — exercised directly here so release and
+// migration still work — but every production caller now passes `enabled: false`;
+// see the "ak no longer writes the pin" test below. Every test runs in its own
+// temporary project.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -190,7 +193,7 @@ test('ak keeps at most its newest pin backup per file (review minor 3)', (t) => 
   assert.ok(fs.existsSync(other), 'only the pin\'s own backups are pruned');
 });
 
-test('a foreign shell-table value is preserved and reported as a hand fix naming the file', async (t) => {
+test('a foreign shell-table value is preserved, never rewritten', (t) => {
   const { root, write, cfg } = project(t);
   const source = '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n\n[shell_environment_policy.set]\nAQE_MEMORY_PATH = "/elsewhere/memory.db"\n';
   const codex = write('.codex/config.toml', source);
@@ -200,11 +203,6 @@ test('a foreign shell-table value is preserved and reported as a hand fix naming
   assert.ok(toml.slice(toml.indexOf(SHELL_TABLE)).includes('AQE_MEMORY_PATH = "/elsewhere/memory.db"'), toml);
   const shellFinding = result.findings.find((f) => f.kind === 'shell');
   assert.ok(shellFinding.conflicts.some((c) => c.key === 'AQE_MEMORY_PATH'), JSON.stringify(shellFinding));
-  const rows = await memoryPin.collect({ cwd: root, cfg });
-  const hand = rows.find((r) => r.repair === 'manual' && r.subsystem === 'aqe-pin');
-  assert.ok(hand, JSON.stringify(rows));
-  // Native separators on Windows: the fix names the file as the user's OS writes it.
-  assert.match(hand.fix, /\.codex[\\/]config\.toml \[shell_environment_policy\.set\]/);
 });
 
 test('an inline or dotted shell environment set is preserved as a hand fix, never rewritten', (t) => {
@@ -225,7 +223,7 @@ test('an inline or dotted shell environment set is preserved as a hand fix, neve
   }
 });
 
-test('AQE re-init after an upgrade puts its relative AQE_MEMORY_PATH back: ak takes it back under the receipt (review M4)', async (t) => {
+test('AQE re-init after an upgrade puts its relative AQE_MEMORY_PATH back: ak takes it back under the receipt (review M4)', (t) => {
   const { root, write, cfg } = project(t);
   const { settings, codex } = seedAll(write);
   const original = fs.readFileSync(codex, 'utf8');
@@ -244,8 +242,6 @@ test('AQE re-init after an upgrade puts its relative AQE_MEMORY_PATH back: ak ta
   assert.ok(!toml.includes('".agentic-qe/memory.db"'), toml);
   assert.equal(json(settings).env.AQE_MEMORY_PATH, path.join(root, '.agentic-qe', 'memory.db'));
   assert.deepEqual(json(`${codex}${AQE_PIN_RECEIPT}`).keys.AQE_MEMORY_PATH.before, { present: true, value: '.agentic-qe/memory.db' }, 'the receipt keeps the first before-state');
-  const rows = await memoryPin.collect({ cwd: root, cfg });
-  assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'manual'), JSON.stringify(rows));
   // Released right after such a re-init, the file is AQE's again with no receipt left.
   fs.writeFileSync(codex, fs.readFileSync(codex, 'utf8').replaceAll(`AQE_MEMORY_PATH = ${absolute}`, 'AQE_MEMORY_PATH = ".agentic-qe/memory.db"'));
   const released = reconcileAqePin(cfg, root, { enabled: false });
@@ -289,55 +285,46 @@ test('ak uninstall releases the pin in every recorded project, from any folder',
   assert.deepEqual(cfg.integrations.ownership.aqePin.projects, {});
 });
 
-test('any other different value is preserved and reported as a hand fix naming the file', async (t) => {
+test('a different pre-existing value is preserved, not overwritten (decision 13)', (t) => {
   const { root, write, cfg } = project(t);
   const settings = write('.claude/settings.local.json', { env: { AQE_MEMORY_PATH: '/elsewhere/memory.db' } });
   const before = fs.readFileSync(settings, 'utf8');
-  // Before the first sync the same file also has keys to write: both rows show.
-  const pending = await memoryPin.collect({ cwd: root, cfg });
-  assert.ok(pending.some((r) => r.repair === 'sync' && r.subsystem === 'aqe-pin'), JSON.stringify(pending));
-  const early = pending.find((r) => r.repair === 'manual' && r.subsystem === 'aqe-pin');
-  assert.ok(early, JSON.stringify(pending));
-  assert.match(early.fix, /settings\.local\.json/);
   const result = reconcileAqePin(cfg, root);
   assert.equal(result.ok, true, 'a preserved value is a hand fix, not a failed sync (decision 13)');
   assert.equal(json(settings).env.AQE_MEMORY_PATH, '/elsewhere/memory.db');
   assert.notEqual(fs.readFileSync(settings, 'utf8'), before, 'the other two keys are still written');
-  const rows = await memoryPin.collect({ cwd: root, cfg });
-  const hand = rows.find((r) => r.repair === 'manual' && /AQE/.test(r.message));
-  assert.ok(hand, JSON.stringify(rows));
-  assert.match(hand.fix, /settings\.local\.json/);
 });
 
-test('a pin naming another root warns in the memory-pin row: re-run ak sync in this checkout', async (t) => {
+// agentic-qe#735: released agentic-qe (>=3.14.5) resolves AQE_PROJECT_ROOT, the
+// memory database and the storage folder from a subfolder on its own (dist/kernel
+// /project-root.js's findProjectRoot, read by dist/learning/embedder-identity-store.js
+// and dist/init/token-bootstrap.js), so ak's callers (sync, setup, status) now pass
+// `enabled: false`: the pin is never written going forward, only released where an
+// older ak version left one.
+test('ak no longer writes the pin: a project with .agentic-qe gets nothing new, and a receipted pin from before the fix is released', (t) => {
   const { root, write, cfg } = project(t);
-  const other = '/Users/someone/other-checkout';
-  write('.claude/settings.local.json', { env: {
-    AQE_PROJECT_ROOT: other, AQE_MEMORY_PATH: `${other}/.agentic-qe/memory.db`, AQE_STORAGE_PATH: `${other}/.agentic-qe`,
-  } });
-  const rows = await memoryPin.collect({ cwd: path.join(root), cfg });
-  const foreign = rows.find((r) => r.message.includes(other));
-  assert.ok(foreign, JSON.stringify(rows));
-  assert.equal(foreign.level, 'warn');
-  assert.equal(foreign.repair, 'manual');
-  assert.match(foreign.fix, /re-run ak sync in this checkout/);
-  assert.match(foreign.fix, /settings\.local\.json/);
+  const { settings, mcp, codex } = seedAll(write);
+  const before = [settings, mcp, codex].map((f) => fs.readFileSync(f, 'utf8'));
+  const first = reconcileAqePin(cfg, root, { enabled: false });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.changed, false);
+  assert.equal(first.active, false);
+  assert.deepEqual([settings, mcp, codex].map((f) => fs.readFileSync(f, 'utf8')), before);
+  reconcileAqePin(cfg, root);
+  assert.notDeepEqual([settings, mcp, codex].map((f) => fs.readFileSync(f, 'utf8')), before);
+  const released = reconcileAqePin(cfg, root, { enabled: false });
+  assert.equal(released.ok, true, JSON.stringify(released));
+  assert.deepEqual([settings, mcp, codex].map((f) => fs.readFileSync(f, 'utf8')), before);
+  for (const file of [settings, mcp, codex]) assert.equal(fs.existsSync(`${file}${AQE_PIN_RECEIPT}`), false);
 });
 
-test('a missing pin is a sync repair in the memory-pin row, read from the repository root', async (t) => {
+test('status reports no aqe-pin rows once the pin is dropped, even with a stale receipted pin present', async (t) => {
   const { root, write, cfg } = project(t);
   seedAll(write);
-  const sub = path.join(root, 'sub');
-  fs.mkdirSync(sub);
-  const rows = await memoryPin.collect({ cwd: sub, cfg });
-  const missing = rows.find((r) => r.subsystem === 'aqe-pin');
-  assert.ok(missing, JSON.stringify(rows));
-  assert.equal(missing.level, 'warn');
-  assert.equal(missing.repair, 'sync');
-  assert.match(missing.message, /subfolder/);
-  reconcileAqePin(cfg, sub);
-  const after = await memoryPin.collect({ cwd: sub, cfg });
-  assert.ok(!after.some((r) => r.subsystem === 'aqe-pin' && r.level === 'warn'), JSON.stringify(after));
+  reconcileAqePin(cfg, root);
+  const rows = await memoryPin.collect({ cwd: root, cfg: { ...cfg, aqe: true } });
+  const pinAwareRows = rows.filter((r) => r.subsystem === 'aqe-pin');
+  assert.deepEqual(pinAwareRows, [], JSON.stringify(rows));
 });
 
 test('outside a repository, or without .agentic-qe, nothing is written', (t) => {
@@ -393,7 +380,7 @@ function git(root, args) {
 }
 const haveGit = spawnSync('git', ['--version'], { stdio: 'ignore', env: { PATH: process.env.PATH } }).status === 0;
 
-test('git-tracked .mcp.json and .codex/config.toml are skipped and shown as a hand fix; settings.local.json is pinned', { skip: !haveGit }, async (t) => {
+test('git-tracked .mcp.json and .codex/config.toml are skipped; settings.local.json is pinned', { skip: !haveGit }, (t) => {
   const { root, write, cfg } = project(t);
   fs.rmSync(path.join(root, '.git'), { recursive: true });
   git(root, ['init', '-q']);
@@ -407,16 +394,9 @@ test('git-tracked .mcp.json and .codex/config.toml are skipped and shown as a ha
   assert.deepEqual(json(settings).env, { KEEP: 'x', ...pinOf(root) }, 'settings.local.json is always pinned');
   const tracked = result.findings.filter((f) => f.status === 'tracked').map((f) => path.relative(root, f.file).split(path.sep).join('/'));
   assert.deepEqual([...new Set(tracked)].sort(), ['.codex/config.toml', '.mcp.json']);
-  const rows = await memoryPin.collect({ cwd: root, cfg });
-  const hand = rows.find((r) => r.subsystem === 'aqe-pin' && r.repair === 'manual' && /tracked/.test(r.message));
-  assert.ok(hand, JSON.stringify(rows));
-  assert.match(hand.message, /\.mcp\.json/);
-  assert.match(hand.message, /\.codex[\\/]config\.toml/);
-  assert.match(`${hand.message} ${hand.fix}`, /does not exist on (their|teammates')/);
-  assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'sync'), JSON.stringify(rows));
 });
 
-test('a pin ak wrote before the file was tracked is released under its receipt', { skip: !haveGit }, async (t) => {
+test('a pin ak wrote before the file was tracked is released under its receipt', { skip: !haveGit }, (t) => {
   const { root, write, cfg } = project(t);
   fs.rmSync(path.join(root, '.git'), { recursive: true });
   git(root, ['init', '-q']);
@@ -425,10 +405,6 @@ test('a pin ak wrote before the file was tracked is released under its receipt',
   reconcileAqePin(cfg, root);
   assert.ok(fs.readFileSync(mcp, 'utf8').includes('AQE_PROJECT_ROOT'), 'untracked in a repository: pinned as before');
   git(root, ['add', '--', '.mcp.json']);
-  // Before the release, status shows the tracked hand fix, never a "not pinned" sync row.
-  const rows = await memoryPin.collect({ cwd: root, cfg });
-  assert.ok(rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'manual' && /tracked/.test(r.message)), JSON.stringify(rows));
-  assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'sync' && /\.mcp\.json/.test(r.message)), JSON.stringify(rows));
   const result = reconcileAqePin(cfg, root);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(json(mcp), JSON.parse(original));
