@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
+- **Updated:** 2026-10-03 — AQE 3.14.5 fixed [agentic-qe#735](https://github.com/proffesor-for-testing/agentic-qe/issues/735) (`findProjectRoot()` now walks up to a `.git` or `package.json` boundary), so ak no longer writes the root pin described in §1: `ak sync` and `ak setup` write nothing new and release a pin an older ak wrote, the write and release mechanics stay so receipted pins keep releasing, and the `aqe-pin` status rows are retired. §1 and the rows that follow describe ak before this change.
 - **Updated:** 2026-09-30 — [private released 3.14.6 real-MCP lock proof](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) preserves patterns.rvf/sidecar bytes and confirms packed-kit busy startup on macOS. Full shutdown conformance fails on omitted shared-adapter cleanup; store merge, installed-target convergence and Windows remain unproved by this receipt
 - **Updated:** 2026-09-27 — adversarial review fixes: no pin in files git tracks (B5-M5), AQE's
   re-init value taken back, clean release; holder checks that time out refuse; nested repositories
