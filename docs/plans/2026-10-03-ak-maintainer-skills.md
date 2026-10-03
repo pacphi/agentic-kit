@@ -332,6 +332,10 @@ test('each skill has matching frontmatter, a trigger description and a bounded s
     assert.ok(head, `${name}: frontmatter must be name then description`);
     assert.equal(head[1], name);
     assert.ok(head[2].length >= 40, `${name}: description says what it does and when to use it`);
+    // A plain YAML scalar ends at " #" (a comment) and cannot hold ": ", so a host's YAML
+    // parser would truncate or reject the description.
+    assert.doesNotMatch(head[2], / #|: /, `${name}: description must be a valid plain YAML scalar`);
+    assert.doesNotMatch(head[2], /^["'>|\[{&*!%@`]/, `${name}: description must not start with a YAML indicator`);
     for (const trigger of CONTRACTS[name].triggers) assert.match(head[2], trigger, `${name}: description trigger`);
     assert.ok(text.split('\n').length < 500, `${name}: under 500 lines`);
   }
@@ -479,7 +483,7 @@ Run `git status --short` first and confirm nothing generated is staged.
 
 ```js
   'ak-ship': {
-    triggers: [/ship #N/i, /squash-merge/i],
+    triggers: [/"ship" with a PR number/i, /squash-merge/i],
     gates: [/only the (pull requests|PRs) the maintainer named/i, /one (removal|deletion) per call/i,
       /ask which PR/i, /never merge/i, /minimumReleaseAge/],
   },
@@ -492,7 +496,7 @@ Run: `node scripts/run-tests.mjs focus tests/kit/ak-skills.test.mjs`. Expected: 
 ````markdown
 ---
 name: ak-ship
-description: Take an open agentic-kit pull request from "CI running" to a clean main - watch CI, fix red jobs, squash-merge, delete the backing branch and worktree, pull main, list stale branches. Use when the maintainer says "ship #N", "squash-merge it", "do the merge dance", or "get PR #N progressed".
+description: Take an open agentic-kit pull request from "CI running" to a clean main - watch CI, fix red jobs, squash-merge, delete the backing branch and worktree, pull main, list stale branches. Use when the maintainer says "ship" with a PR number, "squash-merge it", "do the merge dance", or "get that PR progressed".
 ---
 
 # Ship a pull request
@@ -578,7 +582,8 @@ Each task repeats Task 3's five steps: add the contract (red), write the skill i
 #### Task 5: `ak-upstream-file`
 
 - **Read first:** `docs/upstream-watch.md`, `.claude/skills/ak-upstream-status/SKILL.md`, the memory note "Upstream issue standard".
-- **Contract:** triggers `/file upstream/i`, `/upstream issue/i`; gates `/never post .*without/i`, `/redact/i`, `/search .*existing/i`, `/\bpost\b/` (the maintainer's one-word approval).
+- **Contract:** triggers `/file upstream/i`, `/upstream issue/i`; gates `/never post .*without/i`, `/redact/i`, `/search .*existing/i`, `/maintainer says .?post/i` (the one-word approval).
+- **YAML rule for every skill description:** no space followed by a hash and no colon followed by a space inside it (the contract test enforces this).
 - **Steps to cover:** search the upstream repository for an existing thread (`gh search issues`, `gh issue list --repo`) and supplement an open one; reproduce the failure and keep the repro script; draft with problem, system info, repro, proposed fixes, impact for the upstream's users, friendly tone; strip local paths, emails and tokens; show the draft; post only after the maintainer says `post`; add the new thread to the upstream registry through `scripts/upstream-watch.mjs` guidance in `ak-upstream-status`.
 
 #### Task 6: `ak-verify`
