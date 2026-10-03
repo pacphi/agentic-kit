@@ -1,6 +1,7 @@
 # ADR-0008 — Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md
 
-- **Status:** Implemented
+- **Status:** Implemented; user targets and machine retirement superseded by [ADR-0064](0064-project-scoped-management.md)
+- **Updated:** 2026-10-03 — user targets and machine retirement superseded by [ADR-0064](0064-project-scoped-management.md). "Personal facts are never committed" and the preservation of foreign guidance still apply. Not yet implemented, so the text below describes current behaviour.
 - **Date:** 2026-07-24
 - **Updated:** 2026-09-26 — `ak status` and the drift nudge read guidance drift from the
   writer's dry run (`reconcileGuidance` with sync's context), so detectors see the same kit.json

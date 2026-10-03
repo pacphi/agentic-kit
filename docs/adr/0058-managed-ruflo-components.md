@@ -1,6 +1,7 @@
 # ADR-0058 — Managed ruflo components
 
-- **Status:** Accepted (implementation in progress — see Implementation status)
+- **Status:** Accepted (implementation in progress — see Implementation status); §3, §4 and §6 superseded by [ADR-0064](0064-project-scoped-management.md)
+- **Updated:** 2026-10-03 — §3 (user env), §4 (global typesafe install) and §6 (funnel disable) superseded by [ADR-0064](0064-project-scoped-management.md). The catalogue (§1), states (§2) and MCP governance (§5) stand. Not yet implemented, so the text below describes current behaviour.
 - **Date:** 2026-09-23
 - **Updated:** 2026-09-23 — accepted after maintainer review; implementation plan at
   [2026-09-23-superpowers-plan-managed-ruflo-components.md](../archive/2026-09-23-superpowers-plan-managed-ruflo-components.md)
