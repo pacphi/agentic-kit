@@ -1,7 +1,8 @@
 # ADR-0017 — OpenCode as a managed, observable host through native surfaces
 
-- **Status:** Accepted; compatibility references amended by
+- **Status:** Accepted; user config, plugins, agents, skills, approvals and guidance target superseded by [ADR-0064](0064-project-scoped-management.md); compatibility references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
+- **Updated:** 2026-10-03 — user config, plugins, agents, skills, approvals and the guidance target superseded by [ADR-0064](0064-project-scoped-management.md). OpenCode stays a managed, observable host. Not yet implemented, so the text below describes current behaviour.
 - **Date:** 2026-07-28
 - **Updated:** 2026-09-27 — Claude and Codex now use `ak x ruflo-mcp`; OpenCode's fallback is unchanged.
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211

@@ -1,17 +1,16 @@
 minimumReleaseAgeExclude:
-  - js-yaml@5.2.2
   - brace-expansion@5.0.9
 # pnpm settings (pnpm ≥11 reads overrides from here, not package.json).
-# js-yaml: markdownlint-cli2@0.23.1 pins 5.2.1 exactly, which carries
-# GHSA-pm4m-ph32-ghv5 (flow-collection DoS, patched in 5.2.2). Drop this
-# override once markdownlint-cli2 ships a bumped js-yaml.
+# js-yaml: markdownlint-cli pins ~5.2.1, which carries GHSA-pm4m-ph32-ghv5 (flow-collection DoS)
+# and GHSA-r3ph-w7gj-g6xm (merge-key CPU use), both patched in 5.4.1. Drop this override once
+# markdownlint-cli ships a bumped js-yaml.
 overrides:
-  'js-yaml@<5.2.2': 5.2.2
+  'js-yaml@<5.4.1': '>=5.4.1'
   # brace-expansion <5.0.9 carries GHSA-rgw5-rvv9-x895 (DoS through
   # unbounded intermediate arrays). It reaches us only via eslint ->
   # minimatch. Drop once eslint ships a bumped minimatch.
   'brace-expansion@>=4.0.0 <5.0.9': '>=5.0.9'
   # smol-toml <=1.7.0 carries GHSA-7w5x-hrqm-74c2 (malformed-input DoS)
-  # through markdownlint-cli2. Retain the compatible patched 1.7 line until
-  # markdownlint-cli2 updates its direct dependency.
+  # through markdownlint-cli. Retain the compatible patched 1.7 line until
+  # markdownlint-cli updates its direct dependency.
   'smol-toml@<=1.7.0': 1.7.2

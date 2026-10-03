@@ -1,6 +1,7 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
 - **Status:** Implemented
+- **Updated:** 2026-10-03 — amended by [ADR-0064](0064-project-scoped-management.md): footprint measures the cache and the places ak manages, not user-level installs. Not yet implemented, so the text below describes current behaviour.
 - **Updated:** 2026-09-29 — §5 deep measurement now starts with `POST /api/refresh` at
   `machine` strength; GET routes are passive. The old GET-started scan rationale is withdrawn
   because a read request must not start measurement work. See

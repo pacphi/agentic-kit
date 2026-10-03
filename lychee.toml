@@ -27,4 +27,11 @@ exclude = [
   "^https://www\\.npmjs\\.com",  # npm package pages 403 bots/CI
   "^https://doi\\.org",  # Crossref DOI proxy 403s bot UAs; resolves fine for browsers
   "^https://openai\\.com",  # OpenAI marketing/brand pages 403 bot UAs (Cloudflare); resolves fine for browsers
+  "^https://www\\.investing\\.com",  # news site 403s bot UAs; cited in a dated audit
+  # Frozen evidence in docs/archive cites targets that are private, removed or expire; the
+  # archived text is a dated record and is not rewritten.
+  "^https://github\\.com/pacphi/retort/blob/main/versions-blog\\.md$",  # file no longer on main
+  "^https://github\\.com/pacphi/ruflo-machine-ref/issues/8$",  # private or removed repo
+  "^https://alphasignal\\.ai/news/openai-s-gpt-6-1-sol-",  # article removed
+  "^https://github\\.com/pacphi/agentic-kit/actions/runs/[0-9]+/artifacts/",  # CI artifacts expire
 ]
