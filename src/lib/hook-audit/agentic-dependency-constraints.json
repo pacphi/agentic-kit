@@ -2685,12 +2685,13 @@
       "mapping": "mapped",
       "kitImpact": {"refs": ["Branch 5: ak setup names the Codex hooks and skills only when they exist, otherwise warns", "#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["src/lib/aqe-guidance.mjs", "tests/live/aqe-codex-guidance-conformance.test.mjs"]},
       "adjustment": "Once a released agentic-qe installs its Codex hooks and skills through the aqe command, ak setup's warning stops on its own (it checks the files); run the #655 conformance strictly toward the constraint's sunset.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 765; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 765; no release contains it yet" },
+        { "date": "2026-10-01", "event": "dispatched", "note": "fix first released in 3.14.5; draft PR on upstream/proffesor-for-testing-agentic-qe-755 stops citing agentic-qe#755 in ak setup's Codex-install warning at or above that version (src/lib/aqe-guidance.mjs aqeInitReport); the #655 conformance still runs non-strict pending agentic-qe#756 and #758" }
       ]
     },
     {
