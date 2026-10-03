@@ -28,6 +28,7 @@ test-*.log
 # upstream-status maintainer skill, tracked for both hosts.
 .agentic-qe/
 .ruvnet-brain/
+.harness/
 **/.claude/*
 !/.claude/skills/
 /.claude/skills/*
