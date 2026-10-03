@@ -3,6 +3,7 @@
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human usability, screen-reader, and cross-platform evaluation gates deferred to v5;
   the former Refresh evidence and Re-measure machine controls are superseded by ADR-0063
+- **Updated:** 2026-10-03 — amended by [ADR-0064](0064-project-scoped-management.md): Maintenance writes only in opted-in projects. Not yet implemented, so the text below describes current behaviour.
 - **Updated:** 2026-09-29 — [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) replaces the
   two dashboard scan controls with one Refresh control; its three visible choices start the
   shared staged POST operation. D-15 moves the human usability, screen-reader, and

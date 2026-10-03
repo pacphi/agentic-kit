@@ -1,6 +1,7 @@
 # ADR-0015 — Manage Codex's native user-wide status line without claiming rich-renderer parity
 
-- **Status:** Accepted
+- **Status:** Accepted; user-wide ownership superseded by [ADR-0064](0064-project-scoped-management.md)
+- **Updated:** 2026-10-03 — user-wide ownership superseded by [ADR-0064](0064-project-scoped-management.md); ownership moves to receipts and the Codex exception register. The capability limits stand. Not yet implemented, so the text below describes current behaviour.
 - **Date:** 2026-07-28
 - **Updated:** 2026-08-14
 - **Update note:** The boolean `statuslineSupported` consumer this ADR's context

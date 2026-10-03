@@ -407,7 +407,7 @@ All are finished work. Sizes are line counts.
 | `docs/installation.md` | Its package-scope versus operational-scope premise, and every global-install section | Rewritten at beta.1 |
 | `docs/setup.md` | The whole document | Replaced by an `init` guide at beta.1 |
 | `docs/upgrading.md` | Gains "Upgrading from the user-level versions"; host, self-update, daemon and deja-vu entries | beta.1; historical entries kept |
-| `docs/deja-vu.md` | The whole document | Archived at P0 |
+| `docs/archive/2026-10-03-guide-deja-vu.md` | The whole document | Archived at P0 |
 | `docs/codex-statusline.md` | The whole document | Rewritten at beta.1 |
 | `docs/managed-tools.md`, `docs/host-support.md` | Invariants, companion lifecycle, install modes, external adapters | beta.1 and beta.2 |
 | `docs/providers.md`, `docs/hooks.md`, `docs/maintenance.md`, `docs/dashboard.md` | `ak host` and `heal hooks` references, discovery intent, what can act, local state, host badges | beta.3 and beta.4 |

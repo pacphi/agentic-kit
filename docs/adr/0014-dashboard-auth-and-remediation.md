@@ -1,6 +1,7 @@
 # ADR-0014 — Dashboard auth token, plus a security/quality remediation pass
 
 - **Status:** Implemented
+- **Updated:** 2026-10-03 — amended by [ADR-0064](0064-project-scoped-management.md): the dashboard gains explicit Refresh (project state and cache) and Forget (project index only) writes. Every other route keeps the non-GET rejection. Not yet implemented, so the text below describes current behaviour.
 - **Date:** 2026-07-28
 - **Updated:** 2026-09-28 — CI runs the full test matrix but collects coverage on Ubuntu/Node 24; local coverage remains the default
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211

@@ -19,16 +19,16 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0005](0005-dashboard-in-page-routing-reveal.md) | Dashboard surfaces routing via in-page reveal | Implemented |
 | [0006](0006-primary-host-and-ambidextrous-mirroring.md) | Primary host & ambidextrous mirroring (which host leads) | Amended by 0020 |
 | [0007](0007-maintainer-admin-local-telemetry.md) | Maintainer admin: a loopback telemetry page with deliberate egress | Accepted |
-| [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Implemented |
+| [0008](0008-guidance-target-scope-split.md) | Machine-scoped guidance blocks land in machine files, not a repo's AGENTS.md | Implemented; user targets and machine retirement superseded by 0064 |
 | [0009](0009-usage-scorecard-local-transcript-analytics.md) | Usage scorecard: local transcript analytics with graded evidence | Implemented |
 | [0010](0010-provider-mediated-quota-reads.md) | Provider-mediated quota reads (the only honest denominators) | Accepted |
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
 | [0012](0012-observability.md) | Evidence-graded session observability | Implemented |
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
-| [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Implemented |
-| [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
+| [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Implemented; Refresh and Forget writes amended by 0064 |
+| [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted; user-wide ownership superseded by 0064 |
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted; compatibility amended; closed-registry clause superseded by 0029 |
-| [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted; compatibility amended |
+| [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted; compatibility amended; user-level wiring superseded by 0064 |
 | [0018](0018-generalized-host-worker-execution.md) | Generalized host-worker execution; `ak run` canonical | Implemented; compatibility amended |
 | [0019](0019-escalation-in-ak-run.md) | Bounded per-worker escalation in `ak run` | Accepted; historical context closed |
 | [0020](0020-ga-stable-surfaces.md) | One stable GA surface per capability | Implemented |
@@ -36,16 +36,16 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0022](0022-metaharness-as-optional-assurance-companion.md) | MetaHarness as an optional assurance companion | Proposed |
 | [0023](0023-fail-closed-operations-and-explicit-degradation.md) | Fail-closed mutations and explicit degraded operation evidence | Implemented |
 | [0024](0024-project-intelligence-telemetry.md) | Project intelligence: live learning telemetry from ruflo/agentic-qe's own state | Implemented |
-| [0025](0025-machine-footprint-metrics.md) | Machine footprint: infrastructure metrics for install, runtime, storage, and catalog | Implemented |
+| [0025](0025-machine-footprint-metrics.md) | Machine footprint: infrastructure metrics for install, runtime, storage, and catalog | Implemented; amended by 0064 |
 | [0026](0026-about-component-directory.md) | About: a component directory that explains everything ak installs | Implemented |
-| [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
+| [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented; amended by 0064 |
 | [0028](0028-local-openai-compatible-providers.md) | One generic local OpenAI-compatible provider, not a vendor enumeration | Accepted |
 | [0029](0029-host-adapter-extension-point.md) | External host adapters: declarative manifest, subprocess hooks | Accepted (experimental contract) |
 | [0031](0031-capability-graduation-and-upstream-requests.md) | Capability graduation: earned parity for external adapters, and the upstream request path | Accepted (governance; experimental machinery implemented, consumption/soak gaps remain) |
 | [0032](0032-model-lifecycle-intelligence.md) | Model lifecycle intelligence from provenance-aware local evidence | Implemented |
 | [0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md) | Retire Codex MCP; bound reciprocal QE-Court participant transport | Implemented; handoff transport amended by 0034 |
 | [0034](0034-schema-native-handoffs-and-hermetic-seats.md) | Schema-native worker handoffs and hermetic qe-court seats | Implemented |
-| [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Implemented for issue #114 |
+| [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Retired (implemented for issue #114; removal ships in 4.0.0-beta.1 under 0064) |
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 | [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
 | [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted; Claude, Codex and OpenCode counting corrected 2026-09-19 |
@@ -58,18 +58,19 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
 | [0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md) | Scan-local observation reuse and nonblocking deep scans | Implemented |
 | [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot and separate Discovery continuation implemented |
-| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; two dashboard controls superseded by 0063; human usability, screen-reader and cross-platform gates deferred to v5 |
+| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; two dashboard controls superseded by 0063; human usability, screen-reader and cross-platform gates deferred to v5; Maintenance write gate amended by 0064 |
 | [0050](0050-dashboard-project-identity-and-context-reporting.md) | Dashboard project identity and context reporting | Implemented |
 | [0051](0051-supported-peer-delegation-and-host-realignment.md) | Supported peer delegation and scoped host realignment | Accepted; implemented locally |
 | [0052](0052-codex-usage-attribution.md) | Codex usage attribution: own usage, imports, segments, streaming | Accepted |
 | [0053](0053-host-setup-evidence-and-usage-diagnostics.md) | Qualified host health and separate usage diagnostics | Implemented |
 | [0054](0054-fleet-evidence-export.md) | Vendor-neutral fleet evidence export | Implemented |
 | [0055](0055-aqe-embedding-lifecycle.md) | AQE embedding lifecycle and qualified readiness | Implemented |
-| [0058](0058-managed-ruflo-components.md) | Managed ruflo components | Accepted (implementation in progress — see Implementation status) |
+| [0058](0058-managed-ruflo-components.md) | Managed ruflo components | Accepted (implementation in progress — see Implementation status); §3, §4 and §6 superseded by 0064 |
 | [0060](0060-session-surface-initiator-and-product-names.md) | Session surface, initiator and official product names | Accepted |
 | [0061](0061-brain-reclaim-stuck-remediation.md) | RuvNet Brain "unresolved rollback state" remediation | Accepted |
 | [0062](0062-aqe-project-store-integrity.md) | AQE project store integrity | Accepted |
 | [0063](0063-evidence-store-and-refresh-vocabulary.md) | One evidence store and the refresh vocabulary | Accepted; CLI and dashboard refresh operation delivered |
+| [0064](0064-project-scoped-management.md) | Project-scoped management | Accepted; not yet implemented (starts in 4.0.0-beta.1) |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -390,7 +391,7 @@ never become a silent hash fallback.
 
 ## ADR-0058 — Managed ruflo components
 
-[ADR-0058](0058-managed-ruflo-components.md) (Accepted; implementation in progress) has ak turn on and
+[ADR-0058](0058-managed-ruflo-components.md) (Accepted; implementation in progress; §3, §4 and §6 superseded by [ADR-0064](0064-project-scoped-management.md)) has ak turn on and
 report a catalogue of opt-in ruflo components: the typesafe and MiniLM agent pickers, MCP tool
 governance, the learning profile, turn-credit, the #2887 memory fix, and the funnel (off). Every
 state is shown with its meaning; settings reach Claude Code, Codex and OpenCode through one

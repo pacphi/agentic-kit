@@ -1,6 +1,7 @@
 # ADR-0027 — One project census, four scopes, every count explains itself
 
 - **Status:** Implemented
+- **Updated:** 2026-10-03 — amended by [ADR-0064](0064-project-scoped-management.md): the census gains the opted-in scope and new place kinds. Not yet implemented, so the text below describes current behaviour.
 - **Date:** 2026-08-07
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers

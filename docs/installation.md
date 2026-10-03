@@ -312,7 +312,7 @@ The ordinary `ak uninstall --purge` scope does not remove the deja-vu package or
 deja-vu data. Those require the independent `--remove-deja-vu` and
 `--purge-deja-vu-data` flags. The data flag removes only the validated derived index,
 never Claude, Codex, OpenCode, or another harness's source histories. See the
-[deja-vu removal matrix](deja-vu.md#disable-and-remove-it).
+[deja-vu removal matrix](archive/2026-10-03-guide-deja-vu.md#disable-and-remove-it).
 
 ## Recommended choices
 
