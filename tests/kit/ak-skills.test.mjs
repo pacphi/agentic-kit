@@ -23,6 +23,10 @@ const CONTRACTS = {
       /explicit yes before (any|each) deletion/i, /status --porcelain/, /never `--force`/i,
       /worktree this session created/i, /every merge needs a yes/i],
   },
+  'ak-release': {
+    triggers: [/release next/i, /semantic (release|version)/i],
+    gates: [/separate approval/i, /never .*(--force|--no-verify)/i, /ask whether .*(alpha|beta)/i, /npm i -g/],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
