@@ -2665,13 +2665,14 @@
       "mapping": "mapped",
       "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": ["src/commands/status/sections/aqe.mjs", "src/lib/live-checks.mjs", "src/lib/aqe-embedding-lifecycle.mjs"]},
       "adjustment": "Once a released agentic-qe binds the pattern index with a configured embedder, ak may report semantic pattern search as working after a live check.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact (issuecomment-5863212811)" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 768; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 768; no release contains it yet" },
+        { "date": "2026-10-01", "event": "dispatched", "note": "branch upstream/proffesor-for-testing-agentic-qe-754: 3.14.5 released; added an opt-in verifyPatternIndex live-check round trip through AQE's real RVF pattern store, gated on an actual RvfPatternStore binding (never the legacy HNSW fallback) — see PR" }
       ]
     },
     {

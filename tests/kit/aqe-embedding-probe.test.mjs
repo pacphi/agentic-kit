@@ -166,3 +166,130 @@ test('local-only control uses the same ESM conditional export as AQE runtime', a
   fs.writeFileSync(path.join(dir,'cjs.cjs'),'exports.env = {allowRemoteModels:true};');
   assert.equal((await probeAqeEmbeddings({packageRoot,env:{},backend:'in-process'})).status,'passed');
 });
+
+// ── agentic-qe#754: a live round trip through AQE's real pattern store, only
+// when explicitly requested, only ever on top of an already-verified embedder,
+// and only an RvfPatternStore (never the legacy in-memory HNSW fallback) counts.
+
+function patternStoreFixture(packageRoot, body) {
+  fs.writeFileSync(path.join(packageRoot, 'dist/learning/pattern-store.js'), body);
+}
+
+const rvfBound = `
+  class RvfPatternStore {
+    async initialize() {}
+    async create(options) { return { success: true, value: { id: 'probe-pattern', ...options } }; }
+    async search(query, options) { return { success: true,
+      value: [{ pattern: { id: 'probe-pattern' }, matchType: 'vector', score: 0.9, similarity: 0.9 }] }; }
+    getAdapter() { return {}; }
+    async dispose() {}
+  }
+  export function createPatternStore() { return new RvfPatternStore(); }
+`;
+
+test('verifyPatternIndex is off by default: no pattern-store import, no field on the result', async t => {
+  const packageRoot = fixture(t, good);
+  patternStoreFixture(packageRoot, 'throw Error("must not import pattern-store.js")');
+  const result = await probeAqeEmbeddings({ packageRoot, env });
+  assert.equal(result.status, 'passed');
+  assert.equal('patternIndex' in result, false);
+});
+
+test('a bound RVF pattern index round-trips a stored pattern through vector search', async t => {
+  const packageRoot = fixture(t, good);
+  patternStoreFixture(packageRoot, rvfBound);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.patternIndex, { status: 'passed' });
+});
+
+test('the legacy in-memory HNSW fallback is never read as a bound pattern index', async t => {
+  const packageRoot = fixture(t, good);
+  patternStoreFixture(packageRoot, `
+    class PatternStore {
+      async initialize() {}
+      async create() { throw Error('must not store through the legacy fallback'); }
+      async search() { throw Error('must not search through the legacy fallback'); }
+      async dispose() {}
+    }
+    export function createPatternStore() { return new PatternStore(); }
+  `);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.deepEqual(result.patternIndex, { status: 'failed', reason: 'rvf-pattern-index-not-bound' });
+});
+
+test('an RvfPatternStore without a live adapter is not a bound index', async t => {
+  const packageRoot = fixture(t, good);
+  patternStoreFixture(packageRoot, `
+    class RvfPatternStore {
+      async initialize() {}
+      getAdapter() { return null; }
+      async dispose() {}
+    }
+    export function createPatternStore() { return new RvfPatternStore(); }
+  `);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.deepEqual(result.patternIndex, { status: 'failed', reason: 'rvf-pattern-index-not-bound' });
+});
+
+test('a failed store write never claims a bound pattern index', async t => {
+  const packageRoot = fixture(t, good);
+  patternStoreFixture(packageRoot, `
+    class RvfPatternStore {
+      async initialize() {}
+      async create() { return { success: false, error: new Error('write failed') }; }
+      async search() { throw Error('must not search after a failed store'); }
+      getAdapter() { return {}; }
+      async dispose() {}
+    }
+    export function createPatternStore() { return new RvfPatternStore(); }
+  `);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.deepEqual(result.patternIndex, { status: 'failed', reason: 'pattern-store-create-failed' });
+});
+
+test('a failed search never claims a bound pattern index', async t => {
+  const packageRoot = fixture(t, good);
+  patternStoreFixture(packageRoot, `
+    class RvfPatternStore {
+      async initialize() {}
+      async create(options) { return { success: true, value: { id: 'probe-pattern', ...options } }; }
+      async search() { return { success: false, error: new Error('search failed') }; }
+      getAdapter() { return {}; }
+      async dispose() {}
+    }
+    export function createPatternStore() { return new RvfPatternStore(); }
+  `);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.deepEqual(result.patternIndex, { status: 'failed', reason: 'pattern-store-search-failed' });
+});
+
+test('a search that never returns the stored pattern is not a bound index', async t => {
+  const packageRoot = fixture(t, good);
+  patternStoreFixture(packageRoot, `
+    class RvfPatternStore {
+      async initialize() {}
+      async create(options) { return { success: true, value: { id: 'probe-pattern', ...options } }; }
+      async search() { return { success: true, value: [] }; }
+      getAdapter() { return {}; }
+      async dispose() {}
+    }
+    export function createPatternStore() { return new RvfPatternStore(); }
+  `);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.deepEqual(result.patternIndex, { status: 'failed', reason: 'pattern-not-retrieved' });
+});
+
+test('a missing or broken pattern store module degrades to failed, never throws', async t => {
+  const packageRoot = fixture(t, good);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.deepEqual(result.patternIndex, { status: 'failed', reason: 'pattern-index-probe-failed' });
+});
+
+test('an embedder that fails to verify never attempts the pattern index round trip', async t => {
+  const packageRoot = fixture(t, 'export async function computeBatchEmbeddings(){throw Error("HTTP 404 model not found")}');
+  patternStoreFixture(packageRoot, 'throw Error("must not import pattern-store.js")');
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true });
+  assert.equal(result.status, 'failed');
+  assert.equal('patternIndex' in result, false);
+});

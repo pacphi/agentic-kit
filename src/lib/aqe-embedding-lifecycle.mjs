@@ -94,11 +94,15 @@ export async function prepareAqeEmbedding(cfg, {
       return { ok: false, changed, status: 'failed', detail: `Local embedding setup incomplete. ${coaching}` };
     }
   }
-  const evidence = await probe({ packageRoot, env: resolved.env, backend: resolved.mode });
+  const evidence = await probe({ packageRoot, env: resolved.env, backend: resolved.mode, verifyPatternIndex: true });
   if (evidence.status === 'passed') {
-    return { ok: true, changed, status: 'ok', evidence,
-      // agentic-qe#754: the embedder is proven, not AQE's pattern index binding.
-      detail: 'embedder verified (384 dimensions); AQE pattern index binding and existing corpus compatibility remain separate' };
+    // agentic-qe#754: a passing embedder probe alone never proves AQE's pattern
+    // index binding; only a passing round trip through the real RVF pattern
+    // store (verifyPatternIndex, probed above) does.
+    const binding = evidence.patternIndex?.status === 'passed'
+      ? 'AQE pattern index binding verified (agentic-qe#754); existing corpus compatibility remains separate'
+      : 'AQE pattern index binding and existing corpus compatibility remain separate';
+    return { ok: true, changed, status: 'ok', evidence, detail: `embedder verified (384 dimensions); ${binding}` };
   }
   const coaching = evidence.reason === 'endpoint-unreachable'
     ? await unreachableCoaching(resolved, ollamaInstalled) : AQE_EMBEDDING_COACHING;

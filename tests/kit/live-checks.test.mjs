@@ -868,6 +868,23 @@ test('a passing live embedding request says the embedder is verified, not the pa
   assert.match(out, /✓ embedder verified: live embedding request passed; dimension=384; AQE pattern index binding unverified \(agentic-qe#754\)/);
 });
 
+test('the live check asks the probe to verify the pattern index', async () => {
+  seedHome(offlineKitConfig({ aqeEmbedding: MANAGED_EMBEDDING }));
+  let asked;
+  const probe = async (options) => { asked = options.verifyPatternIndex; return { status: 'passed', dimension: 384 }; };
+  await captureLog(() => live.checkAqeEmbedding({ cwd: PROJECT, corpus: false, probe }));
+  assert.equal(asked, true);
+});
+
+// agentic-qe#754: a verified round trip through the real RVF pattern store,
+// not the version alone, is what lets a live check say the index is bound.
+test('a passing live embedding request with a verified pattern index says so', async () => {
+  seedHome(offlineKitConfig({ aqeEmbedding: MANAGED_EMBEDDING }));
+  const probe = async () => ({ status: 'passed', reason: null, dimension: 384, patternIndex: { status: 'passed' } });
+  const { out } = await captureLog(() => live.checkAqeEmbedding({ cwd: PROJECT, corpus: false, probe }));
+  assert.match(out, /✓ embedder verified: live embedding request passed; dimension=384; AQE pattern index binding verified \(agentic-qe#754\)/);
+});
+
 test.after(() => rmrf(HOME, PROJECT));
 
 // Provider checks run from the project root, whatever folder `ak status` starts

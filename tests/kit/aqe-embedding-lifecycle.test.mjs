@@ -141,6 +141,28 @@ test('a passing probe says the embedder is verified, and names what stays separa
   assert.equal(r.detail, 'embedder verified (384 dimensions); AQE pattern index binding and existing corpus compatibility remain separate');
 });
 
+test('the probe is asked to verify the pattern index', async () => {
+  let asked;
+  const probe = async (options) => { asked = options.verifyPatternIndex; return { status: 'passed', dimension: 384 }; };
+  await prepareAqeEmbedding(local, { probe, request: async () => ({ models: [{ name: 'Xenova/all-MiniLM-L6-v2:latest' }] }) });
+  assert.equal(asked, true);
+});
+
+// agentic-qe#754, once released agentic-qe binds the RVF pattern index: a
+// verified round trip through the real pattern store, not the version alone,
+// is what lets ak say so.
+test('a verified pattern-index round trip replaces the separate-claim caveat', async () => {
+  const probe = async () => ({ status: 'passed', dimension: 384, patternIndex: { status: 'passed' } });
+  const r = await prepareAqeEmbedding(local, { probe, request: async () => ({ models: [{ name: 'Xenova/all-MiniLM-L6-v2:latest' }] }) });
+  assert.equal(r.detail, 'embedder verified (384 dimensions); AQE pattern index binding verified (agentic-qe#754); existing corpus compatibility remains separate');
+});
+
+test('a failed pattern-index round trip keeps the separate-claim caveat', async () => {
+  const probe = async () => ({ status: 'passed', dimension: 384, patternIndex: { status: 'failed', reason: 'rvf-pattern-index-not-bound' } });
+  const r = await prepareAqeEmbedding(local, { probe, request: async () => ({ models: [{ name: 'Xenova/all-MiniLM-L6-v2:latest' }] }) });
+  assert.equal(r.detail, 'embedder verified (384 dimensions); AQE pattern index binding and existing corpus compatibility remain separate');
+});
+
 test('no src/ surface claims AQE pattern search works', () => {
   const offenders = [];
   const walk = (dir) => {
