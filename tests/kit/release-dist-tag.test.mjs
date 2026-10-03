@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { distTag } from '../../scripts/release-dist-tag.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const WORKFLOW = fs.readFileSync(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
 const SCRIPT = new URL('../../scripts/release-dist-tag.mjs', import.meta.url).pathname;
@@ -31,8 +33,9 @@ test('rejects anything that is not a semantic version', () => {
 });
 
 test('the command line prints only the tag', () => {
-  assert.equal(execFileSync(process.execPath, [SCRIPT, '4.0.0-beta.1'], { encoding: 'utf8' }), 'beta\n');
-  assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'nope'], { stdio: 'pipe' }), /not a semantic version/);
+  const env = spawnEnv(tempDir('ak-release-tag-home'));
+  assert.equal(execFileSync(process.execPath, [SCRIPT, '4.0.0-beta.1'], { encoding: 'utf8', env }), 'beta\n');
+  assert.throws(() => execFileSync(process.execPath, [SCRIPT, 'nope'], { stdio: 'pipe', env }), /not a semantic version/);
 });
 
 test('the release workflow takes its tag from the script', () => {
