@@ -4,8 +4,9 @@
 
 ## Status
 
-**Active** (2026-10-03). Waiting for the maintainer to review this plan and choose an execution
-method. Nothing is implemented; the design is approved.
+**Done, pending archive** (2026-10-03). All twelve tasks ran on `feat/ak-maintainer-skills` and the
+shipped `SKILL.md` files, tests and docs are the record. Where a review fixed a skill, the shipped
+text supersedes the example text in Tasks 3 to 10 of this plan.
 
 **Goal:** Track nine `ak-` maintainer skills for Claude and Codex through one prefix convention, with a mirror script and contract tests.
 
@@ -13,7 +14,7 @@ method. Nothing is implemented; the design is approved.
 
 **Tech Stack:** Node.js 22+ ES modules, `node:test`, no new dependencies.
 
-**Spec:** [2026-10-03-ak-maintainer-skills-design.md](2026-10-03-ak-maintainer-skills-design.md)
+**Spec:** [2026-10-03-ak-maintainer-skills-design.md](2026-10-03-design-ak-maintainer-skills.md)
 
 ## Global Constraints
 

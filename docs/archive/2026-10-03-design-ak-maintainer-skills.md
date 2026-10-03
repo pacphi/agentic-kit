@@ -2,9 +2,11 @@
 
 ## Status
 
-**Active** (2026-10-03). The maintainer approved the design in chat on 2026-10-03 and this
-file is waiting for their review. Nothing is implemented. Next step: the implementation plan,
-`docs/plans/2026-10-03-ak-maintainer-skills.md`.
+**Done, pending archive** (2026-10-03). The maintainer approved this design on 2026-10-03 and it
+was implemented on `feat/ak-maintainer-skills` through the implementation plan
+`docs/plans/2026-10-03-ak-maintainer-skills.md`. The shipped skills, tests and docs are the record.
+One decision stays open: which prefix marks skills authored here, because the accepted
+project-scope plan also generates `ak-*` skills.
 
 ## Outcome
 
