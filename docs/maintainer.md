@@ -255,7 +255,8 @@ Rules every skill follows:
 - It never merges, publishes, posts, pushes or deletes without the maintainer's yes on that
   specific action.
 - It removes one thing per call.
-- It never touches a checkout another session uses.
+- It never writes to a checkout another session uses, except `ak-resume`'s one new gitignored
+  handoff file.
 - It never runs `pnpm` in a worktree.
 
 ---

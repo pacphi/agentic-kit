@@ -14,7 +14,8 @@ const HOSTS = ['.claude/skills', '.agents/skills'];
 const CONTRACTS = {
   'ak-upstream-status': {
     triggers: [/upstream status/i, /upstream report/i],
-    gates: [/explicit-user-approval-required/, /never (post|push|merge)/i, /fetchErrors/],
+    gates: [/explicit-user-approval-required/, /never (post|push|merge)/i, /fetchErrors/,
+      /node scripts\/upstream-watch\.mjs report --json/],
   },
   'ak-ship': {
     triggers: [/"ship" with a PR number/i, /squash-merge/i],
@@ -180,6 +181,10 @@ const git = (...args) => spawnSync('git', args, { encoding: 'utf8' }); // spawn-
 const ignored = (file) => git('check-ignore', '-q', '--no-index', file).status === 0;
 const found = fs.readdirSync('.claude/skills').filter((name) => name.startsWith('ak-')).sort();
 const path = (host, name) => `${host}/${name}/SKILL.md`;
+// A repository path a skill cites, minus placeholders. The lookbehind skips a URL's path
+// (platform.claude.com/docs/...), which is not a file in this checkout.
+const CITED_PATH = /(?<![A-Za-z0-9_./:-])((?:scripts|docs|src|tests)\/[A-Za-z0-9_./-]+\.(?:mjs|cjs|md|json))/g;
+const citedPaths = (text) => [...text.matchAll(CITED_PATH)].map((m) => m[1]).filter((file) => !/YYYY|\*/.test(file));
 
 test('every ak- skill folder has a contract and every contract has a skill', () => {
   assert.deepEqual(found, Object.keys(CONTRACTS).sort(),
@@ -213,13 +218,18 @@ test('every script, pnpm script and doc a skill cites exists', () => {
   const scripts = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts;
   for (const name of Object.keys(CONTRACTS)) {
     const text = readText(path(HOSTS[0], name));
-    const cited = [...text.matchAll(/\b((?:scripts|docs)\/[A-Za-z0-9_./-]+\.(?:mjs|md))/g)].map((m) => m[1])
-      .filter((file) => !/YYYY|\*/.test(file));
-    for (const file of cited) assert.ok(fs.existsSync(file), `${name} cites ${file}, which does not exist`);
+    for (const file of citedPaths(text)) assert.ok(fs.existsSync(file), `${name} cites ${file}, which does not exist`);
     for (const m of text.matchAll(/pnpm run ([a-z][a-z0-9:-]*)/g)) {
       assert.ok(m[1] in scripts, `${name} cites pnpm run ${m[1]}, which package.json lacks`);
     }
   }
+});
+
+test('the cited-path check covers src, tests, docs/schemas JSON and .cjs, and skips URLs', () => {
+  const sample = 'Read `src/lib/x.mjs`, `tests/kit/helpers/home-sandbox.mjs`, `docs/schemas/a.schema.json`, '
+    + '`scripts/tool.cjs` and docs/maintainer.md, not platform.claude.com/docs/en/page.md or docs/plans/YYYY-MM-DD-x.md.';
+  assert.deepEqual(citedPaths(sample), ['src/lib/x.mjs', 'tests/kit/helpers/home-sandbox.mjs',
+    'docs/schemas/a.schema.json', 'scripts/tool.cjs', 'docs/maintainer.md']);
 });
 
 test('each skill carries its gate phrases', () => {
@@ -259,6 +269,8 @@ test('only ak- folders are exempt from the generated-file ignores', () => {
     '.claude/skills/upstream-status/SKILL.md', '.claude/skills/akship/SKILL.md', '.claude/skills/ak-ship.md',
     // Generated host folders below the root stay ignored, skill folder included.
     'src/lib/.claude/settings.json', 'claude/.claude/skills/ak-ship/SKILL.md', 'tests/.agents/skills/ak-ship/SKILL.md',
+    // An ak- folder outside skills/ is not a skill.
+    '.claude/ak-ship/SKILL.md', '.agents/ak-ship/SKILL.md',
   ]) {
     assert.equal(ignored(file), true, `${file} must stay ignored`);
   }
@@ -291,6 +303,13 @@ for (const name of ['ak-worktree-sweep', 'ak-ship']) {
 
 // The old texts called `-D` the normal path after a squash merge, ADRs "living plans", and
 // docs/maintainer.md the release's source of truth while its push step is not current practice.
+// ak-resume's handoff file is the one write a skill makes to a checkout another session uses.
+test('docs/maintainer.md states the one write exception', () => {
+  assert.match(readText('docs/maintainer.md'),
+    /never\s+writes\s+to\s+a\s+checkout\s+another\s+session\s+uses,\s+except\s+`ak-resume`'s\s+one\s+new\s+gitignored\s+handoff\s+file/);
+  assert.doesNotMatch(readText('docs/maintainer.md'), /never\s+touches\s+a\s+checkout\s+another\s+session\s+uses/);
+});
+
 test('superseded wording stays out of the skills', () => {
   assert.doesNotMatch(readText(path(HOSTS[0], 'ak-ship')), /always\s+looks\s+unmerged|normal\s+path/);
   assert.doesNotMatch(readText(path(HOSTS[0], 'ak-docs-gate')), /living\s+plans/);
