@@ -2781,15 +2781,16 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["ak setup invokes aqe init and can inherit its repeat-run settings churn"], "files": [] },
+      "kitImpact": { "refs": ["ak setup invokes aqe init and can inherit its repeat-run settings churn"], "files": ["tests/live/aqe-init-settings-conformance.test.mjs"] },
       "adjustment": "Released AQE 3.14.5 still rewrites .claude/settings.json on all three same-option public init runs of an unchanged minimal project; run 2 also creates a backup and changes domain/learning defaults. AGENTS.md and CLAUDE.md remain stable after run 1. PR #783 merged after the 3.14.5 publication; wait for a later released artifact and repeat exact conformance before claiming setup convergence or setting a minimum fixed version.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-29", "event": "filed", "note": "approved exact draft posted; remote title and body match receipt" },
         { "date": "2026-09-29", "event": "registered", "note": "3.14.4 disposable project repro: settings changed on all three runs; guidance hashes and mtimes did not" },
         { "date": "2026-09-29", "event": "closed", "note": "upstream completed via PR #783; merge commit 63d3deb dated 13:05:19 UTC, after npm 3.14.5 publication at 10:08:33 UTC" },
-        { "date": "2026-09-29", "event": "reviewed", "note": "Source-bound released 3.14.5 disposable public init still churns settings on each of three same-option runs, with backup and default changes on run 2. Subsequent release conformance unverified; global 3.14.4 metadata unchanged. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
+        { "date": "2026-09-29", "event": "reviewed", "note": "Source-bound released 3.14.5 disposable public init still churns settings on each of three same-option runs, with backup and default changes on run 2. Subsequent release conformance unverified; global 3.14.4 metadata unchanged. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." },
+        { "date": "2026-10-04", "event": "dispatched", "note": "repeated the exact conformance on released agentic-qe 3.14.6: three same-option disposable `aqe init --auto` runs left .claude/settings.json hash- and mtime-identical, with no backup entry; ak dispatches tests/live/aqe-init-settings-conformance.test.mjs on branch upstream/proffesor-for-testing-agentic-qe-778. Evidence: docs/archive/2026-10-04-aqe-3146-init-settings-conformance-receipt.md. Only the default non-Codex path was probed; setup convergence and a minimum fixed version remain for maintainer review." }
       ]
     },
     {
