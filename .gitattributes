@@ -9,6 +9,8 @@
 # never let a Windows checkout rewrite their line endings.
 tests/fixtures/ruflo-components/** -text
 # Host skill loaders (Claude Code, Codex) parse these skills' YAML frontmatter
-# at runtime: a Windows checkout must hand them the same LF text CI tests.
-.claude/skills/akm-*/**/*.md text eol=lf
-.agents/skills/akm-*/**/*.md text eol=lf
+# at runtime: a Windows checkout must hand them the same LF text CI tests. The
+# glob also pins the Markdown of a generated (ignored) ak-* skill to LF, which
+# is harmless; .gitignore, not this file, decides which skills are tracked.
+.claude/skills/ak-*/**/*.md text eol=lf
+.agents/skills/ak-*/**/*.md text eol=lf

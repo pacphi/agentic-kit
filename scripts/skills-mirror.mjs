@@ -1,13 +1,25 @@
-// scripts/skills-mirror.mjs — keep the authored akm- maintainer skills identical for Claude and Codex.
-// `.claude/skills/akm-*` is the source; `.agents/skills/akm-*` is a verbatim copy (LF endings).
-// Generated skills (any folder without the prefix, the `ak-*` ones `ak init` will write included)
-// are never touched.
+// scripts/skills-mirror.mjs — keep the authored maintainer skills identical for Claude and Codex.
+// `.claude/skills/<name>` is the source; `.agents/skills/<name>` is a verbatim copy (LF endings).
+// Only the names in AUTHORED_SKILLS are mirrored. Every other folder, a generated `ak-*` skill
+// included, is never read, copied or reported.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// "ak maintainer": kept apart from the ak- namespace of generated skills.
-export const PREFIX = 'akm-';
+// The one list of authored skills. Each name also needs its two exception lines in .gitignore
+// (`!/.claude/skills/<name>/` and `!/.agents/skills/<name>/`) and a contract in
+// tests/kit/ak-skills.test.mjs, which checks that the three agree.
+export const AUTHORED_SKILLS = Object.freeze([
+  'ak-docs-gate',
+  'ak-pricing-refresh',
+  'ak-release',
+  'ak-resume',
+  'ak-ship',
+  'ak-upstream-file',
+  'ak-upstream-status',
+  'ak-verify',
+  'ak-worktree-sweep',
+]);
 const SOURCE = '.claude/skills';
 const TARGET = '.agents/skills';
 const TEXT = /\.(md|json|ya?ml|toml|mjs)$/i;
@@ -27,29 +39,29 @@ function files(dir) {
   return walk(dir).sort();
 }
 
-const skillNames = (root) => (fs.existsSync(root)
-  ? fs.readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith(PREFIX)).map((entry) => entry.name).sort()
-  : []);
+const isDir = (dir) => fs.existsSync(dir) && fs.statSync(dir).isDirectory();
 
 /**
  * A stale copy is a problem for --check (the copies differ) and a removal for a write run (fixed).
- * @param {{root?: string, check?: boolean}} [options]
+ * A listed skill with no `.claude` folder is a problem, and its `.agents` copy is never deleted.
+ * @param {{root?: string, check?: boolean, skills?: readonly string[]}} [options]
  * @returns {{changed: string[], removed: string[], problems: string[]}}
  */
-export function mirrorSkills({ root = process.cwd(), check = false } = {}) {
+export function mirrorSkills({ root = process.cwd(), check = false, skills = AUTHORED_SKILLS } = {}) {
   const src = path.join(root, SOURCE);
   const dst = path.join(root, TARGET);
   const changed = [];
   const removed = [];
   const problems = [];
-  const sources = skillNames(src);
-  for (const name of skillNames(dst)) {
-    if (!sources.includes(name)) problems.push(`${TARGET}/${name} has no ${SOURCE}/${name}`);
-  }
-  for (const name of sources) {
+  for (const name of skills) {
     const from = path.join(src, name);
     const to = path.join(dst, name);
+    if (!isDir(from)) {
+      problems.push(isDir(to)
+        ? `${TARGET}/${name} has no ${SOURCE}/${name}`
+        : `${SOURCE}/${name} is missing; AUTHORED_SKILLS lists it`);
+      continue;
+    }
     if (!fs.existsSync(path.join(from, 'SKILL.md'))) {
       problems.push(`${SOURCE}/${name} has no SKILL.md`);
       continue;
@@ -76,7 +88,12 @@ export function mirrorSkills({ root = process.cwd(), check = false } = {}) {
   return { changed, removed, problems };
 }
 
-export function main(argv, root = process.cwd()) {
+/**
+ * @param {string[]} argv
+ * @param {string} [root]
+ * @param {readonly string[]} [skills]
+ */
+export function main(argv, root = process.cwd(), skills = AUTHORED_SKILLS) {
   // Any other argument, a positional one included (`check` without its dashes), is a usage error,
   // never a write run.
   if (argv.some((arg) => arg !== '--check')) {
@@ -84,7 +101,7 @@ export function main(argv, root = process.cwd()) {
     return 2;
   }
   const check = argv.includes('--check');
-  const { changed, removed, problems } = mirrorSkills({ root, check });
+  const { changed, removed, problems } = mirrorSkills({ root, check, skills });
   for (const file of changed) console.log(`${check ? 'differs' : 'wrote'} ${file}`);
   for (const file of removed) console.log(`removed ${file}`);
   for (const problem of problems) console.error(problem);

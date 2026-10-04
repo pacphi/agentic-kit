@@ -88,7 +88,7 @@ test('the docs describe the ledger branch, commit-comment notices and the API tr
 });
 
 test('current-state docs carry no trace of the comment ledger', () => {
-  for (const file of ['docs/maintainer.md', 'docs/ddd/ubiquitous-language.md', '.claude/skills/akm-upstream-status/SKILL.md', '.agents/skills/akm-upstream-status/SKILL.md']) {
+  for (const file of ['docs/maintainer.md', 'docs/ddd/ubiquitous-language.md', '.claude/skills/ak-upstream-status/SKILL.md', '.agents/skills/ak-upstream-status/SKILL.md']) {
     const text = fs.readFileSync(file, 'utf8');
     for (const stale of [/#243/, /upstream-dispatch/, /ledger\.authors/, /upstream-watch\.mjs comment/, /--ledger /, /locked "Upstream watch"/]) {
       assert.doesNotMatch(text, stale, `${file}: ${stale}`);

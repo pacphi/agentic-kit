@@ -25,19 +25,36 @@ test-*.log
 # source"); never commit them. The authored instruction files (CLAUDE.md for claude,
 # AGENTS.md for codex) ARE tracked; only their generated dirs (.claude/, .agents/) and
 # local overrides (.codex/) are ignored. The authored maintainer skills are the exception:
-# every akm-* skill folder is tracked for both hosts (docs/maintainer.md, "Maintainer skills");
-# generated ak-* skills stay ignored.
+# each is listed by name below for both hosts, the same names as AUTHORED_SKILLS in
+# scripts/skills-mirror.mjs (docs/maintainer.md, "Maintainer skills"). A generated ak-* skill
+# is not listed, so it stays ignored.
 .agentic-qe/
 .ruvnet-brain/
 .harness/
 **/.claude/*
 !/.claude/skills/
 /.claude/skills/*
-!/.claude/skills/akm-*/
+!/.claude/skills/ak-docs-gate/
+!/.claude/skills/ak-pricing-refresh/
+!/.claude/skills/ak-release/
+!/.claude/skills/ak-resume/
+!/.claude/skills/ak-ship/
+!/.claude/skills/ak-upstream-file/
+!/.claude/skills/ak-upstream-status/
+!/.claude/skills/ak-verify/
+!/.claude/skills/ak-worktree-sweep/
 **/.agents/*
 !/.agents/skills/
 /.agents/skills/*
-!/.agents/skills/akm-*/
+!/.agents/skills/ak-docs-gate/
+!/.agents/skills/ak-pricing-refresh/
+!/.agents/skills/ak-release/
+!/.agents/skills/ak-resume/
+!/.agents/skills/ak-ship/
+!/.agents/skills/ak-upstream-file/
+!/.agents/skills/ak-upstream-status/
+!/.agents/skills/ak-verify/
+!/.agents/skills/ak-worktree-sweep/
 .codex/
 .mcp.json
 # ak's receipts and backups beside the gitignored .mcp.json (AQE pin: aqe-project-pin.mjs;

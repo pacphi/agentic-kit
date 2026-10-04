@@ -1,7 +1,9 @@
 // Rule configuration for markdownlint-cli (`pnpm run lint:md`). The files to lint are named by the
 // script in package.json: only OUR authored markdown. Vendored ruflo/aqe docs (.claude,
-// .agentic-qe, .agents) are not matched by those globs; our own .claude/skills/akm-* skills are
-// (their .agents copies are identical). Archived documentation is linted too.
+// .agentic-qe, .agents) are not matched by those globs; our own maintainer skills are, through
+// .claude/skills/ak-* (their .agents copies are identical). In a clean checkout, CI's, that glob
+// finds only the authored skills: a generated ak-* skill is gitignored, so only a local checkout
+// can hold one, and there it is linted as well. Archived documentation is linted too.
 {
   "default": true,
   "MD013": false, // line length — prose/tables wrap naturally
