@@ -6,7 +6,7 @@
 [Decisions](#decisions). Nothing is implemented yet.
 
 **Amended 2026-10-03:** one `managed-tools` skill replaces the per-tool on-demand skills; the
-token-audit skill leaves the product; `sync --all --upgrade` is defined under Sync. Decision G15 in
+token-audit skill leaves the product; `sync --all --upgrade` is defined under Sync. Decision G17 in
 the master plan.
 
 The next step is the three [prerequisites](#prerequisites), which land on `main` first. P0
