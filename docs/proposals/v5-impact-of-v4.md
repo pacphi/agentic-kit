@@ -308,7 +308,7 @@ The report's M-01 to M-15 map onto these candidates:
 | B3.4a (SO:15) | Category: hosts and installations | Reshaped. Hosts are chosen per project in `init`; installs are only detected; adapter grants live in `local.json` | "Hosts for this project" |
 | B3.4b (SO:16) | Category: models, routing and budgets | Reshaped. Routing in `project.json`; providers and budgets in `local.json` | Per-place editors |
 | B3.4c (SO:17) | Category: memory and learning | Reshaped. Embeddings consent per project; session recall goes with deja-vu; the Brain knowledge base sits in the cache | Drop recall. **→v4** decide the fate of `ak x harvest` |
-| B3.4d (SO:18) | Category: guidance, hooks and permissions | Reshaped. A 1.5 KB project rule plus skills; MCP families chosen in `init` | Project only |
+| B3.4d (SO:18) | Category: guidance, hooks and permissions | Reshaped. A 1.5 KB project rule plus the `managed-tools` skill; MCP families chosen in `init` | Project only |
 | B3.4e (SO:19) | Category: projects and discovery | Reshaped. Opting in replaces the exact-projects list; roots and exclusions become cache preferences | Shrink |
 | B3.4f (SO:20) | Category: updates and schedules | Conflicts (X1) | X1 |
 | B3.4g (SO:21) | Category: fleet and sharing | Reshaped. Telemetry v2, with identity kept in the cache | After X3 and X4 |

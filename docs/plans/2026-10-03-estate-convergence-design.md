@@ -4,8 +4,8 @@
 
 **Active** (2026-10-03). Design approved by the maintainer in chat on 2026-10-03. Queued: the
 two cards below enter the inventory in this pull request and become issues through the
-dependency-sync runbook; the `sync --all --upgrade` wording for P5-02 lands with the plan
-amendment that introduces the `managed-tools` skill. No code is written for this spec until the
+dependency-sync runbook; the `sync --all --upgrade` wording for P5-02 landed in the plan
+amendment (master plan Decision G15). No code is written for this spec until the
 4.1.0 and v5.0.0 cards are scheduled.
 
 ## Outcome

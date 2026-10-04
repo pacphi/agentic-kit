@@ -5,7 +5,7 @@
 **Direction accepted** (2026-10-01). The maintainer's decisions are recorded under
 [Decisions](#decisions). Nothing is implemented yet.
 
-**Amended 2026-10-04:** one `managed-tools` skill replaces the per-tool on-demand skills; the
+**Amended 2026-10-03:** one `managed-tools` skill replaces the per-tool on-demand skills; the
 token-audit skill leaves the product; `sync --all --upgrade` is defined under Sync. Decision G15 in
 the master plan.
 
@@ -572,7 +572,7 @@ notes when the project qualifies.
 
   | Reference | Source |
   | --- | --- |
-  | `ruflo.md` | `ruflo-reference.md`, with the 439-line `ruflo-reference-full.md` as its reference file. This also closes [prerequisite A](#prerequisites), the dangling full-reference pointer. |
+  | `ruflo.md` | `ruflo-reference.md`, with the 439-line `ruflo-reference-full.md` as its reference file. This also gives the full reference a real home; [prerequisite A](#prerequisites) only stops the current line pointing at a missing file. P1-03 decides the file name and placement of the full reference. |
   | `aqe.md` | `aqe-reference.md` |
   | `brain.md` | `ruvnet-brain-reference.md` |
   | `hosts.md` | `providers-reference.md`, `dual-mode-reference.md` and `ruflo-opencode-reference.md`, only where they apply |

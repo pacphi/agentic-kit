@@ -6,7 +6,7 @@
 [Project-scoped management only](2026-10-01-project-scope-only-design.md#prerequisites). It lands
 on `main` before P0, so it also ships in the exit release.
 
-**Amended 2026-10-04:** the project skill that takes this content over is the single
+**Amended 2026-10-03:** the project skill that takes this content over is the single
 `managed-tools` skill, through its Ruflo reference, not a separate per-tool skill (master plan
 Decision G15).
 
