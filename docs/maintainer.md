@@ -230,9 +230,8 @@ Edit a file under `src/`, re-run the CLI, done.
 The skills in the table below are authored by this repository and tracked by name: `.gitignore`
 has one exception line per skill for each host, and `AUTHORED_SKILLS` in
 `scripts/skills-mirror.mjs` lists them. Every other folder under `.claude/skills/` and
-`.agents/skills/` is ignored, including any `ak-*` skill that tooling generates; `aqe init` and
-claude-flow write their skills there too. The skills are for people working on this repository;
-they do not ship in the package.
+`.agents/skills/` is ignored, whatever its name; `aqe init` and claude-flow write their skills
+there too. The skills are for people working on this repository; they do not ship in the package.
 
 | Skill | Say | Purpose |
 | ----- | --- | ------- |
@@ -254,8 +253,11 @@ To add one:
 3. Add its two exception lines to `.gitignore`, `!/.claude/skills/ak-<name>/` and
    `!/.agents/skills/ak-<name>/`, beside the other skills' lines.
 4. Run `node scripts/skills-mirror.mjs` to copy it to `.agents/skills/` for Codex.
-5. Add a contract for it to `tests/kit/ak-skills.test.mjs`, which checks that the list, the
-   `.gitignore` lines and the contracts name the same skills.
+5. Add a contract for it to `tests/kit/ak-skills.test.mjs`.
+6. Add a row for it to the table above.
+7. Run `node scripts/run-tests.mjs focus tests/kit/ak-skills.test.mjs`. It checks that the list,
+   the contracts, the two `.gitignore` lines per host, the skill folders in both hosts and the
+   table row all name the same skills.
 
 Rules every skill follows:
 

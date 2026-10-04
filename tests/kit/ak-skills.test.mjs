@@ -1,7 +1,7 @@
 // The maintainer skills: authored for this repository, one text for Claude (.claude/skills) and
-// Codex (.agents/skills), each tracked by name through its own .gitignore exception line. Every
-// other skill folder beside them stays ignored, the generated `ak-*` skills `ak init` will write
-// included, so the `ak-` prefix alone never makes a folder tracked.
+// Codex (.agents/skills), each tracked by name through its own .gitignore exception line. Any
+// unlisted folder beside them, a generated `managed-tools` skill included, stays ignored, so the
+// `ak-` prefix alone never makes a folder tracked.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -231,7 +231,8 @@ function listMismatches(authored, { contracts, exceptions, tracked }) {
       problems.push(`.gitignore re-includes \`!/${host}/${name}/\`, which AUTHORED_SKILLS does not list`);
     }
     for (const name of authored.filter((n) => !tracked[host].includes(n))) {
-      problems.push(`${host}/${name} is in AUTHORED_SKILLS but is missing or ignored`);
+      problems.push(`${host}/${name} is in AUTHORED_SKILLS but is missing or ignored `
+        + `(run \`node scripts/skills-mirror.mjs\`, or check that its \`.gitignore\` line comes after \`/${host}/*\`)`);
     }
     for (const name of tracked[host].filter((n) => !authored.includes(n))) {
       problems.push(`${host}/${name} is tracked or trackable but AUTHORED_SKILLS does not list it`);
@@ -264,18 +265,25 @@ test('AUTHORED_SKILLS, the contracts, the .gitignore exceptions and the tracked 
   assert.deepEqual(sorted(Object.keys(CONTRACTS)), sorted(AUTHORED_SKILLS));
 });
 
+test('a listed skill that is missing or ignored says how to fix it', () => {
+  const state = current();
+  const problems = listMismatches(AUTHORED_SKILLS, { ...state, tracked: { '.claude/skills': [], '.agents/skills': [] } }).join('\n');
+  assert.match(problems, /\.claude\/skills\/ak-ship is in AUTHORED_SKILLS but is missing or ignored \(run `node scripts\/skills-mirror\.mjs`, or check that its `\.gitignore` line comes after `\/\.claude\/skills\/\*`\)/);
+  assert.match(problems, /\.agents\/skills\/ak-ship is in AUTHORED_SKILLS but is missing or ignored \(run .*after `\/\.agents\/skills\/\*`\)/);
+});
+
 test('a listed skill without its .gitignore exception lines fails the agreement check', () => {
   const problems = listMismatches([...AUTHORED_SKILLS, 'ak-newthing'], current()).join('\n');
   assert.match(problems, /add the exception lines `!\/\.claude\/skills\/ak-newthing\/` and `!\/\.agents\/skills\/ak-newthing\/`/);
   assert.match(problems, /ak-newthing is in AUTHORED_SKILLS but has no CONTRACTS entry/);
 });
 
-// The folder scan reads what is on disk: a generated ak- skill sitting in a maintainer's checkout is
+// The folder scan reads what is on disk: an unlisted folder sitting in a maintainer's checkout is
 // ignored, so it is not counted and does not fail the suite.
 test('a generated or unlisted folder on disk does not count as an authored skill', () => {
+  const unlisted = ['ak-extra', 'ak-newthing', 'a11y-ally', 'akm-ship', 'managed-tools'];
   for (const host of HOSTS) {
-    assert.deepEqual(trackable(host, [...AUTHORED_SKILLS, 'ak-ruflo', 'ak-aqe', 'ak-newthing', 'a11y-ally', 'akm-ship'], []),
-      sorted(AUTHORED_SKILLS), host);
+    assert.deepEqual(trackable(host, [...AUTHORED_SKILLS, ...unlisted], []), sorted(AUTHORED_SKILLS), host);
   }
 });
 
@@ -320,6 +328,27 @@ test('every script, pnpm script and doc a skill cites exists', () => {
   }
 });
 
+// A skill names another skill as a whole backticked token, `ak-ship` or `.claude/skills/ak-ship/SKILL.md`.
+// The hyphen leaves out the bare `ak` command, and the whole-token match leaves out `ak-*`,
+// `ak-verify.XXXXXX` and the like, which are not skill references.
+const SKILL_REFERENCE = /`(?:\.(?:claude|agents)\/skills\/)?(ak[a-z0-9]*-[a-z0-9]+(?:-[a-z0-9]+)*)(?:\/SKILL\.md)?`/g;
+const skillReferences = (text) => [...text.matchAll(SKILL_REFERENCE)].map((m) => m[1]);
+
+test('every skill a skill names is an authored skill', () => {
+  for (const name of AUTHORED_SKILLS) {
+    for (const token of new Set(skillReferences(readText(path(HOSTS[0], name))))) {
+      assert.ok(AUTHORED_SKILLS.includes(token),
+        `${path(HOSTS[0], name)} names \`${token}\`, which AUTHORED_SKILLS does not list`);
+    }
+  }
+});
+
+test('the skill-reference check reads bare and path forms and skips other ak tokens', () => {
+  const sample = 'Run `ak-ship`, then read `.claude/skills/ak-verify/SKILL.md` and `.agents/skills/ak-resume/SKILL.md`. '
+    + 'Not skills: `ak`, `ak sync`, `ak-*`, `mktemp -d "${TMPDIR:-/tmp}/ak-verify.XXXXXX"`, ak-ship in prose. A stale `akm-ship`.';
+  assert.deepEqual(skillReferences(sample), ['ak-ship', 'ak-verify', 'ak-resume', 'akm-ship']);
+});
+
 test('the cited-path check covers src, tests, docs/schemas JSON and .cjs, and skips URLs', () => {
   const sample = 'Read `src/lib/x.mjs`, `tests/kit/helpers/home-sandbox.mjs`, `docs/schemas/a.schema.json`, '
     + '`scripts/tool.cjs` and docs/maintainer.md, not platform.claude.com/docs/en/page.md or docs/plans/YYYY-MM-DD-x.md.';
@@ -343,12 +372,10 @@ test('every authored SKILL.md checks out with LF line endings on every platform'
 });
 
 // The LF pin covers Markdown only: a future image or binary beside a skill must not be forced to text.
-// Its `ak-*` glob also pins a generated ak- skill's Markdown to LF, which is harmless.
 test('the LF pin covers every authored Markdown file and forces no other file to text', () => {
   for (const host of HOSTS) {
     assert.match(eol(`${host}/ak-ship/notes/extra.md`), /: eol: lf$/m);
     assert.match(git('check-attr', 'text', '--', `${host}/ak-ship/logo.png`).stdout, /: text: unspecified$/m);
-    assert.match(eol(`${host}/ak-ruflo/SKILL.md`), /: eol: lf$/m);
     assert.match(eol(`${host}/a11y-ally/SKILL.md`), /: eol: unspecified$/m);
   }
 });
@@ -383,14 +410,12 @@ test('only the listed skill folders are exempt from the generated-file ignores',
   }
 });
 
-// `ak init` will write ak-ruflo, ak-aqe, ak-brain, ak-hosts and ak-token-audit as ignored skills for
-// both hosts (docs/plans/2026-10-01-project-scope-only-design.md, "On-demand skills"). They share the
-// ak- prefix, so the prefix tracks nothing: only a name listed in .gitignore is tracked.
-test('generated and unlisted ak- skills stay ignored', () => {
+// Only a name listed in .gitignore is tracked: an unlisted ak- folder stays ignored, and so does a
+// generated `managed-tools` skill, whatever the prefix.
+test('unlisted skill folders stay ignored, a generated managed-tools skill included', () => {
   for (const file of [
-    '.claude/skills/ak-ruflo/SKILL.md', '.agents/skills/ak-ruflo/SKILL.md', '.agents/skills/ak-aqe/SKILL.md',
-    '.claude/skills/ak-brain/SKILL.md', '.agents/skills/ak-hosts/SKILL.md', '.claude/skills/ak-token-audit/SKILL.md',
-    '.claude/skills/ak-newthing/SKILL.md', '.agents/skills/ak-newthing/SKILL.md',
+    '.claude/skills/ak-extra/SKILL.md', '.agents/skills/ak-extra/SKILL.md', '.claude/skills/ak-newthing/SKILL.md',
+    '.agents/skills/ak-newthing/SKILL.md', '.claude/skills/managed-tools/SKILL.md', '.agents/skills/managed-tools/SKILL.md',
   ]) {
     assert.equal(ignored(file), true, `${file} must stay ignored`);
   }
@@ -421,17 +446,19 @@ for (const name of ['ak-worktree-sweep', 'ak-ship']) {
   });
 }
 
-// The convention is stated once, in the maintainer guide: the skills are tracked by name, and a
-// generated ak- skill beside them stays ignored.
+// The convention is stated once, in the maintainer guide: the skills are tracked by name, and every
+// other folder beside them stays ignored, whatever its name.
 test('docs/maintainer.md states the tracked-by-name convention and names this test file', () => {
   const doc = readText('docs/maintainer.md');
   assert.match(doc, /authored\s+by\s+this\s+repository\s+and\s+tracked\s+by\s+name:\s+`\.gitignore`\s+has\s+one\s+exception\s+line\s+per\s+skill\s+for\s+each\s+host,\s+and\s+`AUTHORED_SKILLS`\s+in\s+`scripts\/skills-mirror\.mjs`\s+lists\s+them/);
-  assert.match(doc, /Every\s+other\s+folder\s+under\s+`\.claude\/skills\/`\s+and\s+`\.agents\/skills\/`\s+is\s+ignored,\s+including\s+any\s+`ak-\*`\s+skill\s+that\s+tooling\s+generates/);
+  assert.match(doc, /Every\s+other\s+folder\s+under\s+`\.claude\/skills\/`\s+and\s+`\.agents\/skills\/`\s+is\s+ignored,\s+whatever\s+its\s+name/);
   assert.match(doc, /The\s+one\s+authored\s+exception\s+is\s+the\s+maintainer\s+skills,\s+tracked\s+by\s+name/);
   assert.match(doc, /`\.claude\/skills\/ak-<name>\/SKILL\.md`/);
   assert.match(doc, /Add\s+the\s+name\s+to\s+`AUTHORED_SKILLS`\s+in\s+`scripts\/skills-mirror\.mjs`/);
   assert.match(doc, /`!\/\.claude\/skills\/ak-<name>\/`\s+and\s+`!\/\.agents\/skills\/ak-<name>\/`/);
   assert.match(doc, /`tests\/kit\/ak-skills\.test\.mjs`/);
+  assert.match(doc, /Add\s+a\s+row\s+for\s+it\s+to\s+the\s+table\s+above/);
+  assert.match(doc, /It\s+checks\s+that\s+the\s+list,\s+the\s+contracts,\s+the\s+two\s+`\.gitignore`\s+lines\s+per\s+host,\s+the\s+skill\s+folders\s+in\s+both\s+hosts\s+and\s+the\s+table\s+row\s+all\s+name\s+the\s+same\s+skills/);
   const section = doc.slice(doc.indexOf('### Maintainer skills'), doc.indexOf('\n---\n', doc.indexOf('### Maintainer skills')));
   // A prefix never decides what is tracked, so the section never says one does.
   assert.doesNotMatch(section, /prefix/i);

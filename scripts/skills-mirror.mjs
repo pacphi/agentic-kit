@@ -1,7 +1,7 @@
 // scripts/skills-mirror.mjs — keep the authored maintainer skills identical for Claude and Codex.
 // `.claude/skills/<name>` is the source; `.agents/skills/<name>` is a verbatim copy (LF endings).
-// Only the names in AUTHORED_SKILLS are mirrored. Every other folder, a generated `ak-*` skill
-// included, is never read, copied or reported.
+// Only the names in AUTHORED_SKILLS are mirrored. Every other folder, an unlisted `ak-*` one or a
+// generated `managed-tools` skill, is never read, copied or reported.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';

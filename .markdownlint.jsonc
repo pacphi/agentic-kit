@@ -2,7 +2,7 @@
 // script in package.json: only OUR authored markdown. Vendored ruflo/aqe docs (.claude,
 // .agentic-qe, .agents) are not matched by those globs; our own maintainer skills are, through
 // .claude/skills/ak-* (their .agents copies are identical). In a clean checkout, CI's, that glob
-// finds only the authored skills: a generated ak-* skill is gitignored, so only a local checkout
+// finds only the authored skills: an unlisted ak-* folder is gitignored, so only a local checkout
 // can hold one, and there it is linted as well. Archived documentation is linted too.
 {
   "default": true,

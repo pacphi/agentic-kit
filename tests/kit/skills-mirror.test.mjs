@@ -75,23 +75,22 @@ test('generated skills are never mirrored', (t) => {
   assert.equal(fs.existsSync(path.join(root, '.agents/skills/a11y-ally')), false);
 });
 
-// `ak init` will write ak-ruflo, ak-aqe and the other ak- skills for both hosts as ignored files
-// (docs/plans/2026-10-01-project-scope-only-design.md, "On-demand skills"). They share the ak- prefix,
-// so the mirror goes by AUTHORED_SKILLS: an unlisted ak- folder is neither copied nor reported.
-test('an unlisted ak- skill is never mirrored and never a problem', (t) => {
+// The mirror goes by AUTHORED_SKILLS, not by the ak- prefix: an unlisted folder, an ak- one or a
+// generated `managed-tools` skill, is neither copied nor reported.
+test('an unlisted skill folder is never mirrored and never a problem', (t) => {
   const root = tempDir('ak-mirror', t);
   for (const name of AUTHORED_SKILLS) {
     put(root, `.claude/skills/${name}/SKILL.md`, `${name}\n`);
     put(root, `.agents/skills/${name}/SKILL.md`, `${name}\n`);
   }
-  put(root, '.claude/skills/ak-extra/SKILL.md', 'generated for Claude\n');
-  put(root, '.claude/skills/ak-ruflo/SKILL.md', 'generated for Claude\n');
-  put(root, '.agents/skills/ak-ruflo/SKILL.md', 'generated for Codex\n');
-  put(root, '.agents/skills/ak-aqe/SKILL.md', 'generated for Codex\n');
+  put(root, '.claude/skills/ak-extra/SKILL.md', 'unlisted for Claude\n');
+  put(root, '.claude/skills/managed-tools/SKILL.md', 'unlisted for Claude\n');
+  put(root, '.agents/skills/managed-tools/SKILL.md', 'unlisted for Codex\n');
+  put(root, '.agents/skills/ak-other/SKILL.md', 'unlisted for Codex\n');
   assert.deepEqual(mirrorSkills({ root }), { changed: [], removed: [], problems: [] });
   assert.deepEqual(mirrorSkills({ root, check: true }), { changed: [], removed: [], problems: [] });
   assert.equal(fs.existsSync(path.join(root, '.agents/skills/ak-extra')), false);
-  assert.equal(read(root, '.agents/skills/ak-ruflo/SKILL.md'), 'generated for Codex\n');
+  assert.equal(read(root, '.agents/skills/managed-tools/SKILL.md'), 'unlisted for Codex\n');
   assert.equal(main(['--check'], root), 0);
 });
 

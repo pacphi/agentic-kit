@@ -26,8 +26,8 @@ test-*.log
 # AGENTS.md for codex) ARE tracked; only their generated dirs (.claude/, .agents/) and
 # local overrides (.codex/) are ignored. The authored maintainer skills are the exception:
 # each is listed by name below for both hosts, the same names as AUTHORED_SKILLS in
-# scripts/skills-mirror.mjs (docs/maintainer.md, "Maintainer skills"). A generated ak-* skill
-# is not listed, so it stays ignored.
+# scripts/skills-mirror.mjs (docs/maintainer.md, "Maintainer skills"). Any unlisted folder, a
+# generated `managed-tools` skill included, stays ignored.
 .agentic-qe/
 .ruvnet-brain/
 .harness/
