@@ -181,6 +181,22 @@ const CONTRACTS = {
       // `merge-base --is-ancestor` exits 1 for every squash merge: that answer must not make the row inconclusive.
       /A\s+non-zero\s+exit\s+that\s+is\s+the\s+command's\s+answer\s+\(`merge-base --is-ancestor`\s+exiting\s+1,\s+`rev-parse`\s+of\s+a\s+missing\s+ref\)\s+is\s+a\s+no,\s+not\s+a\s+failure;\s+only\s+an\s+error\s+is\s+inconclusive/],
   },
+  'ak-token-audit': {
+    triggers: [/where are my tokens going/i, /usage breakdown/i, /burning through my plan/i, /hitting limits/i],
+    // Each gate pins its own sentence of the Gates section; the run line pins the one way the
+    // engine is started (from the repository root). That the script exists on both hosts is
+    // checked by 'the ak-token-audit engine script exists for both hosts' below, because the
+    // generic cited-path check skips .py files.
+    gates: [/python3\s+\.claude\/skills\/ak-token-audit\/scripts\/ruflo-token-audit\.py\s+--days\s+7/,
+      /The\s+engine\s+reads\s+only\s+the\s+`~\/\.claude\/projects\/\*\*\/\*\.jsonl`\s+transcripts\s+and,\s+for\s+the\s+daemon\s+cross-reference,\s+the\s+process\s+list\s+from\s+`ps`\s+\(`--no-daemons`\s+skips\s+it\)/,
+      /It\s+writes\s+nothing\s+anywhere\s+and\s+posts\s+nothing/,
+      // Step 3 also runs two Ruflo reports, so the read-only claim names them rather than overclaiming.
+      /Step\s+3\s+additionally\s+runs\s+the\s+two\s+read-only\s+Ruflo\s+reports\s+named\s+there/,
+      /The\s+output\s+names\s+projects\s+and\s+sessions:\s+show\s+it\s+to\s+the\s+maintainer\s+and\s+never\s+paste\s+it\s+into\s+an\s+issue,\s+a\s+pull\s+request\s+or\s+any\s+shared\s+place\s+without\s+redacting\s+the\s+project\s+names\s+and\s+paths\s+first/,
+      /Never\s+stop\s+a\s+daemon\s+or\s+any\s+other\s+process\s+from\s+this\s+skill:\s+name\s+the\s+PIDs\s+and\s+their\s+projects\s+and\s+leave\s+the\s+stop\s+to\s+the\s+maintainer/,
+      /`ruflo\s+daemon\s+status\s+--all`/, /`ruflo\s+daemon\s+budget\s+show`/,
+      /Opus-equivalent\s+reference[^.]*not\s+the\s+plan's\s+billing/, /`ak\s+usage`/],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these
@@ -354,6 +370,15 @@ test('the cited-path check covers src, tests, docs/schemas JSON and .cjs, and sk
     + '`scripts/tool.cjs` and docs/maintainer.md, not platform.claude.com/docs/en/page.md or docs/plans/YYYY-MM-DD-x.md.';
   assert.deepEqual(citedPaths(sample), ['src/lib/x.mjs', 'tests/kit/helpers/home-sandbox.mjs',
     'docs/schemas/a.schema.json', 'scripts/tool.cjs', 'docs/maintainer.md']);
+});
+
+// The generic cited-path check above only matches .mjs, .cjs, .md and .json files under scripts,
+// docs, src and tests, so the Python engine the skill runs is pinned here, on both hosts.
+test('the ak-token-audit engine script exists for both hosts', () => {
+  for (const file of ['.claude/skills/ak-token-audit/scripts/ruflo-token-audit.py',
+    '.agents/skills/ak-token-audit/scripts/ruflo-token-audit.py']) {
+    assert.ok(fs.existsSync(file), `${file} does not exist`);
+  }
 });
 
 test('each skill carries its gate phrases', () => {

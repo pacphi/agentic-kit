@@ -15,6 +15,7 @@ export const AUTHORED_SKILLS = Object.freeze([
   'ak-release',
   'ak-resume',
   'ak-ship',
+  'ak-token-audit',
   'ak-upstream-file',
   'ak-upstream-status',
   'ak-verify',

@@ -244,6 +244,7 @@ there too. The skills are for people working on this repository; they do not shi
 | `ak-pricing-refresh` | "refresh pricing", "a new model came out" | Update the model price table from the vendors' pages, with every price sourced. |
 | `ak-docs-gate` | "docs gate", "docs alignment", "archive the finished plan" | Check the documentation layout rules, archive finished plans and confirm living guides match the change. |
 | `ak-worktree-sweep` | "sweep", "clean up worktrees", "tidy the branches" | Classify worktrees and branches as merged, abandoned or live; remove only what you approve. |
+| `ak-token-audit` | "where are my tokens going", "usage breakdown", "burning through my plan", "hitting limits" | Report where Claude Code usage goes from the local session transcripts: by day, model, project, tool and subagent, with a runaway-daemon cross-reference. Read-only; users have `ak usage` and the dashboard. |
 
 To add one:
 

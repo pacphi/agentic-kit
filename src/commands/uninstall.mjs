@@ -218,7 +218,7 @@ export async function purgeDejaVuIndex({
 // ── the uninstall step registry ──────────────────────────────────────────
 // Mirrors sync.mjs's SYNC_STEPS idiom (ADR-0037): every teardown phase used to
 // be inlined sequentially into `run()`, with real ordering invariants (the
-// CLAUDE.md/skill/opencode strips before kit.json purge reads ownership;
+// CLAUDE.md/opencode strips before kit.json purge reads ownership;
 // deja-vu targets before its data purge before its package removal; the
 // registry-driven host-lifecycle loop before kit.json is ever deleted) proven
 // only by source order. Each step below is `{id, when(ctx), run(ctx)}`;
@@ -261,14 +261,7 @@ function stepClaudeMdBlocks(ctx) {
   });
 }
 
-// 2. deployed skill. kit.json is purged only after all receipt-dependent
-// teardown succeeds; otherwise it remains the recovery proof.
-function stepSkill(ctx) {
-  const skill = path.join(paths.claudeSkillsDir(), 'ruflo-token-audit');
-  if (fs.existsSync(skill)) ctx.act('removed skill ruflo-token-audit', () => fs.rmSync(skill, { recursive: true }));
-}
-
-// 2b. opencode host footprint (when ak managed it): strip the guidance
+// 2. opencode host footprint (when ak managed it): strip the guidance
 // blocks from opencode's AGENTS.md. (The opencode.json wiring and deployed
 // artifacts are handled by the registry-driven host-lifecycle loop below.)
 function stepOpencodeAgentsMd(ctx) {
@@ -395,7 +388,7 @@ async function dejaVuPackageRemoval(ctx) {
   }
 }
 
-// 2c. Companion teardown is receipt-gated and precedes any kit.json purge.
+// 2b. Companion teardown is receipt-gated and precedes any kit.json purge.
 // The sequence is load-bearing: targets first, then the optional derived
 // index while `deja doctor` still exists, and only then the optional package.
 async function stepDejaVu(ctx) {
@@ -723,6 +716,8 @@ function stepPurgeArtifacts(ctx) {
   }
 }
 
+// kit.json is purged only after all receipt-dependent teardown succeeds; otherwise it remains
+// the recovery proof.
 function stepPurgeKitConfig(ctx) {
   if (ctx.state.ownershipTeardownOk) {
     ctx.act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
@@ -869,7 +864,6 @@ export const UNINSTALL_STEPS = [
   } },
   { id: 'codex-statusline', when: (ctx) => !!ctx.cfg.statusline?.codex, run: stepCodexStatusline },
   { id: 'claude-md-blocks', when: () => true, run: stepClaudeMdBlocks },
-  { id: 'skill', when: () => true, run: stepSkill },
   { id: 'opencode-agents-md', when: () => true, run: stepOpencodeAgentsMd },
   { id: 'deja-vu', when: () => true, run: stepDejaVu },
   { id: 'host-lifecycles', when: () => true, run: stepHostLifecycles },

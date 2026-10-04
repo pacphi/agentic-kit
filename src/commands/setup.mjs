@@ -1,7 +1,7 @@
 // ak setup — context-aware first-time setup.
 //   Machine scope (always ensured): ruflo + agentic-qe installed globally
 //   (security surface is part of ruflo — verified, not separately installed),
-//   token-audit skill deployed, CLAUDE.md managed blocks merged, MCP offered.
+//   CLAUDE.md managed blocks merged, MCP offered.
 //   Project scope (when run inside a git repo / --project): the port of
 //   ruflo-setup-project — init, sanitize, pin, activate, verify, daemon.
 import fs from 'node:fs';
@@ -89,9 +89,9 @@ export const options = {
 
 export const help = `ak setup — first-time setup (machine and/or this project)
 
-Machine scope always runs: installs ruflo + agentic-qe globally, deploys the
-token-audit skill, merges the CLAUDE.md managed blocks, and offers MCP. Project
-scope auto-runs when .git exists in the current directory. Project setup runs
+Machine scope always runs: installs ruflo + agentic-qe globally, merges the
+CLAUDE.md managed blocks, and offers MCP. Project scope auto-runs when .git
+exists in the current directory. Project setup runs
 \`ruflo init --full --force --no-global --no-codex-detect --no-skills-sh\` and
 the AQE initializer while preserving user-authored CLAUDE.md/AGENTS.md content
 and reconciling only sentinel-owned guidance. Before starting Ruflo's project
@@ -366,17 +366,6 @@ async function healMachineSecuritySurface(cfg) {
   else info('security surface skipped (kit.json security:false — re-enable by removing the key)');
 }
 
-/** Step 3: token-audit skill → ~/.claude/skills. */
-function deployTokenAuditSkill(pkgRoot) {
-  const skillSrc = path.join(pkgRoot, 'claude', 'skills', 'ruflo-token-audit');
-  if (fs.existsSync(skillSrc)) {
-    const dst = path.join(paths.claudeSkillsDir(), 'ruflo-token-audit');
-    fs.mkdirSync(paths.claudeSkillsDir(), { recursive: true });
-    fs.cpSync(skillSrc, dst, { recursive: true });
-    ok('skill deployed: ruflo-token-audit');
-  }
-}
-
 /** Step 6: frontier hosts — install any ENABLED host that is entirely absent
  *  (default enables claude only). External installs (mise/native/brew) are
  *  left alone. Shares HOSTS/hostInstallState/installHost with `ak sync`'s
@@ -473,7 +462,7 @@ async function printUndetectedHostHints(cfg) {
 
 export async function run_machine({ flags, pkgRoot, cfg, deps = { hostLifecycle: undefined } }) {
   heading('machine setup');
-  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. agent-browser and ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
+  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. agent-browser and ruvnet-brain); blocks + MCP land in the final pass'); return true; }
 
   if (!(await installMachinePackages(cfg, flags))) return false;
   await healMachineSecuritySurface(cfg);
@@ -482,7 +471,6 @@ export async function run_machine({ flags, pkgRoot, cfg, deps = { hostLifecycle:
   // about to install (mcp needs `claude` on disk; several block detectors
   // key on `codex` being on PATH / dual-mode enablement). Running them here
   // warned + drifted on genuinely bare machines.
-  deployTokenAuditSkill(pkgRoot);
   await installEnabledAbsentHosts(cfg, flags, deps.hostLifecycle);
   if (!(await applyMachineHostLifecycles(cfg, pkgRoot))) return false;
   if (cfg.codexContext && cfg.integrations?.hosts?.codex) {
