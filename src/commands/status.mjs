@@ -13,13 +13,11 @@ import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { collectIntegrationFacts } from '../lib/providers.mjs';
 import { globalRoot } from '../lib/paths.mjs';
-import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { row } from './status/row.mjs';
 import { renderHostDetailRows, admittedLifecycleFallbackRows } from './status/host-detail.mjs';
-import { collectDejaVuRows } from './status/deja-vu.mjs';
 import { SECTIONS_BEFORE_HOST_DETAIL, SECTIONS_AFTER_HOST_DETAIL } from './status/sections/index.mjs';
 
-export { renderHostDetailRows, collectDejaVuRows };
+export { renderHostDetailRows };
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -60,7 +58,7 @@ Refresh strengths (each runs its stages in this order, one line per stage):
   --refresh          Refreshing Maintenance evidence, Rebuilding the inventory,
                      Re-checking local evidence and versions (re-probes the
                      cached evidence a plain \`ak status\` reuses: ruflo
-                     components, native runtime, host setup, deja-vu, version
+                     components, native runtime, host setup, version
                      drift and the rest)
   --refresh=live     the same, plus Running live checks before the re-check:
                      the quick, free checks below that apply, in parallel,
@@ -79,8 +77,6 @@ Live checks (quick and free):
   providers      kit config matches installed CLIs; ruflo/aqe see the wiring
                  (checked from the project root, whatever folder you run in)
   security       security packages load; defend flags injection, passes clean
-  deja-vu        content-free structural proof of CLI, doctor, wiring and
-                 index (when deja-vu is enabled or ak owns it)
   memory         store, retrieve and purge a value in a temporary folder
 Slow proofs run only when named with --only, up to six minutes each:
   learning       train a cycle in a temporary folder; assert patterns persist
@@ -144,13 +140,11 @@ async function runSections(sections, ctx, rows) {
  *  cache-only reads for the parts --skip names, and its --dry-run preview,
  *  ADR-0063); the versions, self, ruvnet-brain and ruvector sections use them
  *  instead of looking up their own.
- *  @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean,
+ *  @param {{ pkgRoot?: string, cwd?: string, refresh?: boolean, record?: boolean,
  *   retryBrain?: boolean, versionEvidence?: { drift?: any[], self?: any, brain?: any, ruvector?: any, cfg?: any } }} opts */
 export async function collect({
   pkgRoot,
   cwd = process.cwd(),
-  dejaVuAdapter = companionLifecycleFor('deja-vu'),
-  dejaVuPlanOptions = {},
   refresh = false,
   record = true,
   retryBrain = false,
@@ -181,10 +175,6 @@ export async function collect({
   };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);
-
-  rows.push(...(await collectDejaVuRows({
-    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions, refresh, record, source,
-  })));
 
   // Per-host status DETAIL rows (opencode.json wiring, lifecycle bridge,
   // converted agents, platform skill, …) — the host-neutral counterpart of

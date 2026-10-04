@@ -23,7 +23,6 @@
 // version/name fields. No tool's source or data is ever read.
 import fs from 'node:fs';
 import path from 'node:path';
-import { MANAGED_COMPANION_REGISTRY } from '../adapters/companion-registry.mjs';
 import { HOST_REGISTRY } from '../adapters/registries.mjs';
 import {
   home, isWindows, globalRoot, npxCacheDir, claudeDir, codexPluginCacheDir, xdgBase,
@@ -205,16 +204,6 @@ export function managedTools({ pkgRoot = null, globalRootDir = null } = {}) {
       kind: 'npm', root: npmRoot('agentic-qe'),
     },
   ];
-  for (const companion of MANAGED_COMPANION_REGISTRY) {
-    tools.push({
-      id: companion.id,
-      label: companion.label,
-      pkg: companion.install.npmPackage,
-      bin: companion.install.bin,
-      kind: 'npm',
-      root: npmRoot(companion.install.npmPackage),
-    });
-  }
   for (const host of HOST_REGISTRY) {
     tools.push({
       id: host.id,

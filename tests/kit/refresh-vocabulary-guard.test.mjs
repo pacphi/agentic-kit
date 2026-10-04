@@ -39,7 +39,7 @@ const RETIRED_CLI_PATTERNS = [
   // a `|`-separated chain (tight or spaced, markdown-escaped `\|` or not) so
   // a plain English sentence never matches.
   { label: 'ak host …|refresh (enumerated verb list)', pattern: /\bhost\s+[a-z][\w-]*(?:\s*\\?\|\s*[a-z][\w-]*)*\s*\\?\|\s*refresh\b/g },
-  { label: 'ak x verify …|… (enumerated suite list)', pattern: /\bverify\s+(?:learning|security|aqe|providers|harvest|deja-vu|memory)\s*\\?\|/g },
+  { label: 'ak x verify …|… (enumerated suite list)', pattern: /\bverify\s+(?:learning|security|aqe|providers|harvest|memory)\s*\\?\|/g },
   // A bracketed usage line (`system [--deep] [--json]`, `status [--json]
   // [--live]`) puts other bracketed options between the command word and the
   // retired flag, defeating the tight adjacency patterns above — this is

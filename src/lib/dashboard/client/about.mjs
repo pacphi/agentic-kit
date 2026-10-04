@@ -46,7 +46,6 @@ import { aboutHostChip } from './host-readiness.mjs';
     "ruflo":{versions:"ruflo",subs:["ruflo-components"]},
     "agent-browser":{subs:["agent-browser"]},
     "agentdb":{phrase:{sub:"natives",text:"agentdb location"}},
-    "deja-vu":{subs:["deja-vu"]},
     "agentic-qe":{subs:["aqe"],versions:"agentic-qe"},
     "security":{subs:["security"]},
     "ruvnet-brain":{subs:["ruvnet-brain"]},

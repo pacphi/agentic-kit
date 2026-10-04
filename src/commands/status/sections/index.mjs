@@ -1,12 +1,10 @@
 // The ordered registries `collect()` walks. Each section exports
 // `{ id, collect: async (ctx) => Row[] }` — ctx is `{ cfg, cwd, pkgRoot,
 // integrationFacts }`. Splitting collect() into two registries (rather than
-// one) only reflects that three calls in between (collectDejaVuRows,
-// renderHostDetailRows, admittedLifecycleFallbackRows) already have their
-// own bespoke signatures and error contracts and are called directly by
-// collect() instead of going through this generic dispatch — the row ORDER
-// across both registries plus those three calls is unchanged from the
-// original monolithic collect().
+// one) only reflects that two calls in between (renderHostDetailRows,
+// admittedLifecycleFallbackRows) already have their own bespoke signatures
+// and error contracts and are called directly by collect() instead of going
+// through this generic dispatch.
 import models from './models.mjs';
 import codexContext from './codex-context.mjs';
 import context from './context.mjs';
@@ -43,8 +41,8 @@ import statusline from './statusline.mjs';
 import qeCourt from './qe-court.mjs';
 import liveChecks from './live-checks.mjs';
 
-// Everything up to and including codex-plugins — before the deja-vu /
-// host-detail / admitted-lifecycle calls that collect() makes directly.
+// Everything up to and including codex-plugins — before the host-detail /
+// admitted-lifecycle calls that collect() makes directly.
 export const SECTIONS_BEFORE_HOST_DETAIL = [
   models, versions, ruvnetBrain, ruvector, rufloComponents, self, natives, memoryPin,
   projectMemory, userMemory, scaffoldAgents, npx, security, learning, aqe, agentBrowser, mcp,

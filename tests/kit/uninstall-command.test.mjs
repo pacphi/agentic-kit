@@ -9,9 +9,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
-  sandboxProject, writeKitConfig,
+  sandboxProject, writeKitConfig, spawnEnv,
 } from './helpers/home-sandbox.mjs';
 import { isolateProject } from './helpers/project-isolation.mjs';
 
@@ -405,7 +407,7 @@ test('printReportLine routes each level to its own output function (ok/warn/fail
 
 // Controller ruling: every ruflo-components teardown failure must gate
 // ownershipTeardownOk exactly like every other uninstall step that can fail
-// to release what it owns (agent-browser, opencode, deja-vu, ...).
+// to release what it owns (agent-browser, opencode, ...).
 test('a ruflo component env conflict blocks ownership teardown so a purge must not delete kit.json', async () => {
   seedHome();
   const settingsFile = paths.claudeSettingsPath();
@@ -586,7 +588,7 @@ test('a plain uninstall (no --purge) leaves provider env and Codex MCP alone', a
 
 // #311 (exit release): --purge also removes what older ak installed outside kit.json's
 // receipts. Removals ak can prove it owns ask first (--yes approves them). Defaults that
-// KEEP data (deja-vu package/index, the standalone agentdb) need an interactive yes that
+// KEEP data (the standalone agentdb) need an interactive yes that
 // --yes does not give, so `--purge --yes` can never delete them.
 const ALIAS = 'Xenova/all-MiniLM-L6-v2';
 function fakeExtras(calls, o = {}) {
@@ -756,19 +758,6 @@ test('without the older-ak marker, agentdb is never removed even when the user s
   assert.match(out, /npm uninstall -g agentdb/);
 });
 
-test('--purge --yes keeps the deja-vu derived index; only an interactive yes deletes it', async () => {
-  seedHome();
-  // deja-vu is only asked about when it is actually installed (a Kit ownership receipt exists)
-  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { dejaVu: { install: { version: '1.0.0' } } } } });
-  const purged = [];
-  const dejaIndex = (o) => ({ purgeDejaVuIndex: async (a) => { purged.push(Boolean(a.dryRun)); return { ok: true, changed: true }; }, ...o });
-  await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([]), ...dejaIndex({}) } }));
-  assert.deepEqual(purged, []);
-  writeKitConfig(HOME, { aqe: true, integrations: { ownership: { dejaVu: { install: { version: '1.0.0' } } } } }); // the first purge removed kit.json
-  await captureLog(() => uninstall.run({ flags: { purge: true, yes: true }, deps: { undo: fakeUndo([]), extras: fakeExtras([], { confirmKeep: true }), ...dejaIndex({}) } }));
-  assert.deepEqual(purged, [false]);
-});
-
 test('--purge --dry-run lists the extra removals and runs none of them', async () => {
   seedHome();
   const calls = [];
@@ -866,12 +855,11 @@ test('a plain uninstall never removes config, state, archives or memory', async 
   assert.equal(fs.existsSync(path.join(memory, 'memory.db')), true);
 });
 
-test('--purge does not ask about the deja-vu index when deja-vu was never installed', async () => {
-  seedHome();
-  const calls = [];
-  const { result } = await captureLog(() => uninstall.run({
-    flags: { purge: true }, deps: { undo: fakeUndo([]), extras: fakeExtras(calls, { confirmKeep: true, brain: false }) },
-  }));
-  assert.equal(result, 0);
-  assert.ok(!calls.some((c) => c[0] === 'confirmKeep' && /deja-vu/.test(c[1])));
+test('the removed deja-vu uninstall flags fail as unknown options', () => {
+  for (const flag of ['--remove-deja-vu', '--purge-deja-vu-data']) {
+    const r = spawnSync(process.execPath, [fileURLToPath(new URL('../../bin/agentic-kit.mjs', import.meta.url)), 'uninstall', '--dry-run', flag],
+      { encoding: 'utf8', env: spawnEnv(HOME, { NO_COLOR: '1' }) });
+    assert.equal(r.status, 2, `${flag}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stdout + r.stderr, new RegExp(`Unknown option '${flag}'`));
+  }
 });

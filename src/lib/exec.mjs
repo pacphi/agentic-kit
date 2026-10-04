@@ -1,7 +1,7 @@
 // Subprocess helpers. Rule (binding, from the plan): NOTHING goes through a
 // shell string — spawn with argv arrays only, shell ALWAYS false.
 //
-// npm/npx/claude/deja/ruflo/aqe/claude-flow are .cmd shims on Windows, and
+// npm/npx/claude/ruflo/aqe/claude-flow are .cmd shims on Windows, and
 // Windows' CreateProcess cannot launch a .cmd directly — that historically
 // forced `shell:true`, which hands Node's own cmd+args JOIN of the whole
 // command line to cmd.exe as ONE string (CVE-class: any arg with `&`/`|`/`^`
@@ -33,7 +33,7 @@ export const withAbortSignal = (signal, fn) => abortScope.run(signal, fn);
 // `ak` too: the MCP launcher check asks the PATH `ak` (an npm shim on Windows)
 // for its help.
 const CMD_SHIMS = new Set([
-  'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow', 'ak',
+  'npm', 'npx', 'claude', 'codex', 'opencode', 'ruflo', 'aqe', 'claude-flow', 'ak',
 ]);
 
 /** Build a shell-free invocation for `cmd`, trying Windows' shim extensions in

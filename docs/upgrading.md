@@ -42,10 +42,10 @@ official source citations, authority boundaries and verification limits.
 ## 2026-09-28: One evidence cache for `ak status`'s local checks
 
 `ak status`, `ak sync`, and the dashboard now share one evidence cache
-(`<state>/agentic-kit/evidence/`) for native runtime, host setup, deja-vu, version drift,
+(`<state>/agentic-kit/evidence/`) for native runtime, host setup, version drift,
 npm-global-root, the daemon sweep, and the ak launcher check, each with its own age rule.
 Right after upgrading to this release the cache is cold. Native runtime, host setup,
-host-install-method, host-launch, deja-vu, npm-global-root, the daemon sweep, and the ak launcher
+host-install-method, host-launch, npm-global-root, the daemon sweep, and the ak launcher
 check each probe once on their first use after the upgrade and record what they find — a normal
 row, possibly a moment slower on that one check, never a placeholder state. This is expected and
 needs no action. Two rows read differently until their own next refresh, unchanged by this
@@ -518,7 +518,7 @@ family on your behalf.
 | `ak sync`            | update the binary + heal to your recorded state | **no** — converges, never decides |
 | `ak host pick` | opt into or retune execution hosts and host routing | **yes** — this is the switch |
 | `ak x statusline codex native\|extended` | opt into a user-wide Codex status-line preset | **yes** — records the preset |
-| `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`, `--with-deja-vu`, `--no-deja-vu`) |
+| `ak setup`           | first-time bootstrap of absent tooling          | only via explicit flags (`--codex`, `--opencode`, `--primary-host`) |
 
 ## Installation method and the kit's own version
 
@@ -677,34 +677,6 @@ upgrade adds support for it. Run `ak x statusline codex native` once to opt in;
 later `ak sync` runs converge that recorded choice. Use
 `ak x statusline codex off` to relinquish ownership. See
 [Managed Codex status line](codex-statusline.md).
-
-## Adopting the deja-vu companion
-
-An upgrade never opts a machine into transcript indexing. Adopt it in two motions:
-
-```bash
-ak sync                                  # install the newer Agentic Kit
-ak setup --minimal --with-deja-vu       # record MCP mode without rerunning project setup
-ak status --refresh=live --only deja-vu  # prove package, doctor, wiring, and index state
-```
-
-Use `--deja-vu-mode auto` on the setup command only after reviewing the per-host
-automatic event differences and privacy implications in the
-[deja-vu runbook](archive/2026-10-03-guide-deja-vu.md). Run from outside a repository or retain `--minimal`
-when the machine-level opt-in is the only intended change; project setup otherwise
-keeps its normal `ruflo init --full --force` contract.
-
-The integration requires deja-vu 0.19.0 or newer. That release resolved an earlier
-machine-contract risk by adding `schema_version: 2` to doctor JSON. Agentic Kit accepts
-additive fields within schema 2 and degrades rather than guessing when the schema is
-missing, malformed, or newer. It wires only explicit enabled-host targets and builds
-once with `deja index`; it does not invoke upstream discover-all modes.
-
-After opt-in, `ak sync` maintains only the recorded mode and receipt-owned artifacts.
-It updates an owned package through npm, preserves external/native installations and
-Codex plugins, and indexes only when missing or stale. Returning to an explicit
-disabled choice uses `ak setup --minimal --no-deja-vu`; removal scopes remain separate
-and are documented in the runbook.
 
 ## Worked example: adopting ambidextrous dual-host
 

@@ -47,7 +47,7 @@ The existing source provides strong integration seams:
 | [`src/lib/execution/schema.mjs`](../../../src/lib/execution/schema.mjs) | Terminal categories and observed/configured provider/model distinctions | Explicit export limits, cost evidence categories, artifact identity |
 | [`src/lib/live/event-schema.mjs`](../../../src/lib/live/event-schema.mjs) | Versioned metadata events built field by field | Optional observer bridge using a further restricted subset |
 | [`src/lib/live/transcript-streams.mjs`](../../../src/lib/live/transcript-streams.mjs) | Existing transcript handling and masking | Do not reuse transcript text as default training/evaluation export |
-| [`src/lib/adapters/companion-registry.mjs`](../../../src/lib/adapters/companion-registry.mjs) | Existing opt-in companion pattern, currently for deja-vu | Possible later managed integration after the external pilot proves useful |
+| `src/lib/adapters/companion-registry.mjs` | Existing opt-in companion pattern, currently for deja-vu | Possible later managed integration after the external pilot proves useful |
 
 There are two subtle contract gaps. First, `ak run --json` emits `{plan, results}` without a top-level schema version, and the plan contains task-derived prompts. The omission of runtime handoffs does not make the whole JSON document safe to export. Second, `--timeout` is a budget **per worker attempt**, not a deadline for the complete workflow; sequential workers and escalation can extend total elapsed time. The companion must add an overall limit and verify process-tree cleanup without becoming another scheduler for individual workers. [Run command](../../../src/commands/run.mjs), [runner](../../../src/lib/execution/runner.mjs), [routing templates](../../../src/lib/routing.mjs).
 

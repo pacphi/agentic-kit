@@ -183,13 +183,6 @@
     "repair": "manual"
   },
   {
-    "subsystem": "deja-vu",
-    "level": "info",
-    "message": "deja-vu disabled — package, host wiring, and history remain unprobed",
-    "fix": null,
-    "repair": null
-  },
-  {
     "subsystem": "hosts",
     "level": "fail",
     "message": "claude enabled but not installed (primary)",

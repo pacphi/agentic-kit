@@ -74,12 +74,12 @@ test('latestVersion uses literal npm argv, honors its deadline, and rejects unsa
     calls.push({ command, args, options });
     return { code: 0, stdout: '0.20.0 --unsafe\n', stderr: '' };
   };
-  assert.equal(await latestVersion('@vshulcz/deja-vu', 'latest', {
+  assert.equal(await latestVersion('ruflo', 'latest', {
     runner, timeout: 5_000,
   }), null);
   assert.deepEqual(calls, [{
     command: 'npm',
-    args: ['view', '@vshulcz/deja-vu@latest', 'version'],
+    args: ['view', 'ruflo@latest', 'version'],
     options: { timeout: 5_000 },
   }]);
 });

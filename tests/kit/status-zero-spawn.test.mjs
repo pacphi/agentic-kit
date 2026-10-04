@@ -6,7 +6,7 @@
 // makes it, with no product code change.
 //
 // Evidence caching closed every remaining spawn path on a plain `ak status` (native
-// runtime, host setup/launch, deja-vu, version drift, npm's global root, the
+// runtime, host setup/launch, version drift, npm's global root, the
 // daemon process sweep, the ak-launcher-availability check) and promotes the
 // zero-spawn assertion from `test.todo` (Ruling D — never commit a red test)
 // to a real, enforced gate. A single fresh-sandbox collect() call can never

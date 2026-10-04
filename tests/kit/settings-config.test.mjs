@@ -84,12 +84,7 @@ test('loadKitConfig returns defaults when file missing and round-trips saves', (
   assert.equal(cfg.aqe, true);
   assert.equal(cfg.agentBrowser, true);
   assert.equal(cfg.mcp.register, true);
-  assert.deepEqual(cfg.integrations.tools.dejaVu, {
-    enabled: false,
-    mode: 'mcp',
-    hosts: [],
-    indexOnSetup: true,
-  });
+  assert.deepEqual(cfg.integrations.tools, {});
   cfg.mcp.excludeFamilies = ['wasm'];
   cfg.customBlocks.push({ slug: 's', templatePath: '/t.md', detector: { type: 'always' } });
   saveKitConfig(cfg, f);
@@ -117,29 +112,6 @@ test('saveKitConfig preserves bytes and mtime when durable intent is unchanged',
   saveKitConfig(cfg, f);
   assert.notEqual(fs.statSync(f).mtimeMs, beforeMtime);
   fs.rmSync(tmp, { recursive: true, force: true });
-});
-
-test('loadKitConfig rejects invalid deja-vu companion intent', () => {
-  const cases = [
-    [{ enabled: true, mode: 'ambient', hosts: [], indexOnSetup: true }, /mode must be one of/],
-    [{ enabled: true, mode: 'mcp', hosts: ['claude', 'claude'], indexOnSetup: true }, /contains duplicates/],
-    [{ enabled: true, mode: 'mcp', hosts: ['future-host'], indexOnSetup: true }, /unknown host/],
-  ];
-
-  for (const [dejaVu, message] of cases) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-deja-'));
-    const f = tmpFile(tmp, 'kit.json');
-    fs.writeFileSync(f, JSON.stringify({
-      integrations: {
-        version: 3,
-        hosts: { claude: true, codex: false, opencode: false },
-        bindings: [],
-        tools: { dejaVu },
-      },
-    }));
-    assert.throws(() => loadKitConfig(f), message);
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
 });
 
 test('loadKitConfig merges partial files over defaults (user file wins)', () => {

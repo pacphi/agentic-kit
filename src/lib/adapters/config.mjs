@@ -1,18 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import { immutable } from './schema.mjs';
-import { managedCompanionFor } from './companion-registry.mjs';
 import { PROVIDER_REGISTRY } from './registries.mjs';
 
 export const CURRENT_INTEGRATIONS_VERSION = 3;
-
-const DEJA_VU_COMPANION = managedCompanionFor('deja-vu');
-
-export const DEFAULT_DEJA_VU_INTENT = immutable({
-  enabled: DEJA_VU_COMPANION.enabledByDefault,
-  mode: 'mcp',
-  hosts: [],
-  indexOnSetup: true,
-});
 
 // A host's native provider = the registry provider with host-login
 // credentials whose projections include that host (anthropic -> claude,
@@ -42,35 +32,6 @@ const NATIVE_PROVIDER_BY_HOST = buildNativeProviderByHost(PROVIDER_REGISTRY);
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const own = (value, key) => plain(value) && Object.hasOwn(value, key);
-
-export function validateDejaVuIntent(value) {
-  if (!plain(value)) throw new TypeError('integrations.tools.dejaVu must be an object');
-  if (typeof value.enabled !== 'boolean') {
-    throw new TypeError('integrations.tools.dejaVu.enabled must be boolean');
-  }
-  if (!DEJA_VU_COMPANION.modes.includes(value.mode)) {
-    throw new TypeError(
-      `integrations.tools.dejaVu.mode must be one of: ${DEJA_VU_COMPANION.modes.join(', ')}`,
-    );
-  }
-  if (!Array.isArray(value.hosts)
-    || value.hosts.some((host) => typeof host !== 'string' || !host)) {
-    throw new TypeError('integrations.tools.dejaVu.hosts must be an array of non-empty strings');
-  }
-  if (new Set(value.hosts).size !== value.hosts.length) {
-    throw new TypeError('integrations.tools.dejaVu.hosts contains duplicates');
-  }
-  const knownHosts = new Set(DEJA_VU_COMPANION.hosts);
-  for (const host of value.hosts) {
-    if (!knownHosts.has(host)) {
-      throw new TypeError(`integrations.tools.dejaVu.hosts contains unknown host '${host}'`);
-    }
-  }
-  if (typeof value.indexOnSetup !== 'boolean') {
-    throw new TypeError('integrations.tools.dejaVu.indexOnSetup must be boolean');
-  }
-  return value;
-}
 
 function mergeBindings(current = [], legacy = []) {
   const merged = structuredClone(current);
@@ -164,13 +125,7 @@ function deriveInferredBindings(enabled, seenHosts) {
 }
 
 function resolveMigratedTools(existing) {
-  const tools = structuredClone(existing.tools ?? {});
-  tools.dejaVu = plain(tools.dejaVu)
-    ? { ...structuredClone(DEFAULT_DEJA_VU_INTENT), ...tools.dejaVu }
-    : Object.hasOwn(tools, 'dejaVu')
-      ? tools.dejaVu
-      : structuredClone(DEFAULT_DEJA_VU_INTENT);
-  return tools;
+  return structuredClone(existing.tools ?? {});
 }
 
 /** Legacy providers.codexMcp / providers[reverseMarker] -> integrations.

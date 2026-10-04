@@ -13,7 +13,6 @@ npm install -g @pacphi/agentic-kit@next   # alpha channel until 4.0.0 GA
 ak setup            # once per machine; run inside a git repo to set that project up too
 ak setup --codex    # …or bring up Claude + Codex together in one shot
 ak setup --opencode # …and wire ruflo + ruvnet-brain into opencode (third host)
-ak setup --with-deja-vu # optional local transcript search, MCP mode by default
 ```
 
 > [!IMPORTANT]
@@ -37,7 +36,6 @@ container for you. See [docs/devcontainers.md](https://github.com/pacphi/agentic
 
 - **One command** installs, repairs, and checks ruflo & agentic-qe — native SQLite, memory, security, statusline (past npm's `allow-scripts` gate).
 - **Source-grounded knowledge:** *RuvNet Brain* — an offline knowledge base over the rUv stack — powers the `search_ruvnet` MCP tool, so answers about ruflo/AgentDB/RVF/SPARC cite real source instead of stale training priors.
-- **Local transcript recall (optional):** [deja-vu](docs/archive/2026-10-03-guide-deja-vu.md) indexes coding-agent histories for MCP search or host-native automatic recall. It is off by default because the derived plaintext index has its own privacy and retention boundary.
 - **Multi-host execution (optional):** Claude, Codex, and opt-in OpenCode can share one activity policy; `ak run` is the canonical executor, while `ak setup --codex` enables the subscription-backed Claude/Codex defaults.
 - **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard report observed state and explicit evidence gaps.
 - **Managed ruflo components:** ak applies and reports ruflo's opt-in agent pickers, MCP tool governance, learning profile, and promotional funnel — see [Managed ruflo components](docs/managed-tools.md#managed-ruflo-components).
@@ -87,8 +85,8 @@ in [docs/archive/](https://github.com/pacphi/agentic-kit/tree/main/docs/archive)
 ```text
 ak              status + one suggested next action
 ak setup        first-time setup — machine and/or the project you're standing in
-                [--codex] [--opencode] [--primary-host claude|codex] [--with-deja-vu]
-                [--deja-vu-mode mcp|auto] [--no-deja-vu] [--project] [--minimal]
+                [--codex] [--opencode] [--primary-host claude|codex]
+                [--project] [--minimal]
                 [--yes] [--no-aqe] [--no-security] [--reconfigure]
 ak status       read-only dashboard: what's true, what's drifted   [--json] [--refresh[=live|machine]]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
@@ -115,18 +113,13 @@ ak heal hooks   deterministic dry-run repair plan; explicit apply, verify, undo,
 ak run          execute a host-neutral activity pipeline (including explicit OpenCode routes)
                 <template> "<task>"  [--dry-run] [--route ...] [--max-concurrent N] [--timeout ms] [--json]
 ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo]
-                [--remove-aqe] [--remove-deja-vu] [--purge-deja-vu-data] [--purge] [--yes]
+                [--remove-aqe] [--purge] [--yes]
 ```
 
 > [!TIP]
 > **When in doubt: `ak sync`.** Setup, sync, and uninstall support `--dry-run`. Maintenance uses a
 > separate short-lived plan, digest, exact action IDs, and explicit `--yes` confirmation before it
 > changes anything. See the [Maintenance runbook](docs/maintenance.md).
-
-deja-vu is a separately opted-in companion, not another curated memory store. Read the
-[deja-vu runbook](docs/archive/2026-10-03-guide-deja-vu.md) before enabling it: the guide covers MCP versus auto events,
-the plaintext derived index, untrusted recall, Codex plugin coexistence, health checks, and the
-independent package/data removal scopes.
 
 `ak` is the daily-driver alias; the full `agentic-kit` command is identical.
 (Heads-up if you also use AutoKitteh: its CLI is also named `ak` — the full
@@ -164,7 +157,7 @@ Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
 `mcp status|pick|off`, `host status|pick|reset-routes|off|check-connection`, `reference diff|sync`,
 `statusline status|codex native|codex extended|codex off`,
 `improvement-eval`) — see `ak --help --all`. Named checks and slow proofs (`learning`, `security`,
-`aqe`, `providers`, `harvest`, `deja-vu`, `memory`, `memory-routes`, `mcp`, `aqe-embedding`) run
+`aqe`, `providers`, `harvest`, `memory`, `memory-routes`, `mcp`, `aqe-embedding`) run
 through `ak status --refresh=live --only CHECK`.
 
 One of those is worth calling out:
