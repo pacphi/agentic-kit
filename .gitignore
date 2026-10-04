@@ -25,18 +25,19 @@ test-*.log
 # source"); never commit them. The authored instruction files (CLAUDE.md for claude,
 # AGENTS.md for codex) ARE tracked; only their generated dirs (.claude/, .agents/) and
 # local overrides (.codex/) are ignored. The authored maintainer skills are the exception:
-# every ak-* skill folder is tracked for both hosts (docs/maintainer.md, "Maintainer skills").
+# every akm-* skill folder is tracked for both hosts (docs/maintainer.md, "Maintainer skills");
+# generated ak-* skills stay ignored.
 .agentic-qe/
 .ruvnet-brain/
 .harness/
 **/.claude/*
 !/.claude/skills/
 /.claude/skills/*
-!/.claude/skills/ak-*/
+!/.claude/skills/akm-*/
 **/.agents/*
 !/.agents/skills/
 /.agents/skills/*
-!/.agents/skills/ak-*/
+!/.agents/skills/akm-*/
 .codex/
 .mcp.json
 # ak's receipts and backups beside the gitignored .mcp.json (AQE pin: aqe-project-pin.mjs;

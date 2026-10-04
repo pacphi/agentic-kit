@@ -1,11 +1,13 @@
-// scripts/skills-mirror.mjs — keep the authored ak- maintainer skills identical for Claude and Codex.
-// `.claude/skills/ak-*` is the source; `.agents/skills/ak-*` is a verbatim copy (LF endings).
-// Generated skills (any folder without the prefix) are never touched.
+// scripts/skills-mirror.mjs — keep the authored akm- maintainer skills identical for Claude and Codex.
+// `.claude/skills/akm-*` is the source; `.agents/skills/akm-*` is a verbatim copy (LF endings).
+// Generated skills (any folder without the prefix, the `ak-*` ones `ak init` will write included)
+// are never touched.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const PREFIX = 'ak-';
+// "ak maintainer": kept apart from the ak- namespace of generated skills.
+export const PREFIX = 'akm-';
 const SOURCE = '.claude/skills';
 const TARGET = '.agents/skills';
 const TEXT = /\.(md|json|ya?ml|toml|mjs)$/i;

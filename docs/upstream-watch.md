@@ -207,7 +207,7 @@ quiet day sends nothing. Thread ids in a notice are code spans, so it neither li
 mentions upstream threads; a dispatch pull request's `#n` links here on purpose. The notice ends
 with `ledger --recorded-since <run time>`, which prints every record that run wrote.
 
-Whether the watch still runs shows without a commit: `report` (and the `ak-upstream-status` skill)
+Whether the watch still runs shows without a commit: `report` (and the `akm-upstream-status` skill)
 gives the time of the last successful scheduled run and warns after 48 hours. A failed run fails the job,
 and GitHub emails the user who last changed the workflow's `cron` line.
 
@@ -254,7 +254,7 @@ the watch fires it (see [The dispatch routine](#the-dispatch-routine)).
 
 ## The skill
 
-Ask Claude Code or Codex for "upstream status" in this repository. The `ak-upstream-status` skill
+Ask Claude Code or Codex for "upstream status" in this repository. The `akm-upstream-status` skill
 (`.claude/skills/` and `.agents/skills/`, identical) runs `report --json`, gives counts first,
 then when the watch last succeeded, then the action items with links; for history questions it
 runs `ledger`. It offers to draft a reply, dispatch a released item or update the registry. It

@@ -100,7 +100,7 @@ Use `$skill-name` syntax to invoke:
 | `$performance-analysis` | Profiling and optimization |
 | `$github-automation` | CI/CD and PR management |
 
-Maintainer-only skills for this repository are the `ak-*` skills; see `docs/maintainer.md`, section "Maintainer skills".
+Maintainer-only skills for this repository are the `akm-*` skills; see `docs/maintainer.md`, section "Maintainer skills".
 
 ### Agent Types
 

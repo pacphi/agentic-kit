@@ -1,6 +1,6 @@
 // Rule configuration for markdownlint-cli (`pnpm run lint:md`). The files to lint are named by the
 // script in package.json: only OUR authored markdown. Vendored ruflo/aqe docs (.claude,
-// .agentic-qe, .agents) are not matched by those globs; our own .claude/skills/ak-* skills are
+// .agentic-qe, .agents) are not matched by those globs; our own .claude/skills/akm-* skills are
 // (their .agents copies are identical). Archived documentation is linted too.
 {
   "default": true,
