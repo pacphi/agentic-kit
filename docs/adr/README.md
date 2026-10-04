@@ -45,7 +45,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0032](0032-model-lifecycle-intelligence.md) | Model lifecycle intelligence from provenance-aware local evidence | Implemented |
 | [0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md) | Retire Codex MCP; bound reciprocal QE-Court participant transport | Implemented; handoff transport amended by 0034 |
 | [0034](0034-schema-native-handoffs-and-hermetic-seats.md) | Schema-native worker handoffs and hermetic qe-court seats | Implemented |
-| [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Retired (implemented for issue #114; removal ships in 4.0.0-beta.1 under 0064) |
+| [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Retired (implemented for issue #114; removed in 4.0.0-beta.1 under 0064) |
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 | [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
 | [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted; Claude, Codex and OpenCode counting corrected 2026-09-19 |
