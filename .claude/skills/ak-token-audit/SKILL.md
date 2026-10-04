@@ -61,11 +61,12 @@ Code activity looked like, or says the plan is being burned or limits are being 
 
 ## Gates
 
-- It reads only the `~/.claude/projects/**/*.jsonl` transcripts and, for the daemon
+- The engine reads only the `~/.claude/projects/**/*.jsonl` transcripts and, for the daemon
   cross-reference, the process list from `ps` (`--no-daemons` skips it). It writes nothing
-  anywhere and posts nothing.
+  anywhere and posts nothing. Step 3 additionally runs the two read-only Ruflo reports named
+  there.
 - The output names projects and sessions: show it to the maintainer and never paste it into an
-  issue, a pull request or any shared place without redacting the project names first.
+  issue, a pull request or any shared place without redacting the project names and paths first.
 - Never stop a daemon or any other process from this skill: name the PIDs and their projects and
   leave the stop to the maintainer.
 

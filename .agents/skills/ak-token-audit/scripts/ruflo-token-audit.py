@@ -331,7 +331,7 @@ def human_report(data, top, show_daemons):
             for pid, etime, ws in daemons:
                 flag = "  <-- TOP BURN PROJECT" if project_label(ws) in top_projects else ""
                 w(f"  pid={pid:>7}  uptime={etime:>12}  {ws}{flag}")
-            w(f"\n  {len(daemons)} daemon(s) running. Inspect/stop: ruflo-daemon-gc [--kill]")
+            w(f"\n  {len(daemons)} daemon(s) running. Inspect: ruflo daemon status --all")
     return "\n".join(out)
 
 

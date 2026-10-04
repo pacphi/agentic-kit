@@ -2,7 +2,7 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
-- **Updated:** 2026-10-04 — the standalone reporter named below is now the repository's
+- **Updated:** 2026-10-03 — the standalone reporter named below is now the repository's
   maintainer-only `ak-token-audit` skill (`.claude/skills/ak-token-audit/`). It is not shipped
   and `ak setup` does not deploy it; users rely on `ak usage` and the dashboard's Usage view.
   The decision below is otherwise unchanged.
