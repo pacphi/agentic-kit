@@ -2764,12 +2764,13 @@
       "mapping": "mapped",
       "kitImpact": {"refs": ["Branch 5: ak x aqe-store merge deletes each stray copy's witness_chain rows before export (the archived stray keeps them)"], "files": ["src/lib/aqe-store-merge.mjs"]},
       "adjustment": "Once a released agentic-qe imports witness rows without breaking the target chain, ak x aqe-store merge can stop deleting the stray copy's witness_chain rows before export.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 766; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 766; no release contains it yet" },
+        { "date": "2026-10-04", "event": "dispatched", "note": "npm agentic-qe 3.14.5 published; draft PR gates the adjustment on WITNESS_CHAIN_IMPORT_FIX_VERSION = 3.14.5 in src/lib/aqe-store-merge.mjs, test-first; unverified against the released artifact, no test-receipt yet" }
       ]
     },
     {

@@ -46,6 +46,18 @@ test('--yes merges, keeps the audit trail out, archives whole folders beside a b
   assert.deepEqual(fs.readdirSync(p.mergeDir), [result.runId], 'a second run writes no receipt');
 });
 
+// agentic-qe#759: once a released agentic-qe imports witness rows without breaking the
+// target's audit chain, the merge stops deleting the stray copy's witness_chain rows first.
+test('on a fixed agentic-qe, stray witness_chain rows import instead of being dropped', async (t) => {
+  const p = project(t);
+  const { runner } = fakeAqe({ version: '3.14.5' });
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner, holders: noHolders, aqeVersion: '3.14.5' }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  assert.equal(count(p.rootDb, 'witness_chain'), 6, 'stray witness rows reach the root once agentic-qe imports them safely');
+  const receipt = JSON.parse(fs.readFileSync(result.receipt, 'utf8'));
+  assert.deepEqual(receipt.strays.map((s) => s.witnessRowsNotImported), [0, 0], 'nothing was dropped before export');
+});
+
 test('a holder appearing between rehearsal and apply stops before the real import', async (t) => {
   const p = project(t);
   const { runner, calls } = fakeAqe();

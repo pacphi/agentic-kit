@@ -27,7 +27,8 @@
 //   3 backup    VACUUM INTO <run>/backup/root-memory.db.
 //   4 rehearse  on a copy of that backup: per stray copy, delete its
 //               witness_chain rows (appended unlinked they break the root's
-//               audit chain; agentic-qe#759) and the starter patterns the
+//               audit chain; agentic-qe#759) unless the detected `aqe` is
+//               WITNESS_CHAIN_IMPORT_FIX_VERSION or newer, and the starter patterns the
 //               root does not hold, with the rows that must reference them (a
 //               *pattern_id column that is NOT NULL or a foreign key to
 //               qe_patterns: embeddings, usage, null results, lineage,
@@ -78,6 +79,10 @@ import { cmpVersions } from './versions.mjs';
  *   interrupted?: Array<{ runId: string, receipt: string, backup: string|null }> }} MergeResult */
 
 export const MIN_AQE_VERSION = '3.14.4';
+// agentic-qe#759: npm 3.14.5 is the first released artifact claimed to fix `brain import`
+// breaking the target's witness_chain audit trail; unverified against a released artifact
+// (no test-receipt yet), so keep this gate separate from MIN_AQE_VERSION until confirmed.
+export const WITNESS_CHAIN_IMPORT_FIX_VERSION = '3.14.5';
 const STORE_FILES = ['memory.db', 'memory.db-wal', 'memory.db-shm'];
 const AQE_TIMEOUT_MS = 10 * 60_000;
 const EMBEDDER_KEY = /^AQE_EMBEDDER_/;
@@ -349,9 +354,10 @@ function dropStarterPatterns(file, seedKeys, rootKeys, openDb) {
   return result.value;
 }
 
-async function exportStrays(o, rows, scratch, scratchEnv, seedKeys, rootKeys) {
+async function exportStrays(o, rows, scratch, scratchEnv, seedKeys, rootKeys, aqeVersion) {
+  const witnessChainFixed = aqeVersion != null && cmpVersions(aqeVersion, WITNESS_CHAIN_IMPORT_FIX_VERSION) >= 0;
   for (const stray of rows) {
-    stray.witnessRowsNotImported = dropWitnessRows(stray.copy, o.openDb);
+    stray.witnessRowsNotImported = witnessChainFixed ? 0 : dropWitnessRows(stray.copy, o.openDb);
     stray.seedPatternsSkipped = dropStarterPatterns(stray.copy, seedKeys, rootKeys, o.openDb);
     stray.export = path.join(scratch, 'export', stray.slug);
     await aqe(o, ['brain', 'export', '--db', stray.copy, '--format', 'jsonl', '-o', stray.export], scratchEnv);
@@ -539,7 +545,7 @@ async function applyMerge(o, root, result, rows, seedKeys, { fingerprints, rootK
   fs.mkdirSync(path.dirname(rehearsal), { recursive: true });
   fs.copyFileSync(result.backup, rehearsal);
   const scratchEnv = { cwd: scratch, env: { AQE_PROJECT_ROOT: scratch, AQE_MEMORY_PATH: rehearsal, AQE_STORAGE_PATH: path.join(scratch, 'aqe-state') } };
-  await exportStrays(o, rows, scratch, scratchEnv, seedKeys, rootKeys);
+  await exportStrays(o, rows, scratch, scratchEnv, seedKeys, rootKeys, result.aqeVersion);
   const rehearsed = await importAll(o, rows, rehearsal, scratchEnv);
   if (rehearsed.problem || !sameCounts(rehearsed.counts, result.expected)) {
     return { ...result, status: 'failed', reason: rehearsed.problem ?? `rehearsal count mismatch: expected ${JSON.stringify(result.expected)}, got ${JSON.stringify(rehearsed.counts)}; nothing was changed` };
