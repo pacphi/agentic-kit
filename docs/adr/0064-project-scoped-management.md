@@ -3,6 +3,7 @@
 - **Status:** Accepted (design approved 2026-10-01; not yet implemented — implementation starts in 4.0.0-beta.1)
 - **Date:** 2026-10-03
 - **Updated:** 2026-10-03 — accepted with the design; nothing is implemented yet
+- **Updated:** 2026-10-03 — the on-demand guidance is one `managed-tools` skill with per-component reference files; the `ak-` skill namespace belongs to the repository's maintainer skills; the token-audit skill leaves the product; `sync --all --upgrade` semantics are defined in the design plan
 - **Update note:** this ADR changes no stable surface today. [ADR-0020](0020-ga-stable-surfaces.md)'s surface table is updated when the new command surface lands (phase P5).
 - **Deciders:** agentic-kit maintainers
 - **Related:** [design plan](../plans/2026-10-01-project-scope-only-design.md),

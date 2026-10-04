@@ -5,6 +5,10 @@
 **Direction accepted** (2026-10-01). The maintainer's decisions are recorded under
 [Decisions](#decisions). Nothing is implemented yet.
 
+**Amended 2026-10-03:** one `managed-tools` skill replaces the per-tool on-demand skills; the
+token-audit skill leaves the product; `sync --all --upgrade` is defined under Sync. Decision G15 in
+the master plan.
+
 The next step is the three [prerequisites](#prerequisites), which land on `main` first. P0
 follows: the exit release on the current line, then the removal of deja-vu.
 
@@ -85,7 +89,7 @@ write is out of scope. In particular, ak never:
 | 8 | Command surface | **Kept trim.** Four lifecycle verbs: `init`, `status`, `sync`, `uninstall`. See [Commands](#commands). |
 | 9 | What the dashboard covers | **All work, every host, every place.** Observation covers every readable host and every folder where sessions ran, git repository or not. Management stays opt-in per project. The dashboard launches anywhere and defaults to all work. See [Dashboard and metrics](#dashboard-and-metrics). |
 | 10 | External host adapters and Hermes | **Retired from v4 and set aside for v5.** v5 plans full support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai, Desktop) and ChatGPT/Codex as first-class hosts, so a plug-in adapter contract doesn't carry forward. The work is tagged and registered, not discarded. See [Setting host adapters aside for v5](#setting-host-adapters-aside-for-v5). |
-| 11 | `ak x harvest` | **Removed.** Ruflo's own hooks already record task outcomes, and Ruflo's daemon schedules distillation. The `ak-ruflo` skill documents the two Ruflo commands for anyone who wants to run them by hand. |
+| 11 | `ak x harvest` | **Removed.** Ruflo's own hooks already record task outcomes, and Ruflo's daemon schedules distillation. The `managed-tools` skill's Ruflo reference documents the two Ruflo commands for anyone who wants to run them by hand. |
 
 Smaller calls made in this revision (flag any you disagree with):
 
@@ -109,13 +113,13 @@ The inventory was taken at `0511d57`. Paths are relative to the repository.
 | Edits inside global packages | aidefence `--no-save`, a better-sqlite3 rebuild and `npm pkg set` in the global Ruflo tree (`src/lib/heal.mjs:28-106`) | Made only in ak's cached copy; a user's own Ruflo is never changed |
 | Host CLIs | Prompted global install during setup; installed without a prompt by sync and `host pick` (`src/lib/providers.mjs:358`, `src/commands/sync.mjs:260-289`) | Detected and explained, never installed |
 | Kit self-update | `npm i -g @pacphi/agentic-kit@x` as sync's last step (`src/lib/heal.mjs:222`) | Reports the upgrade command for however `ak` was installed |
-| Claude guidance | Up to about 10.5 KB of blocks in `~/.claude/CLAUDE.md`, loaded in **every** Claude session (`src/lib/blocks.mjs:48-175,489`) | About 1.5 KB always-on in opted-in projects, plus on-demand skills |
-| Codex and OpenCode guidance | `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md` | Project skills, OpenCode `instructions`, and a project `AGENTS.md` block where allowed |
+| Claude guidance | Up to about 10.5 KB of blocks in `~/.claude/CLAUDE.md`, loaded in **every** Claude session (`src/lib/blocks.mjs:48-175,489`) | About 1.5 KB always-on in opted-in projects, plus one on-demand skill (`managed-tools`) |
+| Codex and OpenCode guidance | `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md` | The `managed-tools` project skill, OpenCode `instructions`, and a project `AGENTS.md` block where allowed |
 | Ruflo MCP | `claude mcp add -s user`; `codex mcp add` into the user config (`src/lib/mcp.mjs:176`, `src/lib/providers.mjs:846`) | Claude local scope; project `.codex/config.toml`; project `.opencode/` |
 | AQE's Claude MCP entry | Written into `.mcp.json` by `aqe init` | A Claude local-scope registration in personal mode |
 | Component, provider and AQE budget env | `~/.claude/settings.json` `env`, falling back to user settings outside a repo (`src/lib/claude-env-projection.mjs:12`, `src/lib/providers.mjs:469`) | `.claude/settings.local.json` only, with no fallback |
 | Tool-family deny rules | `~/.claude/settings.json` `permissions.deny` (`src/lib/mcp.mjs:662`) | `.claude/settings.local.json` |
-| Token-audit skill | Copied into `~/.claude/skills/` on every setup, and scans all projects (`src/commands/setup.mjs:370`) | A project skill, scoped to this project's transcripts by default |
+| Token-audit skill | Copied into `~/.claude/skills/` on every setup, and scans all projects (`src/commands/setup.mjs:370`) | Not a product skill. It becomes a maintainer-only skill of this repository, and `ak init` never writes it |
 | Superpowers guidance | Added to `~/.claude/CLAUDE.md` whenever the plugin is cached (`src/lib/blocks.mjs:114-128`) | Added only to projects with evidence of Superpowers use |
 | OpenCode wiring | User `opencode.json`, plugins, agents, skills and wildcard approvals (`src/lib/opencode-core.mjs:631-722`) | Project `.opencode/`; approvals apply to that project only |
 | RuvNet Brain | A user-scope Claude plugin whose hooks, including a write gate, run in every session (`src/lib/brain-hook-contract.mjs:11-27`) | Knowledge base in the cache; `search_ruvnet` MCP per project; hooks only by per-project opt-in |
@@ -156,7 +160,7 @@ line.
 
 | | Write-up | What it fixes | Why the design needs it |
 | --- | --- | --- | --- |
-| A | [Remove the dangling full Ruflo reference pointer](2026-10-01-prereq-ruflo-reference-pointer.md) | Every Claude session on an installed machine is pointed at a file the kit never installs | The `ak-ruflo` skill later takes this content over; until then the current line should not mislead agents |
+| A | [Remove the dangling full Ruflo reference pointer](2026-10-01-prereq-ruflo-reference-pointer.md) | Every Claude session on an installed machine is pointed at a file the kit never installs | The Ruflo reference (`ruflo.md`) of the `managed-tools` skill later takes this content over; until then the current line should not mislead agents |
 | B | [Stop the Intelligence view writing into projects](2026-10-01-prereq-intelligence-no-project-writes.md) | Opening Overview → Intelligence appends `.claude-flow/health-history.json` in whichever project is selected, including the home folder | Establishes dashboard principle 2 (viewing writes only to the cache) and introduces `paths.cacheDir()`, the cache folder the whole design uses |
 | C | [Give hooks their real scope in the Maintenance inventory](2026-10-01-prereq-maintenance-hook-scope.md) | Every hook is labelled user-level, and hooks never reach the production Inventory at all | The Maintenance write precondition and the "Yours: ak reads, never changes" labelling both depend on true scope and project |
 
@@ -199,7 +203,7 @@ These are removed or folded in:
 | `host`, `host status` | The Hosts section of `status` |
 | `host pick --primary-host`, `--aqe-provider`, `--aqe-fallback`, `--provider` | Choices in `init`, saved to `local.json` |
 | `host adapters` (list, trust, revoke, conformance, grant, gate, status, revoke-grant), `x aqe-provider` | Retired from v4 and set aside for v5. See [Setting host adapters aside for v5](#setting-host-adapters-aside-for-v5) |
-| `x harvest`, and the `harvest` live check | Removed. The `ak-ruflo` skill documents `ruflo hooks post-task` and `ruflo memory distill run`. The `learning` live check stays |
+| `x harvest`, and the `harvest` live check | Removed. The `managed-tools` skill's Ruflo reference documents `ruflo hooks post-task` and `ruflo memory distill run`. The `learning` live check stays |
 | `x aqe-store` | A `maintain` action with an undo receipt. It still refuses while any AQE writer is open, and it is never a `sync` step (decision B5-D2) |
 | `x skills plan` | A read-only finding in `maintain` |
 
@@ -249,16 +253,16 @@ Who sees it
   (•) Just me: only git-ignored files; teammates see no change
   ( ) My team: commit .agentic-kit/project.json so teammates can run `ak sync`
 
-Plan: 10 files, 0 tracked files modified
+Plan: 8 files, 0 tracked files modified
   + .agentic-kit/project.json, local.json          new, ignored
   + .claude/settings.local.json                    merge: env 4, hooks 3 (yours kept)
   + .claude/rules/agentic-kit.md                   new, ignored (1.6 KB always-on,
                                                    includes Superpowers notes)
-  + .claude/skills/ak-ruflo/ ak-aqe/               new, ignored (load on demand)
+  + .claude/skills/managed-tools/                  new, ignored (load on demand)
   + Claude MCP (this project only)                 claude-flow, agentic-qe via
                                                    `claude mcp add -s local` (.mcp.json untouched)
   + .codex/config.toml                             new, ignored
-  + .agents/skills/ak-ruflo/ ak-aqe/               new, ignored
+  + .agents/skills/managed-tools/                  new, ignored
   + .git/info/exclude                              one ak block listing the above
 Codex account settings (exception; removed when you uninstall here)
   ~ ~/.codex/config.toml                           trust this folder so Codex loads the project
@@ -388,7 +392,7 @@ used in the last 30 days. Anything pruned is downloaded again when needed.
 | | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Always-on guidance | `.claude/rules/agentic-kit.md`: loads at launch and does not stop Claude reading `AGENTS.md` | A block in `AGENTS.md`, only if the file is absent or untracked, or the user agrees | `instructions` in `.opencode/opencode.json` |
-| On-demand guidance | `.claude/skills/ak-*` | `.agents/skills/ak-*` | `.opencode/skills/ak-*` |
+| On-demand guidance | `.claude/skills/managed-tools/` | `.agents/skills/managed-tools/` | `.opencode/skills/managed-tools/` |
 | MCP | Personal: local scope through `claude mcp add -s local` (server names `claude-flow`, `agentic-qe`, `ruvnet-brain`). Team: `.mcp.json` with `${CLAUDE_PROJECT_DIR}` | `[mcp_servers.*]` in the project `.codex/config.toml` | `mcp` in `.opencode/opencode.json` |
 | Env and policy | `env` in `.claude/settings.local.json` | `[shell_environment_policy.set]` and the server `env` in `.codex/config.toml` | `.opencode/opencode.json` |
 | Hooks and plugins | Hooks in `.claude/settings.local.json` | `.codex/hooks.json`; Codex asks once per hook, and ak never writes `trusted_hash` | `.opencode/plugins/` |
@@ -555,23 +559,40 @@ Each topic has one source in `claude/` and a small renderer for each host. That 
 duplication at its source instead of sharing one user-level file.
 
 **Always-on** (budget 1.5 KB): condensed safety and verification rules from `ruflo-preamble.md`,
-what this project has enabled and which skills to use, and the Superpowers notes when the project
-qualifies.
+what this project has enabled and when to open the `managed-tools` skill, and the Superpowers
+notes when the project qualifies.
 
-**On-demand skills**, which cost nothing until used:
+**On-demand skill**, which costs nothing until used. There is one product skill, `managed-tools`.
+`ak init` writes it only into an opted-in project, ignored like every other generated file, at
+`.claude/skills/managed-tools/` and `.agents/skills/managed-tools/` (and
+`.opencode/skills/managed-tools/` where OpenCode applies). It holds:
 
-| Skill | Source |
-| --- | --- |
-| `ak-ruflo` | `ruflo-reference.md`, with the 439-line `ruflo-reference-full.md` as its reference file. This also fixes the dangling reference. |
-| `ak-aqe` | `aqe-reference.md` |
-| `ak-brain` | `ruvnet-brain-reference.md` |
-| `ak-hosts` | `providers-reference.md`, `dual-mode-reference.md` and `ruflo-opencode-reference.md`, only where they apply |
-| `ak-token-audit` | The token-audit skill, rescoped to this project |
+- `SKILL.md`: what this project has enabled and which reference to read for each component.
+- One reference file per enabled component. A component that is not enabled gets no file:
+
+  | Reference | Source |
+  | --- | --- |
+  | `ruflo.md` | `ruflo-reference.md`, with the 439-line `ruflo-reference-full.md` as its reference file. This also gives the full reference a real home; [prerequisite A](#prerequisites) only stops the current line pointing at a missing file. P1-03 decides the file name and placement of the full reference. |
+  | `aqe.md` | `aqe-reference.md` |
+  | `brain.md` | `ruvnet-brain-reference.md` |
+  | `hosts.md` | `providers-reference.md`, `dual-mode-reference.md` and `ruflo-opencode-reference.md`, only where they apply |
+
+- Implementation note for P1-03: content that a tool already injects itself is left out of the
+  reference files. That covers the Brain plugin's hook, AQE's own `AGENTS.md` section and Ruflo's
+  `CLAUDE.md` block.
+
+Two rules keep the skill namespace clean:
+
+- The `ak-` skill namespace in `.claude/skills/` belongs to this repository's authored maintainer
+  skills, tracked by name (see [Maintainer skills](../maintainer.md#maintainer-skills)). `ak init`
+  never writes an `ak-*` skill.
+- The token-audit skill is not a product skill. It becomes a maintainer-only skill of this
+  repository, in a separate change.
 
 Personal facts are never committed (ADR-0008's principle). That covers dual-host mode, provider
 bindings and Superpowers use. Today an installed machine pays about 10.5 KB in every Claude
 session, in every folder. Afterwards, a folder that hasn't opted in pays nothing, and an opted-in
-project pays about 1.5 KB, plus skill descriptions.
+project pays about 1.5 KB, plus the `managed-tools` skill's description.
 
 ## Sync, status, uninstall
 
@@ -588,6 +609,20 @@ project pays about 1.5 KB, plus skill descriptions.
 
 It never self-updates and never touches another project. `--upgrade` is the only thing that moves
 pins. In team mode it leaves `project.json` modified for the user to commit.
+
+**`ak sync --all --upgrade [name[@version]]`** composes the two flags. Applying its plan is `ak sync`
+running in each opted-in project in turn, so no pin moves any other way. The semantics are:
+
+- It shows one per-project plan: which pins move, from what to what.
+- It takes one yes.
+- It then moves the named pin in every opted-in project. With no name, it moves every pin to the
+  newest version inside its support window.
+- `--dry-run` prints the plan and stops.
+- A failure in one project is reported and the batch continues.
+- The report lists the projects moved, left and failed.
+
+Pins stay pinned-only in 4.x: nothing floats. A floating policy is the v5 decision X1. The
+[estate convergence design](2026-10-03-estate-convergence-design.md) (P5-02) uses the same wording.
 
 **`ak status`** has three sections:
 
@@ -893,8 +928,8 @@ stay, and user placements are labelled "Yours: ak reads, never changes".
 | Scorecard, Limits, Prompts, Models | Whole account; `handleUsage` takes only `days` | Follows the header filter and host facet (default All work), with the managed share shown beside the figures. Add `scope=all\|managed\|<place key>` and `host` to `handleUsage`, `scanKey` and `aggregate`. Plan limits are always account-wide and labelled so. Limits: classify each opted-in project's statusLine, and report a kit footer still at user level as an older installation. Extra hosts come from `local.json` |
 | Tool mix | Raw MCP names | Keep `claude-flow` as the server name so history doesn't split. Add a server-to-family tag (ruflo, aqe, brain, and deja-vu as retired) through `classifyToolName` (`src/lib/live/tool-classify.mjs:5`) |
 | Projects | Top Git repositories by spend; plain folders and user-level locations are left out (`src/lib/usage-project-groups.mjs:61-64`) | Becomes **Places**: every kind, with a kind column and a managed badge, and rows that add up to the total. Opt-in status is read once per root at index read time and passed into `aggregate`, never stored in the parse cache, because a project can opt in after its transcripts were indexed |
-| Context and the context-tax finding | Advice points at user-level guidance blocks. Claude window size is measured only where the footer runs | Follows the header filter, and says that Claude pressure is measured only where the footer runs, so **All work** shows input-only figures for sessions outside managed projects. Split the context-tax finding into opted-in and not. Advice points at the project rule, skills and `ak audit context` |
-| `ak audit context` | Reads machine guidance files, top-level `mcpServers` in `~/.claude.json`, and the Superpowers plugin cache (`src/lib/context-audit-sources.mjs:216-275`) | Project rule target (about 1.5 KB budget), frontmatter of ak's own skills, local-scope, `.mcp.json` and project Codex MCP reported by scope, and project Superpowers evidence. Machine blocks show as an older installation |
+| Context and the context-tax finding | Advice points at user-level guidance blocks. Claude window size is measured only where the footer runs | Follows the header filter, and says that Claude pressure is measured only where the footer runs, so **All work** shows input-only figures for sessions outside managed projects. Split the context-tax finding into opted-in and not. Advice points at the project rule, the `managed-tools` skill and `ak audit context` |
+| `ak audit context` | Reads machine guidance files, top-level `mcpServers` in `~/.claude.json`, and the Superpowers plugin cache (`src/lib/context-audit-sources.mjs:216-275`) | Project rule target (about 1.5 KB budget), frontmatter of the `managed-tools` skill, local-scope, `.mcp.json` and project Codex MCP reported by scope, and project Superpowers evidence. Machine blocks show as an older installation |
 | Observability | Reads every transcript. Workspace store in `~/.config/agentic-kit` | Reads stay. Workspace store moves to the cache. `resolveProjectIdentity` gets an `optedIn` flag for a badge and filter (`src/lib/live/project-label.mjs:70-93`) |
 | Telemetry | Contract v1 fixes `selection.scope`. Inventory and maintenance come from user-level stores. Identity sits next to `kit.json` | Contract v2: `selection.scope` is `all\|managed`, matching the dashboard filter; optional per-session `akScope`; inventory and maintenance come from project state or read `unavailable`. Identity moves to the cache |
 | Admin | npm download trends include automatic self-update installs | Annotate the release on the sparkline. The trend breaks there, because there are no more self-update installs and `npx … init` runs count instead |
@@ -906,8 +941,8 @@ Add a **Footprint** card under Usage → Context. It gives the user evidence of 
 promises.
 
 - **Per-session field.** Each session gets a cached `akFootprint` field: MCP calls per ak family,
-  `ak-*` and Ruflo skill uses, and kit-owned hook attachments. This bumps the index `SCHEMA_VERSION`
-  from 26 to 27 (`src/lib/usage-index.mjs:198`).
+  `managed-tools` and Ruflo skill uses, and kit-owned hook attachments. This bumps the index
+  `SCHEMA_VERSION` from 26 to 27 (`src/lib/usage-index.mjs:198`).
 - **Hook attachments.** These need `attachment` and `system` records to be parsed. They are ignored
   today (`src/lib/usage-parsers.mjs:799-801`).
 - **The comparison.** Split sessions into opted-in and not, and into before and after the switch,
@@ -1020,7 +1055,7 @@ dashboard work.
 | --- | --- |
 | Prerequisites | On `main`, in any order: [A](2026-10-01-prereq-ruflo-reference-pointer.md) (dangling reference pointer), [B](2026-10-01-prereq-intelligence-no-project-writes.md) (Intelligence writes into projects; adds `paths.cacheDir()`), [C](2026-10-01-prereq-maintenance-hook-scope.md) (hook scope and inventory wiring) |
 | P0 | The exit release, which includes the prerequisites on the current line: a complete `uninstall --purge` and its regression test. Then, on the new line: remove deja-vu; tag and retire the external host-adapter contract; the ADR; the write gate in report-only mode; and contract tests recording today's violations as the baseline |
-| P1 | The `.agentic-kit/` layout and `ak init` in personal mode for Claude: rules, skills, `settings.local.json`, local-scope MCP launchers. Staged initializers that use existing setups. The legacy check. User-level guidance writes stop |
+| P1 | The `.agentic-kit/` layout and `ak init` in personal mode for Claude: rules, the `managed-tools` skill, `settings.local.json`, local-scope MCP launchers. Staged initializers that use existing setups. The legacy check. User-level guidance writes stop |
 | P2 | Tool cache and launchers. Global npm installs, self-update and host-CLI installs removed. Daemon handling scoped to the project |
 | P3 | Codex project settings and the exception register; OpenCode project settings |
 | P4 | Brain knowledge-base-only mode, agent-browser, embeddings consent, Superpowers evidence. Upstream requests filed |
