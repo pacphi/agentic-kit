@@ -2,6 +2,10 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
+- **Updated:** 2026-10-04 — the standalone reporter named below is now the repository's
+  maintainer-only `ak-token-audit` skill (`.claude/skills/ak-token-audit/`). It is not shipped
+  and `ak setup` does not deploy it; users rely on `ak usage` and the dashboard's Usage view.
+  The decision below is otherwise unchanged.
 - **Updated:** 2026-09-29 — usage schema 25 → 26 delivers bounded session surface/provider
   evidence, per-turn Codex import ownership, positive component usage without responses,
   one Claude message charge owner across the bounded two-window pool, separate host-reported

@@ -47,7 +47,7 @@ The machine phase is the same with or without `--project`. It:
   retaining already-installed tool versions;
 - installs and verifies the exact Ruflo-compatible `agent-browser` executor,
   unless `--no-agent-browser` is selected;
-- repairs required native packages and deploys the token-audit skill;
+- repairs required native packages;
 - reconciles agentic-kit's managed guidance blocks in the user-level Claude
   and Codex files that exist on the machine;
 - offers user-scope Ruflo MCP registration; and
