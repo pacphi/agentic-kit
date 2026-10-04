@@ -8,7 +8,10 @@
 # Captured CLI output fixtures are byte-exact evidence (one keeps a spinner \r):
 # never let a Windows checkout rewrite their line endings.
 tests/fixtures/ruflo-components/** -text
-# Host skill loaders (Claude Code, Codex) parse this skill's YAML frontmatter
-# at runtime: a Windows checkout must hand them the same LF text CI tests.
-.claude/skills/upstream-status/SKILL.md text eol=lf
-.agents/skills/upstream-status/SKILL.md text eol=lf
+# Host skill loaders (Claude Code, Codex) parse these skills' YAML frontmatter
+# at runtime: a Windows checkout must hand them the same LF text CI tests. The
+# glob matches by the ak- prefix and pins line endings only; .gitignore, not
+# this file, decides which skills are tracked, and any unlisted folder, a
+# generated `managed-tools` skill included, stays ignored.
+.claude/skills/ak-*/**/*.md text eol=lf
+.agents/skills/ak-*/**/*.md text eol=lf
