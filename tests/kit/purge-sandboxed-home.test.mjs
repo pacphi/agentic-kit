@@ -92,7 +92,7 @@ test('setup then --purge returns a populated HOME to its pre-setup fingerprint',
   assert.equal(setup.status, 0, setup.out);
   // Not vacuous: setup really wrote ak's footprint into the HOME it is about to be purged from.
   assert.match(s.read('.claude', 'CLAUDE.md'), /<!-- BEGIN ruflo-/);
-  assert.ok(fs.existsSync(path.join(s.home, '.claude', 'skills', 'ruflo-token-audit', 'SKILL.md')), 'setup deployed its skill');
+  assert.deepEqual(fs.readdirSync(path.join(s.home, '.claude', 'skills')), ['my-skill'], 'setup deploys nothing under ~/.claude/skills');
   assert.ok(fs.existsSync(path.join(s.home, '.config', 'agentic-kit', 'kit.json')), 'setup wrote kit.json');
   assert.notDeepEqual(snapshot(s.home), s.before.home, 'setup changed the HOME');
 

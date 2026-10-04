@@ -181,6 +181,18 @@ const CONTRACTS = {
       // `merge-base --is-ancestor` exits 1 for every squash merge: that answer must not make the row inconclusive.
       /A\s+non-zero\s+exit\s+that\s+is\s+the\s+command's\s+answer\s+\(`merge-base --is-ancestor`\s+exiting\s+1,\s+`rev-parse`\s+of\s+a\s+missing\s+ref\)\s+is\s+a\s+no,\s+not\s+a\s+failure;\s+only\s+an\s+error\s+is\s+inconclusive/],
   },
+  'ak-token-audit': {
+    triggers: [/where are my tokens going/i, /usage breakdown/i, /burning through my plan/i, /hitting limits/i],
+    // Each gate pins its own sentence of the Gates section; the run line pins the one way the
+    // engine is started (from the repository root, by a path that exists in this checkout).
+    gates: [/python3\s+\.claude\/skills\/ak-token-audit\/scripts\/ruflo-token-audit\.py\s+--days\s+7/,
+      /It\s+reads\s+only\s+the\s+`~\/\.claude\/projects\/\*\*\/\*\.jsonl`\s+transcripts\s+and,\s+for\s+the\s+daemon\s+cross-reference,\s+the\s+process\s+list\s+from\s+`ps`\s+\(`--no-daemons`\s+skips\s+it\)/,
+      /It\s+writes\s+nothing\s+anywhere\s+and\s+posts\s+nothing/,
+      /The\s+output\s+names\s+projects\s+and\s+sessions:\s+show\s+it\s+to\s+the\s+maintainer\s+and\s+never\s+paste\s+it\s+into\s+an\s+issue,\s+a\s+pull\s+request\s+or\s+any\s+shared\s+place\s+without\s+redacting\s+the\s+project\s+names\s+first/,
+      /Never\s+stop\s+a\s+daemon\s+or\s+any\s+other\s+process\s+from\s+this\s+skill:\s+name\s+the\s+PIDs\s+and\s+their\s+projects\s+and\s+leave\s+the\s+stop\s+to\s+the\s+maintainer/,
+      /`ruflo\s+daemon\s+status\s+--all`/, /`ruflo\s+daemon\s+budget\s+show`/,
+      /Opus-equivalent\s+reference[^.]*not\s+the\s+plan's\s+billing/, /`ak\s+usage`/],
+  },
 };
 
 // .gitattributes checks the skills out with LF everywhere; reading them as LF keeps these

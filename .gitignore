@@ -39,6 +39,7 @@ test-*.log
 !/.claude/skills/ak-release/
 !/.claude/skills/ak-resume/
 !/.claude/skills/ak-ship/
+!/.claude/skills/ak-token-audit/
 !/.claude/skills/ak-upstream-file/
 !/.claude/skills/ak-upstream-status/
 !/.claude/skills/ak-verify/
@@ -51,6 +52,7 @@ test-*.log
 !/.agents/skills/ak-release/
 !/.agents/skills/ak-resume/
 !/.agents/skills/ak-ship/
+!/.agents/skills/ak-token-audit/
 !/.agents/skills/ak-upstream-file/
 !/.agents/skills/ak-upstream-status/
 !/.agents/skills/ak-verify/

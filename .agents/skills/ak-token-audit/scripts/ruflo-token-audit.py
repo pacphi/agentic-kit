@@ -22,12 +22,12 @@ Sections:
 Stdlib only; reads local transcripts and `ps`. No network. The cost weight is an
 Opus-equivalent *reference* to compare line items — NOT your actual plan billing.
 
-Usage:
-  ruflo-token-audit                 # last 7 days, human report
-  ruflo-token-audit --days 30       # widen the window
-  ruflo-token-audit --json          # machine-readable (dashboards/CI)
-  ruflo-token-audit --top 20        # show more projects/sessions/tools
-  ruflo-token-audit --no-daemons    # skip the `ps` daemon cross-reference
+Usage (from the repository root; S = .claude/skills/ak-token-audit/scripts/ruflo-token-audit.py):
+  python3 S                         # last 7 days, human report
+  python3 S --days 30               # widen the window
+  python3 S --json                  # machine-readable (dashboards/CI)
+  python3 S --top 20                # show more projects/sessions/tools
+  python3 S --no-daemons            # skip the `ps` daemon cross-reference
 """
 import argparse
 import collections

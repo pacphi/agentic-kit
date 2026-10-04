@@ -1,5 +1,5 @@
 // `ak uninstall` — the teardown path. It edits the user's machine-wide
-// ~/.claude/CLAUDE.md, deletes a deployed skill, rewrites shell rc files and
+// ~/.claude/CLAUDE.md, rewrites shell rc files and
 // (optionally) removes kit.json, so the properties that matter are: --dry-run
 // changes nothing, a real run backs up before it mutates, foreign content in
 // the files it touches survives, and running it twice is a no-op the second
@@ -31,17 +31,13 @@ Hand-written guidance that ak did not author and must never destroy.
 const block = (slug, body) => `${BEGIN(slug)}\n${body}\n${END(slug)}\n`;
 
 /** Reset the sandbox home to a known state: a CLAUDE.md carrying two managed
- *  blocks wrapped around foreign content, a deployed skill, and a kit.json. */
+ *  blocks wrapped around foreign content, and a kit.json. */
 function seedHome() {
   rmrf(paths.claudeDir(), paths.configDir());
-  fs.mkdirSync(paths.claudeSkillsDir(), { recursive: true });
+  fs.mkdirSync(paths.claudeDir(), { recursive: true });
   fs.writeFileSync(paths.claudeMdPath(),
     `${block('ruflo-preamble', 'preamble body')}\n${FOREIGN_MD}\n${block('ruflo-reference', 'reference body')}`);
-  const skill = path.join(paths.claudeSkillsDir(), 'ruflo-token-audit');
-  fs.mkdirSync(skill, { recursive: true });
-  fs.writeFileSync(path.join(skill, 'SKILL.md'), '# skill\n');
   writeKitConfig(HOME, { aqe: true });
-  return { skill };
 }
 
 const readMd = () => fs.readFileSync(paths.claudeMdPath(), 'utf8');
@@ -53,7 +49,6 @@ test('--dry-run reports the teardown without writing a single byte', async () =>
   const { result, out } = await captureLog(() => uninstall.run({ flags: { 'dry-run': true } }));
   assert.equal(result, 0);
   assert.match(out, /\[dry-run\] stripped 2 managed block\(s\)/);
-  assert.match(out, /\[dry-run\] removed skill ruflo-token-audit/);
   assert.match(out, /\[dry-run\] unregister claude-flow\/ruflo MCP/);
   assertUnchanged(before, HOME, '`ak uninstall --dry-run` must not touch the filesystem');
 });
@@ -110,10 +105,9 @@ test('an orphaned BEGIN sentinel is left alone rather than truncating the file',
     'a malformed block must never take the rest of the user\'s CLAUDE.md with it');
 });
 
-test('the deployed skill is removed but kit.json survives without --purge', async () => {
-  const { skill } = seedHome();
+test('kit.json survives a real run without --purge', async () => {
+  seedHome();
   await captureLog(() => uninstall.run({ flags: { yes: true } }));
-  assert.equal(fs.existsSync(skill), false, 'ruflo-token-audit skill removed');
   assert.ok(fs.existsSync(paths.kitConfigPath()), 'kit.json is only removed under --purge');
 });
 
