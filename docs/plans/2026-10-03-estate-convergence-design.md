@@ -5,7 +5,7 @@
 **Active** (2026-10-03). Design approved by the maintainer in chat on 2026-10-03. Queued: the
 two cards below enter the inventory in this pull request and become issues through the
 dependency-sync runbook; the `sync --all --upgrade` wording for P5-02 landed in the plan
-amendment (master plan Decision G15). No code is written for this spec until the
+amendment (master plan Decision G17). No code is written for this spec until the
 4.1.0 and v5.0.0 cards are scheduled.
 
 ## Outcome
@@ -105,5 +105,5 @@ them.
 - [ADR-0064](../adr/0064-project-scoped-management.md).
 - [v5 plans measured against the v4 decisions](../proposals/v5-impact-of-v4.md): X1, X2, X3, X4,
   B1.6, B5.2, B6.1, B6.2, T01.
-- [v4 GA master plan](2026-10-01-v4-ga-master-plan.md): Decision G14, card format, dependency
+- [v4 GA master plan](2026-10-01-v4-ga-master-plan.md): Decision G16, card format, dependency
   sync runbook.

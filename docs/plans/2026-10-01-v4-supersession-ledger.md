@@ -8,7 +8,7 @@ until 2026-10-01 (section H). It feeds the card inventory, and it serves as reme
 reconciliation (V7 step 2). It is archived with the program.
 
 **Amended 2026-10-03:** in section D, the guidance row points at the single `managed-tools` skill,
-and the token-audit skill row says the skill leaves the product (master plan Decision G15).
+and the token-audit skill row says the skill leaves the product (master plan Decision G17).
 
 ## How to read it
 
@@ -386,7 +386,7 @@ All are finished work. Sizes are line counts.
 | Companion registry | `adapters/companion-registry.mjs` (61), `companion-lifecycle-registry.mjs` (27) | P0 | Superseded (**G5**) |
 | User guidance blocks | `blocks.mjs` (608), `status/sections/blocks.mjs` (43) | P1, P3 | Superseded by the project rule and the `managed-tools` skill |
 | Superpowers block | `blocks.mjs:114-128` | P4 | Superseded by the evidence rule |
-| Token-audit skill deploy | `setup.mjs:369-376` | P1 | Superseded: the skill leaves the product and becomes a maintainer-only skill of this repository (master plan Decision G15) |
+| Token-audit skill deploy | `setup.mjs:369-376` | P1 | Superseded: the skill leaves the product and becomes a maintainer-only skill of this repository (master plan Decision G17) |
 | `kit.json` schema | `config.mjs` (310), `health-history.mjs` (125), `adapters/grants.mjs:55` | P1, P5 | Superseded by `.agentic-kit/` and the cache |
 | User-settings env | `claude-env-projection.mjs` (85), `providers.mjs:469` | P1 | Superseded; the exit purge removes it by receipt |
 | User-scope auto-approvals | `registries.mjs:228-256` | P1, P3 | Superseded |
