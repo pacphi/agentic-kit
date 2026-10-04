@@ -6,6 +6,10 @@
 [Project-scoped management only](2026-10-01-project-scope-only-design.md#prerequisites). It lands
 on `main` before P0, so it also ships in the exit release.
 
+**Amended 2026-10-04:** the project skill that takes this content over is the single
+`managed-tools` skill, through its Ruflo reference, not a separate per-tool skill (master plan
+Decision G15).
+
 ## Problem
 
 The managed `ruflo-reference` block tells the agent, in every Claude session on an installed
@@ -63,7 +67,8 @@ Why not deploy the file instead:
 
 - It would add a new user-level write.
 - The [project-scope design](2026-10-01-project-scope-only-design.md) removes user-level guidance,
-  and turns this content into the reference file of the project skill `ak-ruflo`.
+  and turns this content into the Ruflo reference (`ruflo.md`) of the `managed-tools` project
+  skill.
 
 A one-line prose fix now is cheaper and makes no change that later has to be reversed.
 
@@ -99,6 +104,6 @@ A one-line prose fix now is cheaper and makes no change that later has to be rev
 ## Relation to the project-scope design
 
 The design's [Guidance and templates](2026-10-01-project-scope-only-design.md#guidance-and-templates)
-section later moves this content into the on-demand `ak-ruflo` project skill, with
-`ruflo-reference-full.md` as its reference file. This prerequisite only stops the current line
-from pointing at a missing file in the meantime.
+section later moves this content into the Ruflo reference (`ruflo.md`) of the on-demand
+`managed-tools` project skill, with `ruflo-reference-full.md` as its reference file. This
+prerequisite only stops the current line from pointing at a missing file in the meantime.
