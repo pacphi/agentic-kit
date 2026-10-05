@@ -69,4 +69,3 @@ upgraded. The same results as 3.14.7 hold on macOS:
   (#735).
 
 Not rerun on 3.14.8: the MCP probes for #528 and #535, and the #754 index-binding check.
-

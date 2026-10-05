@@ -34,4 +34,3 @@ verified the same way, in the same disposable folder, with the same fixtures:
 
 `bin/install.mjs` and `kb/forge-update.mjs` differ from 4.5.9 (139 and 22 changed lines); #335 was
 not rechecked. The local mock release server was stopped afterwards.
-
