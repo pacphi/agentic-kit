@@ -95,3 +95,17 @@ test('aqe init report: Codex hooks and skills are named only when they are there
   assert.deepEqual(aqeInitReport({ code: 0, withCodex: false, root: codexProject(t), version: '3.14.4' }), { level: 'ok', text: 'agentic-qe initialized' });
   assert.equal(aqeInitReport({ code: 1, withCodex: false, root: codexProject(t), version: '3.14.4' }).level, 'warn');
 });
+
+// agentic-qe#755 closed upstream (fixed in 3.14.5): once AQE reports that version
+// or newer, a persisting gap is no longer that resolvePackageRoot defect, so stop
+// blaming a closed issue for it.
+test('aqe init report: agentic-qe#755 is cited only below the release that fixed it', (t) => {
+  const stale = aqeInitReport({ code: 0, withCodex: true, root: codexProject(t), version: '3.14.4' });
+  assert.equal(stale.level, 'warn');
+  assert.match(stale.text, /agentic-qe#755/);
+  const fixed = aqeInitReport({ code: 0, withCodex: true, root: codexProject(t), version: '3.14.5' });
+  assert.equal(fixed.level, 'warn');
+  assert.doesNotMatch(fixed.text, /agentic-qe#755/);
+  assert.match(fixed.text, /AQE 3\.14\.5 did not install its Codex hooks or skills/);
+  assert.match(fixed.text, /aqe-plan-quality/);
+});
