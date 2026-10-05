@@ -49,3 +49,24 @@ variable except `AQE_SKIP_CODE_INDEX=1` and, for the embedder run only,
   the environment.
 - Linux and Windows. Results hold for 3.14.7; they do not say which earlier release first fixed
   each item.
+
+## Addendum: AQE 3.14.8 (2026-10-05)
+
+`agentic-qe@3.14.8` (registry integrity
+`sha512-VCqf3p6epkFDHAUtvglYvJpzW8Ls7UjbDGMZKvApGCvOxVNAH/Hyw9rRTIUJxz52aexbuwQXeuCQkNeR0Ryp5A==`)
+was installed with `npm install --prefix` into a disposable folder, with `better-sqlite3` and
+`hnswlib-node` rebuilt there, and run with `AQE_BIN` pointing at it. Nothing on the machine was
+upgraded. The same results as 3.14.7 hold on macOS:
+
+- `aqe-codex-guidance-conformance` (full, compact, none), `aqe-stop-hook-conformance` and
+  `aqe-live-lock-conformance` pass.
+- Three same-option `aqe init` runs leave `.claude/settings.json` and `CLAUDE.md` identical, with
+  no backup file (#778).
+- `aqe init --with-codex --no-claude` writes no `CLAUDE.md` or `.claude` (#532).
+- `aqe platform setup` configures all eight platforms (#757), and `aqe platform verify codex` in a
+  bare project exits 1 (#758).
+- `aqe memory store` from a subfolder writes to the root `.agentic-qe` and creates no other store
+  (#735).
+
+Not rerun on 3.14.8: the MCP probes for #528 and #535, and the #754 index-binding check.
+
