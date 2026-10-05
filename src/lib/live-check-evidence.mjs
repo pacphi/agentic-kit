@@ -141,7 +141,6 @@ const INPUTS = {
   providers: ({ cfg, cwd }) => ({ hosts: cfg.integrations?.hosts ?? null, providers: cfg.providers ?? null,
     aqe: cfg.aqe !== false, project: path.resolve(cwd) }),
   security: () => ({ ruflo: rufloVersion() }),
-  'deja-vu': ({ cfg }) => ({ dejaVu: cfg.integrations?.tools?.dejaVu ?? null }),
   memory: () => ({ ruflo: rufloVersion() }),
   'memory-routes': ({ routingVersion, platform }) => ({
     routingVersion: routingVersion === undefined ? installedRoutingVersion() : routingVersion,

@@ -51,8 +51,6 @@ The machine phase is the same with or without `--project`. It:
 - reconciles agentic-kit's managed guidance blocks in the user-level Claude
   and Codex files that exist on the machine;
 - offers user-scope Ruflo MCP registration; and
-- when explicitly requested, installs and wires the optional deja-vu transcript
-  companion, then builds its derived index once with `deja index`; and
 - applies saved host, provider, and routing choices.
 
 `ak setup` is the first-time installer, not the routine upgrade command. Once
@@ -92,25 +90,6 @@ table (component, state, meaning), any step that failed, and, if anything change
 restart Claude Code, Codex and OpenCode — hosts read their environment at start-up, so a
 component stays `applied, not verified` until the next session and ruflo's own check confirm it. `ak status --refresh` re-checks without a restart
 once the hosts are back up.
-
-### Optional deja-vu companion
-
-deja-vu is disabled unless setup receives `--with-deja-vu`. The default opted-in
-mode is `mcp`; `--deja-vu-mode auto` adds the host-native automatic recall
-surface that deja-vu 0.19.0 supports for each enabled host. The mode surfaces
-are not identical: Claude includes per-prompt, precompaction, action-time, and
-failed-command events; Codex's CLI hooks and user-owned plugin divide those
-events differently; OpenCode has no action-time hook.
-
-Setup installs each exact enabled-host target with indexing and upstream
-guidance suppressed, then runs one `deja index` after all wiring. It never uses
-deja-vu's discover-all targets, so another agent configuration merely present
-on disk is not brought into Agentic Kit's ownership.
-
-The preflight discloses that deja-vu reads coding-agent histories and creates a
-plaintext derived search index. Redaction is best effort, and recalled history
-is untrusted evidence rather than instruction. Review the complete
-[deja-vu runbook](archive/2026-10-03-guide-deja-vu.md) before accepting this optional scope.
 
 ## What project setup changes
 
@@ -313,11 +292,6 @@ For an empty or newly created directory:
   as disabled in agentic-kit's machine configuration.
 - `--codex`, `--opencode`, and `--primary-host` enable and wire the selected
   hosts before the project phase.
-- `--with-deja-vu` opts into the transcript companion. It defaults to MCP mode.
-- `--deja-vu-mode mcp|auto` selects on-demand tools or host-native automatic
-  recall. It is valid only with the companion enabled.
-- `--no-deja-vu` records the companion as disabled and is mutually exclusive
-  with `--with-deja-vu`.
 - `--yes` accepts prompts; it does not hide the setup trust manifest or change
   the project mutation contract.
 - `--dry-run` prints a high-level plan and changes nothing.

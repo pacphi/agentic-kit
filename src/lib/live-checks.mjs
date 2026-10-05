@@ -3,8 +3,7 @@
 // in parallel by default, each bounded by a timeout that reads inconclusive;
 // `--only` names checks, runs exactly those, and is the only way a slow proof
 // (learning, harvest, the full aqe proof, memory with its route observation)
-// runs. The paid host connection check is never one of them. deja-vu is
-// intentionally structural: it must never retrieve or inspect indexed content.
+// runs. The paid host connection check is never one of them.
 // The checks port ruflo-learning-verify, ruflo-security-verify's defend
 // exercise and ruflo-verify-aqe's live checks.
 import fs from 'node:fs';
@@ -28,8 +27,6 @@ import { loadKitConfig } from './config.mjs';
 import { HOSTS, collectIntegrationFacts, aqeRouterFile, aqeExternalProviderState, EXTERNAL_PROVIDERS_MIN_AQE } from './providers.mjs';
 import { readJson } from './settings.mjs';
 import { runHarvest } from './harvest.mjs';
-import { runLifecycle } from './adapters/lifecycle.mjs';
-import { companionLifecycleFor } from './adapters/companion-lifecycle-registry.mjs';
 import { ok, warn, fail, info, heading, captureOutput } from './output.mjs';
 import { rememberLiveCheck, liveCheckInputsKey, embeddingProbeOutcome } from './live-check-evidence.mjs';
 import { LIVE_CHECK_IDS, SLOW_PROOF_IDS } from './refresh.mjs';
@@ -496,125 +493,6 @@ export async function verifyHarvest({ tmpRoot = os.tmpdir(), runner = runCmd, ha
   }
 }
 
-const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const SAFE_TARGETS = new Set([
-  'claude-code', 'claude-auto', 'codex', 'codex-auto', 'opencode', 'opencode-auto',
-]);
-const EXPECTED_TARGETS = Object.freeze({
-  claude: Object.freeze({ mcp: 'claude-code', auto: 'claude-auto' }),
-  codex: Object.freeze({ mcp: 'codex', auto: 'codex-auto' }),
-  opencode: Object.freeze({ mcp: 'opencode', auto: 'opencode-auto' }),
-});
-const SAFE_INDEX_STATES = new Set(['missing', 'ok', 'stale', 'stale-readonly', 'unknown']);
-const SAFE_OWNERSHIP = new Set(['agentic-kit', 'external', 'none']);
-const SAFE_VERSION = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-
-function hasDejaVuOwnership(cfg) {
-  const own = cfg?.integrations?.ownership?.dejaVu;
-  return plain(own) && (!!own.install || (plain(own.targets) && Object.keys(own.targets).length > 0));
-}
-
-/** Whether the deja-vu proof runs at all; when it does not, it reports a skip. */
-export const dejaVuProofApplies = (cfg) => cfg?.integrations?.tools?.dejaVu?.enabled === true || hasDejaVuOwnership(cfg);
-
-/** Package/CLI presence check — prints its verdict and returns whether it passed. */
-function checkDejaVuPackage(install) {
-  const version = typeof install.version === 'string' && SAFE_VERSION.test(install.version)
-    ? install.version.replace(/^v/, '') : 'unavailable';
-  const packageGood = install.binaryPresent === true && install.supported === true;
-  const owner = SAFE_OWNERSHIP.has(install.ownership) ? install.ownership : 'unknown';
-  (packageGood ? ok : fail)(`CLI/package ${version === 'unavailable' ? version : `v${version}`}: ${packageGood ? 'compatible' : 'incompatible or unavailable'} (${owner})`);
-  return packageGood;
-}
-
-/** `deja doctor` schema + bounded component health check. */
-function checkDejaVuDoctor(doctor) {
-  const doctorGood = doctor.state === 'ok' && doctor.schemaVersion === 2
-    && doctor.health?.state !== 'degraded';
-  (doctorGood ? ok : fail)(doctorGood
-    ? 'doctor schema v2 and bounded component health: ok'
-    : doctor.state === 'ok' && doctor.schemaVersion === 2
-      ? 'doctor schema v2 accepted but bounded component health is degraded'
-      : 'doctor schema incompatible or unavailable');
-  return doctorGood;
-}
-
-/** Derived-index state check — a missing index is fine when disabled or
- *  never desired on setup. */
-function checkDejaVuIndex(index, enabled, facts) {
-  const indexState = SAFE_INDEX_STATES.has(index.state) ? index.state : 'unknown';
-  const indexGood = !enabled || indexState === 'ok'
-    || (indexState === 'missing' && facts.desired?.indexOnSetup === false);
-  (indexGood ? ok : fail)(`index state: ${indexState}`);
-  return indexGood;
-}
-
-/** Per-host wiring check across every desired target (claude/codex/opencode
- *  × mcp/auto), printing one line per target and folding to a single verdict. */
-function checkDejaVuTargets(facts, enabled) {
-  let targetsGood = true;
-  const desiredHosts = enabled && Array.isArray(facts.desired?.hosts) ? facts.desired.hosts : [];
-  const mode = facts.desired?.mode === 'auto' ? 'auto' : 'mcp';
-  for (const host of desiredHosts.filter((value) => Object.hasOwn(EXPECTED_TARGETS, value))) {
-    const target = plain(facts.targets) ? facts.targets[host] : null;
-    const expected = EXPECTED_TARGETS[host][mode];
-    const targetName = SAFE_TARGETS.has(expected) ? expected : `${host}-target`;
-    const wired = target?.selected === true && target?.desiredTarget === expected
-      && target?.satisfied === true;
-    (wired ? ok : fail)(`${targetName}: ${wired ? 'wired' : 'not satisfied'}`);
-    targetsGood = wired && targetsGood;
-  }
-  return targetsGood;
-}
-
-/** Fold the four per-surface verdicts into one, reporting the lifecycle
- *  adapter's own failure count (never its raw errors — see the module
- *  header) when it did not report ok. */
-function finalizeDejaVuVerdict(result, packageGood, doctorGood, indexGood, targetsGood) {
-  const good = result?.ok === true && packageGood && doctorGood && indexGood && targetsGood;
-  if (!result?.ok) {
-    const count = Array.isArray(result?.errors) ? Math.min(result.errors.length, 99) : 1;
-    fail(`structural checks reported ${count} failure(s); details redacted`);
-  }
-  return good;
-}
-
-/**
- * A bounded, content-free deja-vu proof. Its lifecycle adapter may run only
- * presence/version checks, direct wiring observations, and
- * `deja doctor --json --offline`; no search/recall command belongs here.
- */
-export async function verifyDejaVu({
-  cfg = loadKitConfig(),
-  adapter = companionLifecycleFor('deja-vu'),
-} = {}) {
-  heading('deja-vu — content-free structural companion proof');
-  const enabled = cfg?.integrations?.tools?.dejaVu?.enabled === true;
-  if (!dejaVuProofApplies(cfg)) {
-    warn('deja-vu disabled and unowned — skipped');
-    return { status: 'skipped', reason: 'disabled and unowned' };
-  }
-  if (!adapter) {
-    fail('deja-vu lifecycle adapter unavailable');
-    return false;
-  }
-
-  let result;
-  try {
-    result = await runLifecycle({ adapter, action: 'verify', cfg });
-  } catch {
-    fail('deja-vu structural verification could not run (details redacted)');
-    return false;
-  }
-  const facts = plain(result?.facts) ? result.facts : {};
-  const packageGood = checkDejaVuPackage(plain(facts.install) ? facts.install : {});
-  const doctorGood = checkDejaVuDoctor(plain(facts.doctor) ? facts.doctor : {});
-  const indexGood = checkDejaVuIndex(plain(facts.index) ? facts.index : {}, enabled, facts);
-  const targetsGood = checkDejaVuTargets(facts, enabled);
-
-  return finalizeDejaVuVerdict(result, packageGood, doctorGood, indexGood, targetsGood);
-}
-
 /** A check's verdict as a live-check outcome: a pass, or a failure whose
  *  reason is the first failure line the check printed. A check that already
  *  returns an outcome (the embedding request) keeps it. */
@@ -645,7 +523,6 @@ const CHECKS = Object.freeze([
   { ...quick('mcp'), applies: (cfg) => cfg.integrations?.hosts?.codex === true, run: ({ cwd }) => verifyMcp({ cwd }) },
   { ...quick('providers'), applies: always, run: ({ cfg, cwd }) => verifyProviders({ cfg, cwd }) },
   { ...quick('security'), applies: (cfg) => cfg.security !== false, run: ({ cwd }) => verifySecurity({ cwd }) },
-  { ...quick('deja-vu'), applies: (cfg) => dejaVuProofApplies(cfg), run: ({ cfg }) => verifyDejaVu({ cfg }) },
   { ...quick('memory'), applies: always, run: () => verifyMemory({ observeRoutes: false }) },
   { ...slow('learning'), run: () => verifyLearning() },
   { ...slow('harvest'), run: () => verifyHarvest() },
@@ -713,7 +590,7 @@ async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
  * Run the selected checks in parallel, each under its own timeout (an explicit
  * `timeoutMs` bounds every one), and remember each result under its evidence
  * id with `source` as its provenance. A named check that does not apply (a
- * backend the kit does not manage, a deja-vu it does not own) runs and
+ * backend the kit does not manage, an optional tool it does not own) runs and
  * reports, but its result is not the kit's evidence and is not remembered.
  * Returns one `{ id, status, reason, elapsedMs, entries, applies }` per check,
  * in order; `entries` are the lines the check printed, for the renderer, and

@@ -34,7 +34,7 @@ test('the store lives under the kit state directory, one file per check', () => 
   assert.ok(evidence.liveCheckDir().startsWith(HOME), 'evidence must never escape the state base');
   assert.equal(evidence.liveCheckDir(), path.join(paths.evidenceDir(), 'live-check'));
   assert.deepEqual([...evidence.LIVE_CHECK_IDS].sort(),
-    ['aqe-embedding', 'deja-vu', 'mcp', 'memory', 'providers', 'security']);
+    ['aqe-embedding', 'mcp', 'memory', 'providers', 'security']);
   assert.equal(evidence.LIVE_CHECK_TTL_MS, 24 * 3600_000);
   assert.deepEqual(evidence.RECORDED_CHECK_IDS, [...evidence.LIVE_CHECK_IDS, 'memory-routes']);
 });

@@ -22,7 +22,7 @@ export const REFRESH_OPTIONS = Object.freeze({
  *  live stage runs by default, and the slow proofs that run only when named.
  *  They live here, not in live-checks.mjs, so a usage error is caught without
  *  loading the checks; live-checks.mjs re-exports them. */
-export const LIVE_CHECK_IDS = Object.freeze(['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory']);
+export const LIVE_CHECK_IDS = Object.freeze(['aqe-embedding', 'mcp', 'providers', 'security', 'memory']);
 export const SLOW_PROOF_IDS = Object.freeze(['learning', 'harvest', 'aqe', 'memory-routes']);
 const CHECK_NAMES = new Set([...LIVE_CHECK_IDS, ...SLOW_PROOF_IDS]);
 

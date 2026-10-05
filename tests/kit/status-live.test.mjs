@@ -43,7 +43,6 @@ test('the default set is the quick, free checks that apply to this configuration
   assert.deepEqual(ids({ ...managed, aqeEmbedding: { mode: 'unmanaged' } }), ['memory', 'providers', 'security'],
     'like sync, the embedding request runs only for a backend the kit manages');
   assert.ok(ids({ ...managed, aqeEmbedding: { mode: 'in-process' } }).includes('aqe-embedding'));
-  assert.ok(ids({ ...cfg, integrations: { tools: { dejaVu: { enabled: true } } } }).includes('deja-vu'));
   for (const slow of ['learning', 'harvest']) {
     assert.ok(!verify.liveChecksFor(cfg).some((check) => check.id === slow), `${slow} is slow; never in the live stage`);
   }

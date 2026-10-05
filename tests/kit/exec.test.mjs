@@ -438,26 +438,26 @@ test('resolveShim builds safe native and PowerShell invocations in PATHEXT order
   }
 });
 
-test('run() routes the deja npm binary through safe Windows shim resolution', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-deja-shim-'));
+test('run() routes the ruflo npm binary through safe Windows shim resolution', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ruflo-shim-'));
   const bin = path.join(root, 'bin');
   const hostile = ['install', 'claude-code', 'hello & whoami', '$(echo pwned)'];
   fs.mkdirSync(bin);
   try {
     if (process.platform === 'win32') {
-      fs.writeFileSync(path.join(bin, 'deja.cmd'), '@echo off\r\n');
+      fs.writeFileSync(path.join(bin, 'ruflo.cmd'), '@echo off\r\n');
       fs.writeFileSync(
-        path.join(bin, 'deja.ps1'),
+        path.join(bin, 'ruflo.ps1'),
         '[Console]::Out.Write(($args | ConvertTo-Json -Compress))\n',
       );
     } else {
       fs.writeFileSync(
-        path.join(bin, 'deja.exe'),
+        path.join(bin, 'ruflo.exe'),
         `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n`,
         { mode: 0o755 },
       );
     }
-    const result = await run('deja', hostile, {
+    const result = await run('ruflo', hostile, {
       windows: true,
       env: { PATH: bin, PATHEXT: process.platform === 'win32' ? '.CMD' : '.EXE' },
     });

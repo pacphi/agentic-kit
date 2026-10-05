@@ -257,13 +257,6 @@ async function main() {
       contains(r.body, '"codex-mcp","codex-plugins","opencode"');
     });
 
-    await test('GET / carries the deja-vu Intelligence category, preferred order, and About join', async () => {
-      const r = await get(url);
-      contains(r.body, '"deja-vu":"intel"');
-      contains(r.body, '"memory","deja-vu","providers"');
-      contains(r.body, '"deja-vu":{subs:["deja-vu"]}');
-    });
-
     // ── RENDERED behavior, not served-source literals ────────────────────────
     // The grouping/card/notice logic is ./groups.mjs (pure) — the SAME function
     // sources the served bundle interpolates. These exercise the real render
@@ -294,25 +287,24 @@ async function main() {
       contains(html, '<span class="card-name">opencode</span>');
     });
 
-    await test('a deja-vu row renders under Intelligence without leaking ignored raw/path facts', async () => {
+    await test('an Intelligence row renders escaped without leaking ignored raw/path facts', async () => {
       const { catOf, groupRows, gridHtml } = await import('../src/lib/dashboard/groups.mjs');
       const rows = [
         { subsystem: 'providers', level: 'ok', message: 'provider bindings current', fix: null },
-        { subsystem: 'deja-vu', level: 'ok',
-          message: 'deja-vu index current <script>alert("history")</script>', fix: null,
+        { subsystem: 'memory', level: 'ok',
+          message: 'memory index current <script>alert("history")</script>', fix: null,
           path: '/private/SENTINEL/transcripts/session.jsonl',
           raw: { query: 'SENTINEL raw recalled text' } },
-        { subsystem: 'memory', level: 'ok', message: 'project memory current', fix: null },
       ];
 
-      assert(catOf('deja-vu') === 'intel', 'deja-vu must group with Intelligence and memory');
+      assert(catOf('memory') === 'intel', 'memory must group with Intelligence');
       const groups = groupRows(rows);
       assert(JSON.stringify(groups.map((g) => g.subsystem))
-        === JSON.stringify(['memory', 'deja-vu', 'providers']),
-      'equal-severity groups must use the memory → deja-vu → providers preferred order');
+        === JSON.stringify(['memory', 'providers']),
+      'equal-severity groups must use the memory → providers preferred order');
 
       const html = gridHtml(groups.filter((g) => catOf(g.subsystem) === 'intel'));
-      contains(html, '<span class="card-name">deja-vu</span>');
+      contains(html, '<span class="card-name">memory</span>');
       contains(html, '&lt;script&gt;alert(&quot;history&quot;)&lt;/script&gt;');
       assert(!html.includes('<script>'), 'status markup must be escaped, never executed');
       assert(!/SENTINEL|\/private\/|session\.jsonl|raw recalled text/.test(html),
@@ -2091,7 +2083,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 86;
+  const EXPECTED = 85;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

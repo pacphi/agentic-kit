@@ -52,7 +52,7 @@ const texts = (result) => result.entries.map((e) => e.text).join('\n');
 // ── the check names and the --only flag ─────────────────────────────────────
 
 test('the quick checks and the slow proofs are two named lists', () => {
-  assert.deepEqual(live.LIVE_CHECK_IDS, ['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory']);
+  assert.deepEqual(live.LIVE_CHECK_IDS, ['aqe-embedding', 'mcp', 'providers', 'security', 'memory']);
   assert.deepEqual(live.SLOW_PROOF_IDS, ['learning', 'harvest', 'aqe', 'memory-routes']);
   assert.equal(live.LIVE_CHECK_IDS, evidence.LIVE_CHECK_IDS,
     'one list: every quick check has its own evidence id, and the evidence store names no other');
@@ -106,7 +106,7 @@ test('without --only the quick checks that apply run; mcp runs whenever Codex is
   const mcp = results.find((r) => r.id === 'mcp');
   assert.equal(mcp.status, 'failed');
   assert.equal(mcp.reason, 'effective Codex MCP inventory unavailable');
-  const ids = live.liveChecksFor({ integrations: { tools: { dejaVu: { enabled: true } } } }).map((c) => c.id);
+  const ids = live.liveChecksFor({ integrations: { tools: {} } }).map((c) => c.id);
   for (const slow of live.SLOW_PROOF_IDS) assert.ok(!ids.includes(slow), `${slow} runs only when named`);
 });
 
@@ -221,12 +221,12 @@ test('a named check that does not apply says on its line that its result is not 
   ]);
   assert.match(out, /^⚠ {2}mcp failed \(20 ms\) — effective Codex MCP inventory unavailable; not remembered: this check does not apply to your setup$/m);
   assert.match(out, /^✓ security passed \(30 ms\)$/m, 'a check that applies says nothing more');
-  const skipped = await runStatus({ refresh: 'live', only: ['deja-vu'] }, [
-    { id: 'deja-vu', status: 'skipped', reason: 'disabled and unowned', elapsedMs: 2, entries: [], applies: false },
+  const skipped = await runStatus({ refresh: 'live', only: ['providers'] }, [
+    { id: 'providers', status: 'skipped', reason: 'disabled and unowned', elapsedMs: 2, entries: [], applies: false },
   ]);
   assert.equal(skipped.code, 1, 'a named skipped proof did not pass');
   assert.match(skipped.out, /Running live checks \(\d+ ms\): 1 skipped/);
-  assert.match(skipped.out, /^⚠ {2}deja-vu skipped \(2 ms\) — disabled and unowned; not remembered: this check does not apply to your setup$/m);
+  assert.match(skipped.out, /^⚠ {2}providers skipped \(2 ms\) — disabled and unowned; not remembered: this check does not apply to your setup$/m);
 });
 
 test('one line per check; with --only each check\'s own lines are indented under it', async () => {
@@ -675,24 +675,14 @@ test('a CLI upgrade during the route check cannot attribute the old observation 
   assert.equal((await row('3.45.1')).level, 'warn');
 });
 
-test('a skipped deja-vu proof is not remembered as a pass', async () => {
-  seedHome();
-  rmrf(evidence.liveCheckDir());
-  const [r] = await runOnly(['deja-vu']);
-  assert.equal(r.status, 'skipped');
-  assert.equal(r.reason, 'disabled and unowned');
-  assert.match(texts(r), /deja-vu disabled and unowned — skipped/);
-  assert.equal(evidence.readLiveCheck('deja-vu', {}), null);
-});
-
 test('a skipped applicable check never writes conformance evidence', async () => {
   seedHome();
   rmrf(evidence.liveCheckDir());
   const [result] = await live.runLiveChecks({ cfg: offlineKitConfig(), cwd: PROJECT,
-    checks: [{ id: 'deja-vu', evidenceId: 'deja-vu', applies: () => true,
+    checks: [{ id: 'providers', evidenceId: 'providers', applies: () => true,
       run: async () => ({ status: 'skipped', reason: 'not installed' }) }] });
   assert.equal(result.status, 'skipped');
-  assert.equal(evidence.readLiveCheck('deja-vu', {}), null);
+  assert.equal(evidence.readLiveCheck('providers', {}), null);
 });
 
 test('learning removes only its call-owned folder after success, missing artifacts, thrown runner, and abort', async (t) => {

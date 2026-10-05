@@ -259,9 +259,6 @@ test('convergenceVerdict never counts a manual row, with or without a plan', () 
     assert.deepEqual(verdict.unresolved, [], `plan of ${plan.length}`);
     assert.deepEqual(verdict.remaining, [], `plan of ${plan.length}`);
   }
-  const dejaVu = row('deja-vu', 'warn', 'index stale', 'run: deja-vu index yourself', { repair: 'manual' });
-  assert.deepEqual(sync.convergenceVerdict({ plan: [RVF_WARN], after: [dejaVu], state, flags, cfg }).remaining, [],
-    'a manual deja-vu row is no exception');
   const control = row('memory-pin', 'fail', 'no fix known');
   assert.deepEqual(sync.convergenceVerdict({ plan: [RVF_WARN], after: [control], state, flags, cfg }).remaining.map((r) => r.subsystem),
     ['memory-pin'], 'control: a fail row without a manual fix still counts');
@@ -284,11 +281,6 @@ test('a manual fail row never hides a recorded apply failure for its own subsyst
       manual: row('codex-mcp', 'fail', 'recursive Codex registration you own', 'remove it yourself', { repair: 'manual' }),
       state: { applyFailures: [], codexRepairFailure: 'Codex MCP repair was declined mid-run' },
       expected: { subsystem: 'codex-mcp', message: 'Codex MCP repair was declined mid-run', reason: 'apply-failed' },
-    },
-    {
-      manual: row('deja-vu', 'fail', 'index owned outside the kit', 'rebuild it yourself', { repair: 'manual' }),
-      state: { applyFailures: [], dejaVuApplyFailed: true },
-      expected: { subsystem: 'deja-vu', message: 'companion lifecycle apply failed', reason: 'apply-failed' },
     },
   ];
   for (const { manual, state, expected } of cases) {

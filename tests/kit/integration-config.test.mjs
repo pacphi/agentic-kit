@@ -2,9 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CURRENT_INTEGRATIONS_VERSION,
-  DEFAULT_DEJA_VU_INTENT,
   migrateIntegrationConfig,
-  validateDejaVuIntent,
   validateEndpoint,
 } from '../../src/lib/adapters/config.mjs';
 import { migrateConfig } from '../../src/lib/adapters/migration.mjs';
@@ -42,7 +40,7 @@ test('integration migration is versioned, deterministic, and idempotent', () => 
     'the independent routing migration still owns this field');
 });
 
-test('v2 migration adds disabled deja-vu defaults without inferring opt-in', () => {
+test('v2 migration adds an empty tools map without inferring opt-in', () => {
   const migrated = migrateIntegrationConfig({
     integrations: {
       version: 2,
@@ -52,61 +50,33 @@ test('v2 migration adds disabled deja-vu defaults without inferring opt-in', () 
   });
 
   assert.equal(migrated.integrations.version, 3);
-  assert.deepEqual(migrated.integrations.tools.dejaVu, DEFAULT_DEJA_VU_INTENT);
-  assert.equal(migrated.integrations.tools.dejaVu.enabled, false);
-  assert.deepEqual(migrated.integrations.tools.dejaVu.hosts, []);
+  assert.deepEqual(migrated.integrations.tools, {});
 });
 
-test('migration preserves explicit pre-release deja-vu intent and unrelated tools', () => {
+test('migration preserves unrelated tool intent opaquely and idempotently', () => {
   const migrated = migrateIntegrationConfig({
     integrations: {
       version: 2,
       hosts: { claude: true, codex: true, opencode: false },
       bindings: [],
       tools: {
-        dejaVu: { enabled: true, mode: 'auto', hosts: ['codex'], indexOnSetup: false },
         futureCompanion: { preserve: true },
       },
     },
   });
 
   assert.deepEqual(migrated.integrations.tools, {
-    dejaVu: { enabled: true, mode: 'auto', hosts: ['codex'], indexOnSetup: false },
     futureCompanion: { preserve: true },
   });
   assert.deepEqual(migrateIntegrationConfig(structuredClone(migrated)), migrated);
 });
 
-test('deja-vu intent validation accepts only complete bounded intent', () => {
-  assert.deepEqual(validateDejaVuIntent({
-    enabled: true,
-    mode: 'mcp',
-    hosts: ['claude', 'codex'],
-    indexOnSetup: true,
-  }), {
-    enabled: true,
-    mode: 'mcp',
-    hosts: ['claude', 'codex'],
-    indexOnSetup: true,
-  });
-
-  for (const [intent, message] of [
-    [{ enabled: 'yes', mode: 'mcp', hosts: [], indexOnSetup: true }, /enabled must be boolean/],
-    [{ enabled: true, mode: 'automatic', hosts: [], indexOnSetup: true }, /mode must be one of/],
-    [{ enabled: true, mode: 'mcp', hosts: ['claude', 'claude'], indexOnSetup: true }, /contains duplicates/],
-    [{ enabled: true, mode: 'mcp', hosts: ['unknown'], indexOnSetup: true }, /unknown host/],
-    [{ enabled: true, mode: 'mcp', hosts: [], indexOnSetup: 'yes' }, /indexOnSetup must be boolean/],
-  ]) {
-    assert.throws(() => validateDejaVuIntent(intent), message);
-  }
-});
-
-test('future integration schema preserves deja-vu content opaquely', () => {
+test('future integration schema preserves tool content opaquely', () => {
   const future = {
     integrations: {
       version: CURRENT_INTEGRATIONS_VERSION + 1,
       tools: {
-        dejaVu: { futureMode: 'ambient', hosts: { futureShape: true } },
+        futureCompanion: { futureMode: 'ambient', hosts: { futureShape: true } },
       },
     },
   };

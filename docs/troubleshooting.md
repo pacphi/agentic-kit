@@ -32,10 +32,6 @@ ak sync             # apply it
 | `ak sync` ends with `unresolved: [subsystem] fix — …` and exits 1 | Sync ran its plan, but a row it planned to fix is still there with the same fix, or no sync step performs that fix. The step may have succeeded without reaching its goal | Run `ak status` and read that row: its message says what still stands. Fix the cause it names, or follow a `→ manual:` step, then run `ak sync` again. A `no sync step performs this repair` line is an agentic-kit defect; please report it |
 | `ak sync` launched from a checkout/local dependency created a global `ak` | Older versions installed the resolved replacement globally as a final self-update step | Fixed: `ak sync` never installs another kit version and prints the upgrade steps instead. `--no-upgrade` still holds back the other tools |
 | Different users or Node versions see different global stacks | npm `-g` means the active prefix, which can be per-user and per-Node-version | standardize the Node manager/prefix per user; do not repair this with `sudo ak setup` |
-| `status` shows a deja-vu schema or capability warning | The CLI is older than 0.19.0, doctor JSON is missing/malformed/newer than schema 2, or an explicit enabled-host target is absent | update the owned installation with `ak sync`; update an external installation with its owner. Agentic Kit fails closed instead of guessing; see the [deja-vu runbook](archive/2026-10-03-guide-deja-vu.md) |
-| deja-vu index is `missing`, `stale`, or `stale-readonly` | Histories have not been indexed, changed since the last build, or the derived index cannot be rewritten | use `ak sync --dry-run`, then `ak sync`; for `stale-readonly`, repair the data-directory ownership/permissions first. The v0.19 command is `deja index`, not “warmup” |
-| Codex receives automatic deja-vu recall while Agentic Kit says MCP mode | A user-owned Codex deja-vu plugin can contribute session/per-prompt/precompaction hooks independently of Agentic Kit's mode | disable/remove that plugin through Codex if MCP-only behavior is required. `ak sync` preserves external plugins and reports the effective auto surface without claiming a fix |
-| `--purge-deja-vu-data` refuses the index path | The observed path is broad, relative, outside an approved data root, overlaps config/transcript sources, or crosses a symlink | move/reconfigure the derived index safely, run `deja doctor --offline`, then retry. Never bypass the guard by deleting a host transcript root |
 | Just upgraded ruflo/agentic-qe (`npm i -g …`) and things feel off | Upgrades re-resolve dependencies: native SQLite bindings and the aidefence package get dropped, and ruflo's helper auto-refresh regenerates the statusline without the footer | `ak sync` (this is its main job) |
 | `status` says `Ruflo … is unsupported: below the support window` | ak supports the newest six Ruflo minors, never fewer than those released in the last 30 days. Workarounds for Ruflo defects fixed before the window's floor have been removed, so an older Ruflo may misbehave | `ak sync` upgrades Ruflo. See [Ruflo support window](upgrading.md#2026-09-27-ruflo-support-window) |
 | `status` says `Ruflo support window not yet known` | ak has not read Ruflo's release dates yet; `ak status` never looks them up itself | Run `ak sync` (not `--dry-run` or `--no-upgrade`): it reads and remembers them |
@@ -110,7 +106,6 @@ ak sync             # apply it
 | Dashboard Models returns `model dashboard privacy key unavailable` | A cache exists but its private scope key is absent or invalid | Run an explicit `ak models refresh` to create or repair owner-only model state. Dashboard reads fail closed and never create the key |
 | Observability does not show a live host process | POSIX runtime discovery uses the current numeric UID; Windows uses its process survey and bounded cwd probe. Account/permissions, a private container PID namespace, missing probes, or restricted process access change visibility | Run `ak dashboard` as the same ordinary OS account as the host CLI. Do not use `sudo`; inspect OS/container process permissions when runtime presence is degraded. If the UID matches and none of the above applies, set `AK_RUNTIME_DEBUG=1` for one reproduction — stage-level evidence (survey row count, host classification per PID, nested-child exclusions, cwd resolution) goes to `$XDG_STATE_HOME/agentic-kit/runtime-debug.log` (mode 0600, bounded at 64 KiB; `AK_RUNTIME_DEBUG_FILE` to redirect it), then unset debug |
 | Don't want the RuvNet Brain (the ~2 GB KB download) | It's on by default | `ak setup --no-ruvnet-brain`, or set `ruvnetBrain: false` in `~/.config/agentic-kit/kit.json` |
-| Don't want deja-vu transcript indexing | It is already disabled by default, or a prior opt-in is still recorded | record disabled intent with `ak setup --minimal --no-deja-vu`; use `ak uninstall --dry-run` before removing owned wiring/package/index scopes described in the [runbook](archive/2026-10-03-guide-deja-vu.md#disable-and-remove-it) |
 | Don't want the security surface managed | Also on by default | `ak setup --no-security` (persists `security:false`; status shows an info row and sync stops healing it) |
 | RuvNet Brain KB lives somewhere non-default | The installer + ak honor `$RUVNET_BRAIN_KB` (default `~/.cache/ruvnet-brain/kb`) | export `RUVNET_BRAIN_KB` so detection points at your KB |
 
@@ -143,8 +138,7 @@ Windows split-store behavior.
 
 ## Deep proofs (slow, spawn real CLIs)
 
-`ak status --refresh=live` runs the quick, free checks (including `security` and
-`deja-vu`) in parallel. The slow proofs below run only when named with `--only`,
+`ak status --refresh=live` runs the quick, free checks (including `security`) in parallel. The slow proofs below run only when named with `--only`,
 up to six minutes each:
 
 ```bash
@@ -152,7 +146,7 @@ ak status --refresh=live --only learning        # trains a cycle in an isolated 
 ak status --refresh=live --only aqe             # agentic-qe genuinely on ruvector (no FsyncFailed)
 ak status --refresh=live --only harvest         # Ruflo's learning-write path (post-task + distill) in an isolated store
 ak status --refresh=live --only memory-routes   # CLI round trip remembered as memory; routing observation remembered separately
-ak status --refresh=live --only learning,harvest,aqe,memory-routes,security,deja-vu,providers,mcp,aqe-embedding
+ak status --refresh=live --only learning,harvest,aqe,memory-routes,security,providers,mcp,aqe-embedding
 ```
 
 If `ak status --refresh=live --only aqe` warns that RVF is held by another live process, another AQE

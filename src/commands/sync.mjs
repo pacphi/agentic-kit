@@ -19,7 +19,6 @@ import {
 } from '../lib/mcp.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
-import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { applyRufloDaemon, rufloDaemonProjectRoot } from '../lib/ruflo-daemon-config.mjs';
@@ -236,9 +235,9 @@ Examples:
 // *is* the ordering invariant, and `when` is a pure, explicitly-parameterized
 // predicate (no closures) so it stays easy to reason about independent of
 // `run`'s side effects. `run(ctx)` receives the shared per-invocation context
-// (see `converge()` below): {cfg, cwd, pkgRoot, flags, dejaVuAdapter, subsystems,
-// skip, report, step, markFailed, state}. `state` carries the two cross-step signals
-// (`dejaVuApplyFailed`, `aqeRouterApplyFailure`) the final convergence check
+// (see `converge()` below): {cfg, cwd, pkgRoot, flags, subsystems,
+// skip, report, step, markFailed, state}. `state` carries the cross-step signals
+// (`aqeRouterApplyFailure`, `codexRepairFailure`) the final convergence check
 // needs — the only state that survives past its own step.
 const HOST_LIFECYCLE = { installState: hostInstallState, executable: hostExecutable, install: installHost };
 const DAEMON_LIFECYCLE = { list: listDaemons, reap };
@@ -515,28 +514,6 @@ export const SYNC_STEPS = [
       if (applied.restarted) ok('ruflo daemon restarted so it reads its settings');
     },
   },
-  // Managed companion convergence is independent from host lifecycle
-  // adapters. The adapter owns exact package/target/index ordering and mutates
-  // only its in-memory ownership ledger; this command owns persistence. Save a
-  // changed ledger even after a partial failure so a later sync or uninstall
-  // retains the proof for every operation that did verify successfully.
-  {
-    id: 'deja-vu',
-    when: (subs) => subs.has('deja-vu'),
-    run: async (ctx) => {
-      if (!ctx.dejaVuAdapter) return;
-      const lifecycle = await withProgress('deja-vu', () => runLifecycle({
-        adapter: ctx.dejaVuAdapter,
-        action: 'apply',
-        cfg: ctx.cfg,
-        options: { pkgRoot: ctx.pkgRoot, allowUpgrade: !ctx.flags['no-upgrade'] },
-      }));
-      if (lifecycle.configChanged) saveKitConfig(ctx.cfg);
-      ctx.state.dejaVuApplyFailed = lifecycle.ok === false;
-      const applyReport = renderApplyReport('deja-vu', lifecycle);
-      for (const line of applyReport.lines) printReportLine(line, ctx.markFailed);
-    },
-  },
   // opencode host wiring: connected MCPs, compact lazy gateway, lifecycle
   // bridge, specialist dispatcher, and platform skill. Runs AFTER the `hosts`
   // step so an enable+install converges in one sync, and only when the CLI is
@@ -772,7 +749,7 @@ const stepSubsystems = (s) => (Object.hasOwn(STEP_SUBSYSTEMS, s.id) ? STEP_SUBSY
 // fails when a step's `when` names one missing here.
 const SYNC_SUBSYSTEMS = [
   'agent-browser', 'aqe', 'aqe-embedding', 'aqe-pin', 'blocks', 'codex-context', 'codex-mcp', 'codex-statusline',
-  'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'memory', 'natives', 'npx', 'providers', 'routing',
+  'daemons', 'host-alignment', 'hosts', 'mcp', 'memory', 'natives', 'npx', 'providers', 'routing',
   'ruflo-components', 'ruvector', 'ruvnet-brain', 'ruvnet-brain-nightly', 'scaffold-agents', 'security',
   'self', 'statusline', 'versions',
 ];
@@ -855,7 +832,7 @@ const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
  *  did not take: a planned (subsystem, fix) whose row is still present after
  *  the apply phase, and any planned subsystem no step performs. Manual fixes
  *  never enter the plan, so they can never be unresolved. `remaining` holds
- *  everything else still failing: fail-level rows, a deja-vu row with a fix,
+ *  everything else still failing: fail-level rows
  *  and mutations that reported failure during this run. A row whose fix is
  *  manual is never counted, whether or not there was a plan (decision 10):
  *  sync's exit code reflects only what sync can repair, and the row is listed
@@ -867,7 +844,7 @@ const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
 export function convergenceVerdict({ plan, after: collected, state, flags, cfg, skip = new Set(), skipped: skippedPlan = [] }) {
   const skippedKeys = new Set(skippedPlan.map(repairKey));
   const setAside = (r) => skip.has(r.subsystem) || (!!r.fix && skippedKeys.has(repairKey(r)));
-  const counts = (r) => r.repair !== 'manual' && (r.level === 'fail' || (r.subsystem === 'deja-vu' && r.fix !== null));
+  const counts = (r) => r.repair !== 'manual' && r.level === 'fail';
   const skipped = [...skippedPlan, ...collected.filter((r) => skip.has(r.subsystem) && counts(r)
     && !skippedKeys.has(repairKey(r)))];
   const after = collected.filter((r) => !setAside(r));
@@ -893,9 +870,6 @@ export function convergenceVerdict({ plan, after: collected, state, flags, cfg, 
   const applyFailed = (subsystem, message) => remaining.push({ subsystem, message, reason: 'apply-failed' });
   if (state.aqeRouterApplyFailure && !remaining.some((r) => r.subsystem === 'providers')) {
     applyFailed('providers', `AQE router apply failed: ${state.aqeRouterApplyFailure}`);
-  }
-  if (state.dejaVuApplyFailed && !remaining.some((r) => r.subsystem === 'deja-vu')) {
-    applyFailed('deja-vu', 'companion lifecycle apply failed');
   }
   if (state.codexRepairFailure && !remaining.some((r) => r.subsystem === 'codex-mcp')) {
     applyFailed('codex-mcp', state.codexRepairFailure);
@@ -957,7 +931,7 @@ function stepDetail(chunks) {
 function stepTracer(state, result, capture) {
   let current = null;
   const failures = () => state.applyFailures.length
-    + [state.dejaVuApplyFailed, state.aqeRouterApplyFailure, state.codexRepairFailure].filter(Boolean).length;
+    + [state.aqeRouterApplyFailure, state.codexRepairFailure].filter(Boolean).length;
   const markFailed = () => { if (current) current.failed = true; };
   const report = (name, r) => {
     const status = reportOutcome(name, r);
@@ -1076,7 +1050,6 @@ async function converge({
   releaseDatesRunner,
   brainDrift,
   tmpRoot,
-  dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
   refreshHosts = refreshPlanHosts,
   confirmCodexRepair = askCodexRepair,
@@ -1084,7 +1057,6 @@ async function converge({
   repairCodexTopology = repairCodexMcpTopology,
 }, result, capture = null) {
   const cwd = process.cwd();
-  const dejaVuPlanOptions = { allowUpgrade: !flags['no-upgrade'] };
   const { skip, error: skipError } = parseSkip(flags.skip);
   if (skipError) {
     fail(`ak sync: ${skipError}`);
@@ -1127,7 +1099,7 @@ async function converge({
   // converge proof below — and a plain `ak status` right after — see the
   // post-repair state, not what was cached before it.
   const rows = await collectFn({
-    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false, versionEvidence,
+    pkgRoot, cwd, record: false, versionEvidence,
     retryBrain: flags['retry-brain'] === true,
   });
   result.needsYourAction = needsYourAction(rows);
@@ -1191,7 +1163,6 @@ async function converge({
     }
   }
   const state = {
-    dejaVuApplyFailed: false,
     aqeRouterApplyFailure: null,
     codexRepairFailure: null,
     applyFailures: [],
@@ -1207,7 +1178,7 @@ async function converge({
     return r;
   };
   const ctx = {
-    cfg, cwd, pkgRoot, flags, dejaVuAdapter, codexRepairPlan, subsystems, skip, report, step, markFailed, state,
+    cfg, cwd, pkgRoot, flags, codexRepairPlan, subsystems, skip, report, step, markFailed, state,
     inspectCodexTopology, repairCodexTopology,
   };
 
@@ -1234,7 +1205,7 @@ async function converge({
   console.log('');
   const afterEvidence = await skippedVersionEvidence({ skip, pkgRoot });
   const after = await collectFn({
-    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: true, versionEvidence: afterEvidence,
+    pkgRoot, cwd, record: true, versionEvidence: afterEvidence,
   });
   result.needsYourAction = needsYourAction(after);
 

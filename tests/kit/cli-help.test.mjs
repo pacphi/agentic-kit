@@ -21,8 +21,6 @@ test('setup --help shows help and does NOT run setup', () => {
   assert.match(r.stdout, /Options:/);
   assert.match(r.stdout, /ruflo init --full --force/);
   assert.match(r.stdout, /docs\/setup\.md/);
-  assert.match(r.stdout, /--with-deja-vu/);
-  assert.match(r.stdout, /--deja-vu-mode <m>/);
   // A real setup run would emit ✓/⚠ progress lines, never the help header.
   assert.doesNotMatch(r.stdout, /installing|✓ /);
 });
@@ -127,10 +125,9 @@ test('ak status --help documents --only: every check and slow proof, and its exi
   assert.equal(r.status, 0);
   const flat = r.stdout.replace(/\s+/g, ' ');
   assert.match(flat, /--only CHECK/);
-  for (const id of ['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory', 'learning', 'harvest', 'aqe', 'memory-routes']) {
+  for (const id of ['aqe-embedding', 'mcp', 'providers', 'security', 'memory', 'learning', 'harvest', 'aqe', 'memory-routes']) {
     assert.match(r.stdout, new RegExp(`^\\s+${id}\\s{2,}\\S`, 'm'), `status help describes the ${id} check`);
   }
-  assert.match(flat, /deja-vu content-free structural proof/);
   assert.match(flat, /slow proofs run only when named/i);
   assert.match(flat, /with --only, only the named checks decide the exit code: 1 when one failed, was inconclusive or did not run/i);
   assert.match(flat, /rows and stage failures still print and appear in --json/i);
