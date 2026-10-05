@@ -272,3 +272,9 @@ captured, not today. Two further designs from the same program moved to
 | [2026-10-03-aqe-pin-retirement-proof.md](2026-10-03-aqe-pin-retirement-proof.md) | Written here | What released agentic-qe 3.14.5 and 3.14.7 resolve from a subfolder, run in disposable repositories | Fix confirmed for the memory path, storage folder and root; a stray `.agentic-qe` is still adopted (nearest store wins), so ak releases a legacy pin only behind a gate. Command line, hook and MCP server not run. |
 | [2026-10-03-plan-ak-maintainer-skills.md](2026-10-03-plan-ak-maintainer-skills.md) | `docs/plans/2026-10-03-ak-maintainer-skills.md` | The plan that added nine authored `ak-` maintainer skills for Claude and Codex, a prefix convention, a mirror script and contract tests. | Executed on `feat/ak-maintainer-skills`; the shipped skills, tests and docs supersede the example text in Tasks 3 to 10. |
 | [2026-10-03-design-ak-maintainer-skills.md](2026-10-03-design-ak-maintainer-skills.md) | `docs/plans/2026-10-03-ak-maintainer-skills-design.md` | The design for the `ak-` maintainer skills: inventory, gates, the prefix convention, tests and delivery. | Implemented; one decision stays open, which prefix marks skills authored here, because the accepted project-scope plan also generates `ak-*` skills. |
+
+## Added 2026-10-04 — agentic-qe#778 3.14.6 init-settings conformance
+
+| File | Original location | What it was | Why it's historical |
+|---|---|---|---|
+| [2026-10-04-aqe-3146-init-settings-conformance-receipt.md](2026-10-04-aqe-3146-init-settings-conformance-receipt.md) | Written here | AQE 3.14.6 init-settings conformance receipt (2026-10-04) | Dated capture for the dispatched upstream/proffesor-for-testing-agentic-qe-778 adjustment; maintainer review, broader-mode/platform conformance and the registry retirement decision remain separate. |
