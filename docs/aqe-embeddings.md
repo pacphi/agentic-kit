@@ -62,8 +62,9 @@ ak x aqe-embedding configure --aqe-embedding-mode unmanaged --yes
 
 A passing check proves the embedder: ak sends synthetic text and gets a vector of
 the expected size back. It does not prove that AQE's pattern index uses that
-embedder. AQE 3.14.4 does not bind its pattern index when an embedder endpoint is
-configured ([agentic-qe#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)),
+embedder. AQE 3.14.7 writes the embedding-space manifest, but its pattern index
+binding with a configured embedder endpoint is not shown to work
+([agentic-qe#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)),
 so `ak status` reads "embedder verified; AQE pattern index binding unverified", and
 compatibility with vectors already stored in the project is a separate question.
 

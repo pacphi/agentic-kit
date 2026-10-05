@@ -202,30 +202,37 @@ Current AQE includes a subscription-backed `codex` provider. Agentic-kit accepts
 `ak host pick --aqe-provider codex`, admits Codex fallback rungs, enables Codex
 providers referenced by `agentOverrides`, and projects Codex activity routes.
 
-AQE 3.14.4 adopted fixes for the
-[MCP entrypoint double-spawn](https://github.com/proffesor-for-testing/agentic-qe/issues/528)
-and [exclusive platform initialization](https://github.com/proffesor-for-testing/agentic-qe/issues/532)
-(`aqe init --no-claude`). Both upstream issues remain open; versions below
-3.14.4 retain those gaps. The remaining dated AQE risk inventory includes
-[GOAP `maxSteps` and world-state, test-generation quality, and coherence recommendation-text gaps](https://github.com/proffesor-for-testing/agentic-qe/issues/535)
-(the 3.14.4 recheck did not exercise `goap_execute`),
+AQE 3.14.7 passed the checks below on macOS (see the
+[dated conformance receipt](archive/2026-10-05-audit-aqe-3-14-7-conformance.md) for the
+method and limits). The MCP entrypoint runs in-process
+([#528](https://github.com/proffesor-for-testing/agentic-qe/issues/528), from 3.14.4) and
+`aqe init --no-claude` gives exclusive platform initialization
+([#532](https://github.com/proffesor-for-testing/agentic-qe/issues/532), from 3.14.4); versions
+below 3.14.4 lack both. `aqe init --auto --with-codex --codex-guidance full|compact|none`
+selects its guidance, keeps the user's text outside its sentinel, is idempotent and installs the
+Codex hooks and skills through the `aqe` command
+([#655](https://github.com/proffesor-for-testing/agentic-qe/issues/655),
+[#755](https://github.com/proffesor-for-testing/agentic-qe/issues/755),
+[#756](https://github.com/proffesor-for-testing/agentic-qe/issues/756), from 3.14.5).
+`aqe platform setup` works for all eight platforms and `aqe platform verify` exits 1 when a
+check fails
+([#757](https://github.com/proffesor-for-testing/agentic-qe/issues/757),
+[#758](https://github.com/proffesor-for-testing/agentic-qe/issues/758), from 3.14.5). Repeated
+`aqe init` runs leave `.claude/settings.json` and `CLAUDE.md` unchanged
+([#778](https://github.com/proffesor-for-testing/agentic-qe/issues/778), from 3.14.6).
+
+The remaining dated AQE risk inventory includes
+[test-generation quality and the GOAP world-state `activeAgents` count](https://github.com/proffesor-for-testing/agentic-qe/issues/535)
+(not re-exercised on 3.14.7; the other items in that issue pass),
 [RVF recovery loop](https://github.com/proffesor-for-testing/agentic-qe/issues/574),
 and [local-embedding audit findings](https://github.com/proffesor-for-testing/agentic-qe/issues/615).
-A 2026-09-29 disposable probe of an npm-integrity-verified AQE 3.14.5 tarball found that
-[#655](https://github.com/proffesor-for-testing/agentic-qe/issues/655)'s selected compact
-guidance path emits a 315-byte owned sentinel and preserves a foreign `AGENTS.md`
-prefix/suffix across two repeated calls. Full/none and complete receipt/platform
-conformance remain unverified.
-[#753](https://github.com/proffesor-for-testing/agentic-qe/issues/753)'s fresh native
+[#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)'s pattern index binding is
+unverified: the embedding-space manifest is written, but index binding and semantic search were
+not shown. [#753](https://github.com/proffesor-for-testing/agentic-qe/issues/753)'s fresh native
 macOS witness append produced valid 4001-row chains in one sequential and three
 synchronized two-process rounds; only one concurrent round demonstrably interleaved. That
 does not justify removing the kit's stray-store live-holder refusal or claim old-fork
 repair, signature validation, import safety, or Windows/Linux behavior.
-[#778](https://github.com/proffesor-for-testing/agentic-qe/issues/778) still reproduces
-settings churn on 3.14.5 across three same-option init runs; its source fix merged after
-this release was published. A later released-artifact retest is pending. See the [dated artifact
-receipt](archive/2026-09-29-aqe-released-artifact-receipt.md) for source binding and
-limits.
 
 The Codex QE-Court investigation in
 [agentic-kit #108](https://github.com/pacphi/agentic-kit/issues/108) is a

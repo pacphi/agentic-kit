@@ -66,9 +66,9 @@ test('upstream registry separates valid shape, current evidence, and version app
   // Sunset 2026-09-27: AQE 3.14.4 passed the offline Stop conformance
   // (tests/live/aqe-stop-hook-conformance.test.mjs).
   assert.equal(result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-stop-hook-generator'), undefined);
-  const guidance = result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-codex-guidance-policy');
-  assert.equal(guidance.notification.status, 'published');
-  assert.match(guidance.notification.publishedUrl, /issues\/655$/);
+  // Sunset 2026-10-05: AQE 3.14.7 passed the strict Codex guidance conformance
+  // (tests/live/aqe-codex-guidance-conformance.test.mjs) for full, compact and none.
+  assert.equal(result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-codex-guidance-policy'), undefined);
   const rufloGuidance = result.constraints.find((entry) => entry.id === 'ruflo-3.38.20-project-guidance-selector');
   assert.equal(rufloGuidance.notification.status, 'published');
   assert.match(rufloGuidance.notification.publishedUrl, /issues\/3153#issuecomment-5512219386$/);

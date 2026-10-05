@@ -213,26 +213,6 @@
       }
     },
     {
-      "id": "agentic-qe-3.14.0-codex-guidance-policy",
-      "dependency": "agentic-qe",
-      "kind": "upstream-capability-gap",
-      "affected": ["3.14.0"],
-      "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/655",
-      "issueState": "closed-at-last-verification",
-      "primaryEvidence": "AQE PR #661 merged 2026-09-06; 3.14.1 released 2026-09-07; installed generator inspected 2026-09-09. Existing project artifacts require separate content-bound conformance. Conformance on ak's own path (aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, 2026-09-27) failed, so the constraint is kept: full writes no block when AGENTS.md already exists (0 owned bytes; the --json receipt reports the requested policy, not the effective one); compact adds 6 bytes outside its sentinel; resolvePackageRoot() misses the package through the aqe bin symlink, so no Codex hooks or skills install and platform verify fails 4 checks yet exits 0; platform setup codex fails with 'Module not found in bundle' and exits 0.",
-      "strategy": "Use released --codex-guidance full|compact|none on 3.14.1+; preserve AQE sentinel ownership and verify actual owned bytes.",
-      "versionGate": "Historical 3.14.0 generator defect fixed in 3.14.1; inspect generated project bytes independently of current package version.",
-      "expiryPolicy": "retest within 14 days and on every Agentic-QE release",
-      "nextRetestAt": "2026-10-11",
-      "sunsetWhen": "a released Agentic-QE build independently selects full/compact/none Codex guidance and passes preservation, idempotency, and receipt conformance",
-      "notification": {
-        "status": "published",
-        "publishedAt": "2026-09-02T15:42:26Z",
-        "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/655",
-        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
-      }
-    },
-    {
       "id": "codex-0.152.1-skill-context-budget",
       "dependency": "codex",
       "kind": "upstream-capability-gap",
@@ -681,17 +661,19 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["constraint agentic-qe-3.14.0-codex-guidance-policy"], "files": [] },
-      "adjustment": "Keep constraint agentic-qe-3.14.0-codex-guidance-policy. The released 3.14.5 artifact passed the selected compact owned-byte and foreign-content preservation check, but full/none modes, all receipt and platform checks, and the complete ak conformance remain unverified. Run the existing opt-in full conformance on a future released artifact before any sunset.",
-      "status": "released",
-      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "kitImpact": { "refs": ["constraint agentic-qe-3.14.0-codex-guidance-policy (sunset 2026-10-05)"], "files": [] },
+      "adjustment": "Done: agentic-qe-3.14.0-codex-guidance-policy sunset after the strict Codex-guidance conformance (tests/live/aqe-codex-guidance-conformance.test.mjs) passed on 3.14.7 for full, compact and none (macOS only).",
+      "status": "retired",
+      "constraintIds": [],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
         { "date": "2026-09-06", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" },
         { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 conformance on ak's path (full aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, sandboxed): FAIL, constraint kept. full: no block when AGENTS.md exists and platform verify reports detected=none; compact and none select correctly and are idempotent, but compact adds 6 bytes outside its sentinel; through the aqe bin resolvePackageRoot() misses the package, so no Codex hooks or skills install; platform verify exits 0 on failed checks; platform setup codex: Module not found in bundle. Evidence: Branch 5 report b5-655-conformance; upstream issue drafted, not filed" },
-        { "date": "2026-09-29", "event": "reviewed", "note": "Private source-bound agentic-qe 3.14.5 tarball proof: selected compact AGENTS sentinel is 315 bytes; separate foreign prefix/suffix survives two same-option public init calls with bytes and mtime stable between calls 1/2. Full/none, complete receipts and all-platform conformance unverified; constraint retained. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
+        { "date": "2026-09-29", "event": "reviewed", "note": "Private source-bound agentic-qe 3.14.5 tarball proof: selected compact AGENTS sentinel is 315 bytes; separate foreign prefix/suffix survives two same-option public init calls with bytes and mtime stable between calls 1/2. Full/none, complete receipts and all-platform conformance unverified; constraint retained. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." },
+        { "date": "2026-10-05", "event": "adopted", "note": "constraint sunset: tests/live/aqe-codex-guidance-conformance.test.mjs passed strictly on agentic-qe 3.14.7 for full, compact and none (macOS): selection, byte-for-byte preservation of user text, idempotency over two runs, --json receipt and aqe platform verify codex. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -782,11 +764,11 @@
       "kind": "issue",
       "title": "Running aqe from a subfolder creates and adopts a new .agentic-qe store (#516 follow-up)",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["plan 6.3, addendum 3: AQE_PROJECT_ROOT pin", "Branch 5 decisions B5-D1, B5-D1a, B5-D1b"], "files": ["src/lib/aqe-project-pin.mjs"] },
-      "adjustment": "Once a released agentic-qe resolves its project root, memory database and storage folder from a subfolder, drop the pin of AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH (src/lib/aqe-project-pin.mjs; decisions B5-D1, B5-D1a, B5-D1b).",
-      "status": "dispatched",
+      "adjustment": "Done: ak writes no AQE_PROJECT_ROOT, AQE_MEMORY_PATH or AQE_STORAGE_PATH pin (PR #436, ADR-0062); a legacy pin is released only when aqePinReleaseGate says it is safe. On 3.14.7 a command run from a subfolder uses the root store.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
@@ -794,7 +776,9 @@
         { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 pins all three keys: on 3.14.4 dist/learning/embedder-identity-store.js getMemoryDbPath() uses AQE_MEMORY_PATH or <cwd>/.agentic-qe/memory.db and never reads AQE_PROJECT_ROOT, and dist/init/token-bootstrap.js resolves AQE_STORAGE_PATH ?? '.agentic-qe' against the cwd; with all three pinned a subfolder run created nothing there (Slice 0 case c, Slice B proof)" },
         { "date": "2026-09-27", "event": "commented", "note": "3.14.4 re-test with the pin table, review notes for PR #741; refs agentic-qe#758 (issuecomment-5863178438)" },
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 772; no release contains it yet" },
-        { "date": "2026-10-03", "event": "dispatched", "note": "fix released in agentic-qe 3.14.5 (dist/kernel/project-root.js's findProjectRoot, read by dist/learning/embedder-identity-store.js and dist/init/token-bootstrap.js); ak dispatches the adjustment on branch upstream/proffesor-for-testing-agentic-qe-735" }
+        { "date": "2026-10-03", "event": "dispatched", "note": "fix released in agentic-qe 3.14.5 (dist/kernel/project-root.js's findProjectRoot, read by dist/learning/embedder-identity-store.js and dist/init/token-bootstrap.js); ak dispatches the adjustment on branch upstream/proffesor-for-testing-agentic-qe-735" },
+        { "date": "2026-10-05", "event": "adopted", "note": "ak writes no pin (PR #436, ADR-0062); a pin an older ak wrote is released only through aqePinReleaseGate. On 3.14.7, with no pin variables set, aqe memory store run from a subfolder wrote to the root store and created no new one. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -1904,16 +1888,17 @@
       "dependency": "ruvnet-brain",
       "doneWhen": {
         "state": "closed-completed",
-        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": null }
+        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": "4.5.2" }
       },
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
       "adjustment": "Once a released Brain stops creating a nested .swarm/.swarm store, drop that stray-store report.",
-      "status": "watching",
+      "status": "released",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-10-05", "event": "released", "note": "confirmed by hand in a disposable HOME: nested .swarm/.swarm stores appear on 4.3.28 and not on 4.5.2 or 4.5.9; first fixed version not bisected, so 4.5.2 is the earliest verified; the ak change (drop the stray-store report) is pending. Evidence: docs/archive/2026-10-05-audit-brain-4-5-9-verification.md." }
       ]
     },
     {
@@ -1925,7 +1910,7 @@
       "dependency": "ruvnet-brain",
       "doneWhen": {
         "state": "closed-completed",
-        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": null }
+        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": "4.5.9" }
       },
       "mapping": "mapped",
       "kitImpact": {
@@ -1933,11 +1918,12 @@
         "files": []
       },
       "adjustment": "Once a released Brain stops injecting capacity advice while the Brain is off, re-review the reviewed hook-contract pin (decision 4).",
-      "status": "watching",
+      "status": "released",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-10-05", "event": "released", "note": "confirmed by hand in a disposable HOME: with the brain-off sentinel the capacity-aware advisory printed 968 bytes on 4.5.2 and nothing on 4.5.9; the upstream maintainer says 4.5.7, but 4.5.3 to 4.5.8 were not tested, so 4.5.9 is the earliest verified; the ak change (re-review the hook-contract pin) is pending. Evidence: docs/archive/2026-10-05-audit-brain-4-5-9-verification.md." }
       ]
     },
     {
@@ -1949,7 +1935,7 @@
       "dependency": "ruvnet-brain",
       "doneWhen": {
         "state": "closed-completed",
-        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": null }
+        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": "4.5.2" }
       },
       "mapping": "mapped",
       "kitImpact": {
@@ -1957,11 +1943,12 @@
         "files": []
       },
       "adjustment": "Once a released Brain --update runs the current updater, lift the blocked hold on the refused refresh.",
-      "status": "watching",
+      "status": "released",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-10-05", "event": "released", "note": "confirmed by hand in a disposable HOME: --update replaces the stale updater on 4.5.2 and 4.5.9 and the private-overlay preflight passes, where 4.3.28 exits 1; first fixed version not bisected, so 4.5.2 is the earliest verified; no full update was run; the ak change (lift the blocked hold) is pending. Evidence: docs/archive/2026-10-05-audit-brain-4-5-9-verification.md." }
       ]
     },
     {
@@ -2149,12 +2136,14 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.4" } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
-      "adjustment": "The 3.14.4 MCP entry runs in-process; host-support.md records adoption from that version. Keep watching the still-open upstream issue until its closed-completed condition is met.",
-      "status": "watching",
+      "adjustment": "Done: the MCP entry runs in-process from 3.14.4 (re-verified on 3.14.7); docs/host-support.md records the adoption.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "commented", "note": "re-verified fixed on 3.14.4 (MCP entry now runs in-process); suggested closing (issuecomment-5878244297)" }
+        { "date": "2026-09-28", "event": "commented", "note": "re-verified fixed on 3.14.4 (MCP entry now runs in-process); suggested closing (issuecomment-5878244297)" },
+        { "date": "2026-10-05", "event": "adopted", "note": "re-verified on 3.14.7: the MCP entry runs in-process. docs/host-support.md records adoption from 3.14.4. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -2167,12 +2156,14 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.4" } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
-      "adjustment": "The 3.14.4 aqe init --no-claude option supports exclusive platform initialization; host-support.md records adoption from that version. Keep watching the still-open upstream issue until its closed-completed condition is met.",
-      "status": "watching",
+      "adjustment": "Done: aqe init --no-claude gives exclusive platform initialization from 3.14.4 (re-verified on 3.14.7); docs/host-support.md records the adoption.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "commented", "note": "re-verified fixed on 3.14.4 (aqe init --no-claude); suggested closing (issuecomment-5878244945)" }
+        { "date": "2026-09-28", "event": "commented", "note": "re-verified fixed on 3.14.4 (aqe init --no-claude); suggested closing (issuecomment-5878244945)" },
+        { "date": "2026-10-05", "event": "adopted", "note": "re-verified on 3.14.7: aqe init --no-claude gives exclusive platform initialization. docs/host-support.md records adoption from 3.14.4. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -2185,12 +2176,13 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
-      "adjustment": "Keep the host-support.md risk link limited to the remaining 3.14.4 GOAP maxSteps/world-state, test-generation quality, and coherence recommendation-text gaps. memory_delete and cross-phase stats were fixed; goap_execute was not re-exercised.",
+      "adjustment": "Keep the host-support.md risk link limited to what 3.14.7 did not re-exercise: test-generation quality and the GOAP world-state activeAgents count. memory_delete, cross-phase stats, GOAP maxSteps, goap_execute dryRun and the coherence recommendation text were fixed.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "commented", "note": "re-verified on 3.14.4: memory_delete and cross-phase stats fixed; GOAP maxSteps, GOAP world state, test generation and coherence text still reproduce; goap_execute not exercised (issuecomment-5878245564)" }
+        { "date": "2026-09-28", "event": "commented", "note": "re-verified on 3.14.4: memory_delete and cross-phase stats fixed; GOAP maxSteps, GOAP world state, test generation and coherence text still reproduce; goap_execute not exercised (issuecomment-5878245564)" },
+        { "date": "2026-10-05", "event": "reviewed", "note": "re-verified on 3.14.7: memory_delete and cross-phase stats fixed; GOAP maxSteps honored and goap_execute dryRun finds the plan; the coherence recommendation text matches the vote tally. Not re-exercised: test-generation quality and the GOAP activeAgents count. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." }
       ]
     },
     {
@@ -2652,7 +2644,8 @@
         { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5: ak x aqe-store merge finds the processes holding the root or a stray store by open file (lsof, /proc; the host-session census on Windows) before its backup, its real import and its archive, and refuses while any holds one; there is no force" },
         { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact; refs agentic-qe#759 (issuecomment-5863202746)" },
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 764; no release contains it yet" },
-        { "date": "2026-09-29", "event": "released", "note": "npm-integrity-verified 3.14.5 tarball, source-bound native macOS fresh-chain append proof: immediate transaction; 4001 valid rows in sequential control and three synchronized two-process rounds; only round 1 demonstrably interleaved. No old-fork repair, signed-entry, import-splice or live-holder removal claim. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
+        { "date": "2026-09-29", "event": "released", "note": "npm-integrity-verified 3.14.5 tarball, source-bound native macOS fresh-chain append proof: immediate transaction; 4001 valid rows in sequential control and three synchronized two-process rounds; only round 1 demonstrably interleaved. No old-fork repair, signed-entry, import-splice or live-holder removal claim. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." },
+        { "date": "2026-10-05", "event": "reviewed", "note": "3.14.7: tests/live/aqe-live-lock-conformance.test.mjs passes on macOS; no concurrent-append check was added and the live-holder refusal stays. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." }
       ]
     },
     {
@@ -2672,7 +2665,8 @@
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact (issuecomment-5863212811)" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 768; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 768; no release contains it yet" },
+        { "date": "2026-10-05", "event": "reviewed", "note": "3.14.7 disposable repro: patterns.rvf.space.json is now written, but aqe learning embedding-health still reports unverified (71 mismatched vectors, runtime not initialized); index binding and semantic search not shown. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." }
       ]
     },
     {
@@ -2682,16 +2676,19 @@
       "kind": "issue",
       "title": "`aqe init --with-codex` installs no Codex hooks or skills when run through the `aqe` bin (global install)",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
-      "kitImpact": {"refs": ["Branch 5: ak setup names the Codex hooks and skills only when they exist, otherwise warns", "#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["src/lib/aqe-guidance.mjs", "tests/live/aqe-codex-guidance-conformance.test.mjs"]},
-      "adjustment": "Once a released agentic-qe installs its Codex hooks and skills through the aqe command, ak setup's warning stops on its own (it checks the files); run the #655 conformance strictly toward the constraint's sunset.",
-      "status": "fixed-unreleased",
-      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "kitImpact": {"refs": ["Branch 5: ak setup names the Codex hooks and skills only when they exist, otherwise warns", "#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy, sunset 2026-10-05)"], "files": ["src/lib/aqe-guidance.mjs", "tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "Done: on 3.14.7 the Codex hooks and skills install through the aqe command (platform verify passes in every mode); ak setup's warning checks the files and stops on its own.",
+      "status": "retired",
+      "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 765; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 765; no release contains it yet" },
+        { "date": "2026-10-05", "event": "released", "note": "first release containing PR 765 is 3.14.5 (the watch report's release basis)" },
+        { "date": "2026-10-05", "event": "adopted", "note": "the strict #655 conformance passed on 3.14.7: aqe platform verify codex passes in every mode, so the Codex hooks and skills install through the aqe command. ak setup's warning checks the files and stays quiet. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -2703,16 +2700,18 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
-      "kitImpact": {"refs": ["#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
-      "adjustment": "Once a released agentic-qe applies full on an existing AGENTS.md and writes nothing outside its sentinel, run the #655 conformance strictly; if it passes, sunset the constraint and drop the conformance todo.",
-      "status": "released",
-      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "kitImpact": {"refs": ["#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy, sunset 2026-10-05)"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "Done: the strict #655 conformance passed on 3.14.7, so the constraint is sunset and the conformance test runs strictly.",
+      "status": "retired",
+      "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 767; no release contains it yet" },
         { "date": "2026-09-28", "event": "commented", "note": "thanked the maintainer for PR 767; ak runs the Codex-guidance conformance once a release contains it (issuecomment-5878043475)" },
-        { "date": "2026-10-02", "event": "released", "note": "confirmed by hand on 3.14.5, the first release after the fix: in a disposable project whose AGENTS.md held only user text, aqe init --auto --with-codex --codex-guidance full wrote one AQE block (1769 bytes, against 316 for compact), left the text outside the sentinel byte for byte, wrote no --- separator, and a second run changed nothing (identical sha256); compact behaved the same way. Not the full #655 conformance: the none mode, platform verify and the receipt fields are unverified" }
+        { "date": "2026-10-02", "event": "released", "note": "confirmed by hand on 3.14.5, the first release after the fix: in a disposable project whose AGENTS.md held only user text, aqe init --auto --with-codex --codex-guidance full wrote one AQE block (1769 bytes, against 316 for compact), left the text outside the sentinel byte for byte, wrote no --- separator, and a second run changed nothing (identical sha256); compact behaved the same way. Not the full #655 conformance: the none mode, platform verify and the receipt fields are unverified" },
+        { "date": "2026-10-05", "event": "adopted", "note": "the strict #655 conformance passed on 3.14.7: full on an existing AGENTS.md writes one block and leaves the text outside the sentinel unchanged; constraint sunset. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -2722,16 +2721,19 @@
       "kind": "issue",
       "title": "`aqe platform setup <platform>` fails for every platform: \"Module not found in bundle: ../../init/<name>-installer.js\"",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row formerly named the broken platform setup command (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
-      "adjustment": "The codex-mcp status row now points to AQE's supported aqe init --auto --with-codex --codex-guidance compact flow and notes the separate 3.14.4 Codex asset gap (agentic-qe#755). ak does not run platform setup or write AQE's Codex registration.",
-      "status": "fixed-unreleased",
+      "adjustment": "The codex-mcp status row points to AQE's supported aqe init --auto --with-codex --codex-guidance compact flow. Done: aqe platform setup works on 3.14.7. ak does not run platform setup or write AQE's Codex registration.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 761; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 761; no release contains it yet" },
+        { "date": "2026-10-05", "event": "released", "note": "first release containing PR 761 is 3.14.5 (the watch report's release basis)" },
+        { "date": "2026-10-05", "event": "adopted", "note": "aqe platform setup works for all eight platforms on 3.14.7 (copilot, cursor, cline, kilocode, roocode, codex, windsurf, continuedev). ak still runs aqe init --with-codex and writes no AQE Codex registration. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -2741,16 +2743,19 @@
       "kind": "issue",
       "title": "CLI exits 0 even when a command set `process.exitCode = 1` (`platform verify`, `plugin install/remove`, `hooks` task provenance)",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": {"refs": ["#655 conformance reads the [fail] lines of aqe platform verify codex, not its exit code"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
-      "adjustment": "none: the #655 conformance reads the [fail] lines of aqe platform verify codex, so it already catches a failed check; once fixed, the exit code agrees with them.",
-      "status": "fixed-unreleased",
+      "adjustment": "Done: on 3.14.7 the exit code agrees with the [fail] lines that the #655 conformance reads; no ak change was needed.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 760; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 760; no release contains it yet" },
+        { "date": "2026-10-05", "event": "released", "note": "first release containing PR 760 is 3.14.5 (the watch report's release basis)" },
+        { "date": "2026-10-05", "event": "adopted", "note": "on 3.14.7 aqe platform verify codex exits 1 when a check fails, in agreement with its [fail] lines that the conformance reads. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch" }
       ]
     },
     {
@@ -2779,17 +2784,20 @@
       "kind": "issue",
       "title": "fix: repeated aqe init changes generated settings on an unchanged project",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.6" } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["ak setup invokes aqe init and can inherit its repeat-run settings churn"], "files": [] },
-      "adjustment": "Released AQE 3.14.5 still rewrites .claude/settings.json on all three same-option public init runs of an unchanged minimal project; run 2 also creates a backup and changes domain/learning defaults. AGENTS.md and CLAUDE.md remain stable after run 1. PR #783 merged after the 3.14.5 publication; wait for a later released artifact and repeat exact conformance before claiming setup convergence or setting a minimum fixed version.",
-      "status": "fixed-unreleased",
+      "adjustment": "Done: on 3.14.7 three same-option public init runs of an unchanged minimal project leave .claude/settings.json and CLAUDE.md identical with no backup (PR #783, first released in 3.14.6). ak setup no longer inherits the churn.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-29", "event": "filed", "note": "approved exact draft posted; remote title and body match receipt" },
         { "date": "2026-09-29", "event": "registered", "note": "3.14.4 disposable project repro: settings changed on all three runs; guidance hashes and mtimes did not" },
         { "date": "2026-09-29", "event": "closed", "note": "upstream completed via PR #783; merge commit 63d3deb dated 13:05:19 UTC, after npm 3.14.5 publication at 10:08:33 UTC" },
-        { "date": "2026-09-29", "event": "reviewed", "note": "Source-bound released 3.14.5 disposable public init still churns settings on each of three same-option runs, with backup and default changes on run 2. Subsequent release conformance unverified; global 3.14.4 metadata unchanged. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." }
+        { "date": "2026-09-29", "event": "reviewed", "note": "Source-bound released 3.14.5 disposable public init still churns settings on each of three same-option runs, with backup and default changes on run 2. Subsequent release conformance unverified; global 3.14.4 metadata unchanged. Evidence: docs/archive/2026-09-29-aqe-released-artifact-receipt.md." },
+        { "date": "2026-10-05", "event": "released", "note": "PR #783 merged after the 3.14.5 publication, so the first release containing it is 3.14.6" },
+        { "date": "2026-10-05", "event": "adopted", "note": "on 3.14.7 three same-option aqe init runs leave .claude/settings.json and CLAUDE.md identical, with no backup file (macOS; options --auto --minimal --skip-patterns --no-statusline). Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "closed upstream; ak needed no change and no longer inherits the churn" }
       ]
     },
     {

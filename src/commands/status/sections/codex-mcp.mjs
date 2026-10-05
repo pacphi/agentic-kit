@@ -87,7 +87,7 @@ function topologyRows(cwd, cfg) {
       if (!topology.agenticQeRegistrations.length) {
         // Agentic-QE owns its Codex registration (ADR-0033); sync never writes it.
         rows.push(row('codex-mcp', 'warn', 'agentic-qe MCP is not concretely registered in Codex',
-          'run: aqe init --auto --with-codex --codex-guidance compact in this project, then recheck; AQE 3.14.4 may still omit Codex assets (agentic-qe#755)', { repair: 'manual' }));
+          'run: aqe init --auto --with-codex --codex-guidance compact in this project, then recheck', { repair: 'manual' }));
       } else {
         rows.push(row('codex-mcp', 'ok', 'agentic-qe MCP concretely registered in Codex'));
       }
