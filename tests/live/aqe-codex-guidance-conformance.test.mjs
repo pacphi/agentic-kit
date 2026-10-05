@@ -7,12 +7,15 @@
 // AQE's sentinel, be idempotent over two runs, report the owned bytes it wrote in
 // its --json receipt, and pass `aqe platform verify codex --codex-guidance <mode>`.
 //
-// On agentic-qe 3.14.4 it fails (2026-09-27, Branch 5 report b5-655-conformance),
-// so every mode is a todo naming the defects: the run reports them without
-// failing. Once a release fixes them, run it strictly to prove the sunset:
+// It is also the regression check for agentic-qe#755 (Codex hooks and skills through the
+// `aqe` command), agentic-qe#756 (`full` on an existing AGENTS.md) and agentic-qe#758
+// (`platform verify` exit code).
 //
-//   AK_AQE_CONFORMANCE=1 [AK_AQE_CONFORMANCE_STRICT=1] \
-//     node --test tests/live/aqe-codex-guidance-conformance.test.mjs
+// It failed on agentic-qe 3.14.4 (2026-09-27, Branch 5 report b5-655-conformance)
+// and passes on 3.14.7 (2026-10-05, docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md),
+// which sunset the constraint. A failure now means a regression:
+//
+//   AK_AQE_CONFORMANCE=1 node --test tests/live/aqe-codex-guidance-conformance.test.mjs
 //
 // Sandbox (the full init runs `npm install -g vibium`, AQE/dist/init/phases/
 // 09-assets.js): HOME, TMPDIR, the npm prefix and cache, and mise's data, state and
@@ -27,11 +30,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const ENABLED = process.env.AK_AQE_CONFORMANCE === '1';
-const STRICT = process.env.AK_AQE_CONFORMANCE_STRICT === '1';
 const AQE_BIN = process.env.AQE_BIN ?? 'aqe';
-const KNOWN_DEFECTS = 'agentic-qe 3.14.4 (agentic-qe#755, agentic-qe#756, agentic-qe#758): --codex-guidance full writes no block when AGENTS.md '
-  + 'already exists; compact adds bytes outside its sentinel; through the aqe command resolvePackageRoot() misses the package, so '
-  + 'no Codex hooks or skills install and platform verify fails; platform verify exits 0 on failed checks';
 const BEGIN = '<!-- BEGIN AGENTIC-QE CODEX -->';
 const BLOCK = /<!-- BEGIN AGENTIC-QE CODEX -->[\s\S]*?<!-- END AGENTIC-QE CODEX -->(?:\r?\n)?/g;
 const USER_TEXT = '# Project notes\n\nUser-owned line that AQE must keep.\n';
@@ -74,7 +73,6 @@ function receiptOf(stdout) {
 for (const mode of ['full', 'compact', 'none']) {
   test(`Agentic-QE selects ${mode} Codex guidance on ak's path, keeps user text, is idempotent and verifies`, {
     skip: ENABLED ? false : 'set AK_AQE_CONFORMANCE=1 to run the live AQE Codex guidance conformance',
-    todo: STRICT ? false : KNOWN_DEFECTS,
     timeout: 900_000,
   }, (t) => {
     if (process.platform === 'win32') { t.skip('POSIX conformance'); return; }
