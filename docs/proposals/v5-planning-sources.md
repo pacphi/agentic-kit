@@ -119,8 +119,9 @@ v4 retires the experimental external host-adapter contract and its Hermes integr
 v5 plans first-class support for Grok, Gemini, Hermes, OpenCode, Claude (Code, claude.ai, Desktop)
 and ChatGPT/Codex. It should start from this work rather than from nothing.
 
-**Where it is.** On `main` until the P0 removal lands. After that, at the annotated tag
-`archive/v4-host-adapters`, which marks the last `main` commit that has the code.
+**Where it is.** At the annotated tag `archive/v4-host-adapters`, which marks the `main` commit the
+code was archived at: `6362ee11e689a46e58b7ec8b9e3399f9deb18bea`, tagged on 2026-10-05. The code
+also stays on `main` until the P0 removal lands.
 
 | Part | Files |
 | --- | --- |
