@@ -216,6 +216,21 @@ test('the #574 exception retirement records released conformance, and the #240 t
   assert.ok(tracker.history.some((item) => item.event === 'retired' && item.date === '2026-10-02'));
 });
 
+test('#535 keeps host-support.md narrowed to what 3.14.7 did not re-exercise', () => {
+  const doc = document();
+  const smoke = entry(doc, 'proffesor-for-testing/agentic-qe#535');
+  assert.equal(smoke.status, 'dispatched');
+  assert.match(smoke.adjustment, /test-generation quality and the GOAP world-state activeAgents count/);
+  assert.match(smoke.adjustment, /memory_delete, cross-phase stats, GOAP maxSteps, goap_execute dryRun and the coherence recommendation text were fixed/);
+  const hostSupport = fs.readFileSync(path.join(process.cwd(), 'docs/host-support.md'), 'utf8');
+  assert.match(hostSupport, /test-generation quality and the GOAP world-state `activeAgents` count/);
+  assert.doesNotMatch(hostSupport, /memory_delete/);
+  assert.doesNotMatch(hostSupport, /cross-phase stats/);
+  assert.doesNotMatch(hostSupport, /GOAP `?maxSteps`?/);
+  assert.doesNotMatch(hostSupport, /goap_execute dryRun/);
+  assert.doesNotMatch(hostSupport, /coherence recommendation text/);
+});
+
 test('stale threads are mapped to what ak carries, or retired with a reason', () => {
   const doc = document();
   const clear = entry(doc, 'openai/codex#16045');

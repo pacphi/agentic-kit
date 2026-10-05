@@ -2177,12 +2177,13 @@
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
       "adjustment": "Keep the host-support.md risk link limited to what 3.14.7 did not re-exercise: test-generation quality and the GOAP world-state activeAgents count. memory_delete, cross-phase stats, GOAP maxSteps, goap_execute dryRun and the coherence recommendation text were fixed.",
-      "status": "watching",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-28", "event": "commented", "note": "re-verified on 3.14.4: memory_delete and cross-phase stats fixed; GOAP maxSteps, GOAP world state, test generation and coherence text still reproduce; goap_execute not exercised (issuecomment-5878245564)" },
-        { "date": "2026-10-05", "event": "reviewed", "note": "re-verified on 3.14.7: memory_delete and cross-phase stats fixed; GOAP maxSteps honored and goap_execute dryRun finds the plan; the coherence recommendation text matches the vote tally. Not re-exercised: test-generation quality and the GOAP activeAgents count. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." }
+        { "date": "2026-10-05", "event": "reviewed", "note": "re-verified on 3.14.7: memory_delete and cross-phase stats fixed; GOAP maxSteps honored and goap_execute dryRun finds the plan; the coherence recommendation text matches the vote tally. Not re-exercised: test-generation quality and the GOAP activeAgents count. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "dispatched", "note": "branch upstream/proffesor-for-testing-agentic-qe-535 on agentic-qe 3.14.6: docs/host-support.md already carries the narrowed risk link from commit 6362ee1; this PR adds regression coverage (tests/kit/upstream-watch-registry.test.mjs) locking it in and closes the dispatch loop." }
       ]
     },
     {
