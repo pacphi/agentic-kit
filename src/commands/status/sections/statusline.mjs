@@ -6,9 +6,10 @@
 import fs from 'node:fs';
 import * as paths from '../../../lib/paths.mjs';
 import {
-  fixStatusline, helperStampStale, statuslineVersionAhead,
+  fixStatusline, commandUsesLoader, statuslineVersionAhead,
   helperRefreshBlocker, bakedVersionManualFix,
 } from '../../../lib/statusline.mjs';
+import { readJson } from '../../../lib/settings.mjs';
 import { statuslineDrift } from '../../../lib/codex-statusline.mjs';
 import { row } from '../row.mjs';
 
@@ -17,32 +18,35 @@ function footerRows(cwd) {
   if (!fs.existsSync(sl)) {
     return [row('statusline', 'info', 'no project statusline here (created by setup)')];
   }
-  const slSrc = fs.readFileSync(sl, 'utf8');
-  const hasFooter = slSrc.includes('ruflo-seg:BEGIN');
-  // Drift is "would a sync CHANGE this file?", which fixStatusline's dry run answers
-  // exactly. A marker-presence test alone cannot see CONTENT drift: after a kit upgrade
-  // revises the footer or another injected block, the marker is still there, this row
-  // reports 'ok', and — because sync builds its plan from rows carrying a `fix` — the
-  // re-injection never runs and the stale block survives indefinitely. Observed live:
-  // an updated overlay silently failed to land for exactly this reason.
-  let wouldChange = !hasFooter;
-  try { wouldChange = fixStatusline(cwd, { dryRun: true }).applied; } catch { /* keep marker fallback */ }
-  // Armed wipe: the footer can be present AND current while ruflo's helper
-  // stamp lags the installed CLI — the next ruflo command (in practice the
-  // daemon start) then pristine-copies statusline.cjs over ours. That is how
-  // the footer kept vanishing BETWEEN syncs. Surface it as the same drift
-  // story; sync closes it by refreshing the helpers before re-injecting.
-  let stampStale = false;
-  try { stampStale = helperStampStale(cwd); } catch { /* best-effort */ }
-  const rows = [row('statusline', (wouldChange || stampStale) ? 'warn' : 'ok',
-    wouldChange
-      ? (hasFooter ? 'injected blocks are out of date' : 'statusline present but footer missing')
-      : stampStale
-        ? 'footer present but ruflo helper stamp is stale — next ruflo command wipes it'
-        : 'activation footer present and current',
-    (wouldChange || stampStale) ? 'sync refreshes helpers, then re-injects the footer' : null)];
+  // Ruflo 3.51+ signs statusline.cjs and restores any edit to it, so the kit's footer lives in
+  // a loader beside it. Drift is "would a sync CHANGE anything?", which fixStatusline's dry run
+  // answers exactly: a missing or stale loader or footer, an older injection still inside the
+  // signed helper, or a Ruflo-owned statusLine command that does not run the loader yet.
+  let wouldChange = true;
+  try { wouldChange = fixStatusline(cwd, { dryRun: true }).applied; } catch { /* report drift */ }
+  const rows = [wouldChange ? driftRow(sl) : wiredRow(cwd)];
   rows.push(...versionRows(cwd));
   return rows;
+}
+
+const FIX = 'sync installs the kit loader, restores Ruflo\'s helper and points statusLine at it';
+
+function driftRow(sl) {
+  const injected = /ruflo-(seg|bin):BEGIN/.test(fs.readFileSync(sl, 'utf8'));
+  return row('statusline', 'warn',
+    injected
+      ? 'footer was injected into Ruflo\'s signed helper, which Ruflo restores on its next call'
+      : 'statusline present but footer missing',
+    FIX);
+}
+
+// Converged files are not enough: a custom statusLine command never runs the loader.
+function wiredRow(cwd) {
+  const command = readJson(paths.projectSettings(cwd))?.statusLine?.command;
+  if (commandUsesLoader(command)) return row('statusline', 'ok', 'activation footer present and current');
+  return row('statusline', 'warn',
+    'the footer loader is installed, but this project\'s statusLine command does not run it',
+    'point statusLine.command in .claude/settings.json at .claude/helpers/ak-statusline.cjs', { repair: 'manual' });
 }
 
 // Ruflo's helper renders the HIGHEST of its baked floor and every install it

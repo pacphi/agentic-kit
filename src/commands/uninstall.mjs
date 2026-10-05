@@ -27,6 +27,8 @@ import * as paths from '../lib/paths.mjs';
 import { brainShimPath } from '../lib/opencode-core.mjs';
 import { ok, warn, fail, info } from '../lib/output.mjs';
 import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
+import { stripInjected, commandUsesLoader, RUFLO_STATUSLINE_COMMAND } from '../lib/statusline.mjs';
+import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { modelInventoryPath, modelScopeKeyPath } from '../lib/model-inventory/store.mjs';
 import { removeManagedAgentBrowser, removeManagedAgentBrowserConfig } from '../lib/agent-browser.mjs';
 import { editLabel, installEditStatus, restoreInstallEdits } from '../lib/install-edits.mjs';
@@ -559,14 +561,26 @@ function stepLegacyShellKit(ctx) {
 
 // 5. per-project revert
 function stepThisProject(ctx) {
-  const sl = paths.projectStatusline(process.cwd());
+  const root = process.cwd();
+  const sl = paths.projectStatusline(root);
   if (!fs.existsSync(sl)) return;
   ctx.act('reverted statusline footer in this project', () => {
-    fs.copyFileSync(sl, `${sl}.bak`);
-    let s = fs.readFileSync(sl, 'utf8');
-    s = s.replace(/\/\* ruflo-seg:BEGIN \*\/[\s\S]*?\/\* ruflo-seg:END \*\/\n?/, '');
-    s = s.replace(/ \+ rufloActivationSegments\(process\.cwd\(\)\)/g, '');
-    fs.writeFileSync(sl, s);
+    // An older ak injected the footer into Ruflo's signed helper; this one keeps it in a loader.
+    const raw = fs.readFileSync(sl, 'utf8');
+    const stock = stripInjected(raw);
+    if (stock !== raw) {
+      fs.copyFileSync(sl, `${sl}.bak`);
+      fs.writeFileSync(sl, stock);
+    }
+    for (const file of [paths.projectStatuslineLoader(root), paths.projectStatuslineFooter(root)]) {
+      fs.rmSync(file, { force: true });
+    }
+    const settingsFile = paths.projectSettings(root);
+    const settings = readJson(settingsFile);
+    if (commandUsesLoader(settings?.statusLine?.command)) {
+      settings.statusLine = { ...settings.statusLine, command: RUFLO_STATUSLINE_COMMAND };
+      writeJsonWithBackup(settingsFile, settings);
+    }
   });
 }
 

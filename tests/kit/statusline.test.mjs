@@ -12,6 +12,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { fixStatusline } from '../../src/lib/statusline.mjs';
+import { projectStatuslineFooter, projectStatuslineLoader } from '../../src/lib/paths.mjs';
 import statuslineSection from '../../src/commands/status/sections/statusline.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 import { redirectToolState, spawnEnv } from './helpers/home-sandbox.mjs';
@@ -58,6 +59,9 @@ function fixture({ buggyUpstream, rufloVersion }) {
 }
 
 const count = (s, re) => (s.match(re) || []).length;
+// The footer and bin fix live in the kit's loader files, never in Ruflo's signed helper.
+const footerOf = (proj) => fs.readFileSync(projectStatuslineFooter(proj), 'utf8');
+const loaderOf = (proj) => projectStatuslineLoader(proj);
 
 // An old security block as an earlier ak injected it (ruvnet/ruflo#2694 stopgap).
 const OLD_SEC_BLOCK = [
@@ -84,7 +88,8 @@ test('an old CVE overlay block is stripped and never re-injected, even on a CLI 
   const out = fs.readFileSync(sl, 'utf8');
   assert.doesNotMatch(out, /ruflo-sec/);
   assert.doesNotMatch(out, /rufloLocalSecurity|rufloHonestInsight/);
-  assert.match(out, /ruflo-seg:BEGIN/, 'the activation footer is injected');
+  assert.equal(out, HOST, 'the signed helper is restored to Ruflo\'s own text');
+  assert.match(footerOf(proj), /ruflo-seg:BEGIN/, 'the activation footer lives in the kit footer file');
 });
 
 test('status never reports a statusline/cve row, even on a CLI with the defect', async () => {
@@ -100,10 +105,12 @@ test('the footer template no longer carries the CVE overlay functions', () => {
   assert.doesNotMatch(footer, /function rufloLocalSecurity|function rufloHonestInsight/);
 });
 
-test('injected statusline is syntactically valid', () => {
-  const { proj, sl } = fixture({ buggyUpstream: true });
+test('the loader and footer files are syntactically valid', () => {
+  const { proj } = fixture({ buggyUpstream: true });
   fixStatusline(proj);
-  execFileSync(process.execPath, ['--check', sl], { stdio: 'ignore' }); // throws on bad syntax; spawn-env: inherits (syntax check only, runs nothing)
+  // throws on bad syntax
+  execFileSync(process.execPath, ['--check', loaderOf(proj)], { stdio: 'ignore' }); // spawn-env: inherits (syntax check only, runs nothing)
+  execFileSync(process.execPath, ['--check', projectStatuslineFooter(proj)], { stdio: 'ignore' }); // spawn-env: inherits (syntax check only, runs nothing)
 });
 
 test('injection is idempotent — repeated syncs never stack blocks', () => {
@@ -111,9 +118,10 @@ test('injection is idempotent — repeated syncs never stack blocks', () => {
   fixStatusline(proj); fixStatusline(proj);
   const r3 = fixStatusline(proj);
   const out = fs.readFileSync(sl, 'utf8');
-  assert.equal(count(out, /ruflo-sec:BEGIN/g), 0);
-  assert.equal(count(out, /ruflo-seg:BEGIN/g), 1);
-  assert.equal(count(out, /ruflo-bin:BEGIN/g), 1);
+  const footer = footerOf(proj);
+  assert.equal(count(out, /ruflo-(sec|seg|bin):BEGIN/g), 0, 'nothing is injected into the signed helper');
+  assert.equal(count(footer, /ruflo-seg:BEGIN/g), 1);
+  assert.equal(count(footer, /ruflo-bin:BEGIN/g), 1);
   assert.equal(r3.applied, false, 'a converged file must report no change');
 });
 
@@ -129,19 +137,20 @@ test('bin wrapper is injected on a fixed CLI', () => {
   // buggyUpstream:false = the exact state that bit us: CVE counter fixed, bin path broken.
   const { proj, sl } = fixture({ buggyUpstream: false });
   fixStatusline(proj);
-  const out = fs.readFileSync(sl, 'utf8');
+  const out = footerOf(proj);
   assert.match(out, /ruflo-bin:BEGIN/);
   assert.match(out, /function rufloRealCliBins/, 'footer helper the wrapper depends on');
+  assert.equal(fs.readFileSync(sl, 'utf8'), HOST, 'the signed helper is untouched');
 });
 
 test('bin wrapper prepends real bins ahead of upstream candidates at run time', () => {
-  const { proj, sl } = fixture({ buggyUpstream: false });
+  const { proj } = fixture({ buggyUpstream: false });
   // A project-local ruflo whose REAL bin layout (bin/ruflo.js, nested cli) exists on disk.
   const rufloBin = path.join(proj, 'node_modules', 'ruflo', 'bin');
   fs.mkdirSync(rufloBin, { recursive: true });
   fs.writeFileSync(path.join(rufloBin, 'ruflo.js'), '');
   fixStatusline(proj);
-  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8', env: spawnEnv(path.join(path.dirname(proj), 'home')) });
+  const stdout = execFileSync(process.execPath, [loaderOf(proj)], { cwd: proj, encoding: 'utf8', env: spawnEnv(path.join(path.dirname(proj), 'home')) });
   const real = stdout.indexOf(path.join(rufloBin, 'ruflo.js'));
   const orig = stdout.indexOf('/orig');
   assert.notEqual(real, -1, 'the on-disk bin upstream can never find must be a candidate');
@@ -153,7 +162,7 @@ test('bin wrapper is inert on a template without resolveCliBinCandidates', () =>
   const { proj, sl } = fixture({ buggyUpstream: false });
   fs.writeFileSync(sl, '#!/usr/bin/env node\nlet ver = "3.0.0";\nconsole.log("x")\n');
   fixStatusline(proj);
-  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8', env: spawnEnv(path.join(path.dirname(proj), 'home')) });
+  const stdout = execFileSync(process.execPath, [loaderOf(proj)], { cwd: proj, encoding: 'utf8', env: spawnEnv(path.join(path.dirname(proj), 'home')) });
   assert.match(stdout, /^x/, 'typeof guard: the wrapper must not break a template it does not fit');
 });
 
@@ -171,7 +180,7 @@ for (const [label, rufloVersion] of [['higher (the 9.9.9 leak)', '9.9.9'], ['low
     const out = fs.readFileSync(sl, 'utf8');
     assert.match(out, /let ver = "3\.0\.0";/, 'the helper\'s own baked version must survive injection');
     assert.doesNotMatch(out, new RegExp(`let ver = "${rufloVersion.replace(/\./g, '\\.')}"`));
-    assert.match(out, /ruflo-seg:BEGIN/, 'the footer is still injected');
+    assert.match(footerOf(proj), /ruflo-seg:BEGIN/, 'the kit footer is still installed');
     assert.equal(r.applied, true);
   });
 }

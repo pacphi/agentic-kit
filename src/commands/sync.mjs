@@ -659,12 +659,11 @@ export const SYNC_STEPS = [
       else info('ruflo helpers: current');
     },
   },
-  // Gate includes 'providers': applyProviders runs ruflo CLI commands, and any
-  // ruflo command is a potential helper-refresh wiper — so a providers-only
-  // sync must re-heal the statusline afterwards (this step runs after the
-  // `providers` step by design — array position, not comments, keeps it so).
-  // Without this, a stale-oracle miss could let a providers sync wipe the
-  // footer with no re-inject planned.
+  // Gate includes 'providers': applyProviders runs ruflo CLI commands, and Ruflo's helper refresh
+  // can regenerate its signed statusline.cjs, so a providers-only sync re-checks the statusline
+  // afterwards (this step runs after the `providers` step by design — array position, not
+  // comments, keeps it so). The kit footer lives in a loader beside the signed helper and
+  // survives that refresh, but the statusLine command must still point at the loader.
   {
     id: 'statusline',
     when: (subs) => subs.has('statusline') || subs.has('versions') || subs.has('providers'),
@@ -676,7 +675,7 @@ export const SYNC_STEPS = [
       const root = paths.repoRoot(ctx.cwd) ?? ctx.cwd;
       const r = await withProgress('statusline', async () => fixStatusline(root));
       if (r.absent) info('statusline: no ruflo helpers here — nothing to patch');
-      else (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? 'footer injected' : r.reason ?? 'in sync'}`);
+      else (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? 'kit footer loader installed beside Ruflo\'s signed helper' : r.reason ?? 'in sync'}`);
       // The baked Ruflo version is repaired only by Ruflo's own helper refresh
       // (fixStatusline clears the stamp first); ak never writes a version.
       const v = r.versionAhead;
@@ -684,13 +683,11 @@ export const SYNC_STEPS = [
       else if (r.versionRepair === 'failed') {
         warn(`statusline: still shows Ruflo v${v.baked} (installed v${v.installed}) — ruflo's helper refresh did not regenerate it; ${bakedVersionManualFix(v.installed)}`);
       }
-      // Honest success: fixStatusline invokes ruflo's PRIVATE helper-refresh
-      // internal, best-effort. If the stamp is STILL stale after the heal, that
-      // refresh silently no-oped (e.g. upstream moved the dist module) and the
-      // next ruflo command will wipe the footer we just injected — say so
-      // instead of letting "footer injected" read as converged.
+      // Honest success: fixStatusline invokes ruflo's PRIVATE helper-refresh internal, best-effort.
+      // If the stamp is STILL stale after the heal, that refresh silently no-oped (e.g. upstream
+      // moved the dist module) and the helper is older than the installed Ruflo.
       if (helperStampStale(root)) {
-        warn('statusline: helper stamp still stale after heal — ruflo\'s refresh did not run; the footer may not survive the next ruflo command');
+        warn('statusline: helper stamp still stale after heal — ruflo\'s refresh did not run, so the helper is older than the installed Ruflo');
       }
     },
   },

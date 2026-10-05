@@ -560,12 +560,12 @@ open in other terminals, here is what can actually reach them, worst first:
    failures surface as one-off errors. A live session's `claude-flow` MCP server keeps
    running its already-loaded code but sees a mixed-version tree for anything loaded
    lazily afterward — if its tools start misbehaving, restart that session.
-3. **Footer wipes get armed in your *other* projects.** A ruflo upgrade makes every
-   project's `.claude/helpers/.helpers-version` stamp lag. Sync heals the **current**
-   project (refresh-then-inject); in other open projects the first ruflo command — in
-   practice a hook — pristine-copies `statusline.cjs` and wipes the kit footer there.
-   Cosmetic; `ak sync` in that project restores it, and `ak status` flags the armed state
-   before it fires.
+3. **Other projects keep an older footer until you sync them.** Ruflo signs
+   `.claude/helpers/statusline.cjs` and restores it from its manifest on its next call. The
+   kit's footer lives in a loader beside it (`.claude/helpers/ak-statusline.cjs`), so an
+   upgrade does not remove it. A project that still has an older kit's injection inside the
+   signed helper loses that footer when Ruflo restores the file. Cosmetic; `ak sync` in that
+   project installs the loader, and `ak status` flags it on the `statusline` row.
 4. **A narrow race on `~/.claude.json`.** MCP registration shells out to
    `claude mcp add -s user`, which rewrites the same file live Claude sessions persist
    state into — last writer wins. Rare, but real; re-run `ak sync` if the registration
