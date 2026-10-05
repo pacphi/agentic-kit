@@ -14,7 +14,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { projectStatusline, projectSettings, rufloCliDist, rufloNodeModules } from './paths.mjs';
+import {
+  projectStatusline, projectStatuslineLoader, projectStatuslineFooter, projectSettings, rufloCliDist, rufloNodeModules,
+} from './paths.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 
@@ -230,6 +232,81 @@ function refreshHelpersBeforeInjection(root) {
   return { versionRepair: 'failed', versionAhead: ahead };
 }
 
+const LOADER_TEMPLATE = path.join(
+  path.dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'statusline-loader.cjs');
+
+// Ruflo's own statusLine command points at the signed helper; ours prefers the loader and
+// falls back to that helper, so a project that loses the loader still renders stock.
+export const LOADER_COMMAND = 'sh -c \'D="${CLAUDE_PROJECT_DIR:-.}"; if [ -f "$D/.claude/helpers/ak-statusline.cjs" ]; then exec node "$D/.claude/helpers/ak-statusline.cjs"; fi; [ -f "$D/.claude/helpers/statusline.cjs" ] || D="${HOME}"; exec node "$D/.claude/helpers/statusline.cjs"\'';
+
+// What `ruflo init` writes; uninstall puts it back when it removes the loader.
+export const RUFLO_STATUSLINE_COMMAND = 'sh -c \'D="${CLAUDE_PROJECT_DIR:-.}"; [ -f "$D/.claude/helpers/statusline.cjs" ] || D="${HOME}"; exec node "$D/.claude/helpers/statusline.cjs"\'';
+
+const LOADER_MARK = 'ak-statusline.cjs';
+const rufloOwnedCommand = (cmd) => cmd.includes('helpers/statusline.cjs') || cmd.includes('statusline-v3.cjs');
+
+/** True when a statusLine command runs the kit loader. */
+export const commandUsesLoader = (cmd) => typeof cmd === 'string' && cmd.includes(LOADER_MARK);
+
+/** The text the loader splices into Ruflo's helper in memory: the footer plus the bin fix. */
+export function footerSource() {
+  const footer = fs.readFileSync(FOOTER_TEMPLATE, 'utf8').replace(/\r\n/g, '\n').trim();
+  return `${[footer, BIN_WRAP].join('\n')}\n`;
+}
+
+const loaderSource = () => fs.readFileSync(LOADER_TEMPLATE, 'utf8').replace(/\r\n/g, '\n');
+
+/** Strip everything an older ak injected into the signed helper, leaving Ruflo's text. */
+export function stripInjected(raw) {
+  let s = raw.replace(/\r\n/g, '\n');
+  s = s.replace(/ \/\* agentic-kit: global-install version probe \*\/ require\("path"\)\.join\(require\("path"\)\.dirname\(process\.execPath\),"\.\.","lib","node_modules","ruflo","package\.json"\),/, '');
+  s = s.replace(/\/\* ruflo-seg:BEGIN \*\/[\s\S]*?\/\* ruflo-seg:END \*\/\n?/, '');
+  s = s.replace(/ \+ rufloActivationSegments\(process\.cwd\(\)\)/g, '');
+  s = s.replace(SEC_WRAP_STRIP, '');
+  s = s.replace(BIN_WRAP_STRIP, '');
+  return eol(raw) === '\r\n' ? s.replace(/\n/g, '\r\n') : s;
+}
+
+function writeIfChanged(file, content, dryRun) {
+  let current = null;
+  try { current = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
+  if (current === content) return false;
+  if (!dryRun) {
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, content);
+    fs.renameSync(tmp, file);
+  }
+  return true;
+}
+
+// Restores Ruflo's text in the signed helper; rolls back if the result does not parse.
+function restoreSignedHelper(file, raw, dryRun) {
+  const stock = stripInjected(raw);
+  if (stock === raw) return { changed: false };
+  if (dryRun) return { changed: true };
+  fs.writeFileSync(file, stock);
+  try {
+    execFileSync(process.execPath, ['--check', file], { stdio: 'ignore' });
+  } catch {
+    fs.writeFileSync(file, raw);
+    return { changed: false, failed: 'restored helper failed node --check — rolled back' };
+  }
+  return { changed: true };
+}
+
+// Points a Ruflo-owned statusLine command at the loader. A command someone else wrote is theirs.
+function wireStatusLine(root, dryRun) {
+  const settingsFile = projectSettings(root);
+  const settings = readJson(settingsFile);
+  const cmd = settings?.statusLine?.command ?? '';
+  if (!rufloOwnedCommand(cmd) || commandUsesLoader(cmd)) return false;
+  if (!dryRun) {
+    settings.statusLine = { type: 'command', ...settings.statusLine, command: LOADER_COMMAND };
+    writeJsonWithBackup(settingsFile, settings);
+  }
+  return true;
+}
+
 export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
   const file = projectStatusline(root);
   if (!fs.existsSync(file)) {
@@ -239,64 +316,23 @@ export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
       reason: 'no statusline.cjs (created by ruflo init)', versionRepair: null, versionAhead: null };
   }
 
-  // Order matters: refresh ruflo's helpers BEFORE reading, so we inject onto the
-  // freshly-stamped copy and nothing rewrites it until the next ruflo upgrade
-  // (where sync repeats this, again under its own control). dryRun (status) must
-  // stay read-only — helperStampStale() and statuslineVersionAhead() report there.
+  // Refresh Ruflo's helpers first so the signed copy is current and stamped. dryRun (status)
+  // stays read-only — helperStampStale() and statuslineVersionAhead() report there.
   const version = dryRun ? { versionRepair: null, versionAhead: null } : refreshHelpersBeforeInjection(root);
 
-  const raw = fs.readFileSync(file, 'utf8');
-  const ending = eol(raw);
-  let s = raw.replace(/\r\n/g, '\n');
-
-  // (a) legacy probe strip. The baked `let ver` is left exactly as Ruflo wrote it.
-  s = s.replace(/ \/\* agentic-kit: global-install version probe \*\/ require\("path"\)\.join\(require\("path"\)\.dirname\(process\.execPath\),"\.\.","lib","node_modules","ruflo","package\.json"\),/, '');
-
-  // (b) footer injection: strip any prior block/wrap, re-inject after shebang
-  const footer = fs.readFileSync(FOOTER_TEMPLATE, 'utf8').replace(/\r\n/g, '\n').trim();
-  s = s.replace(/\/\* ruflo-seg:BEGIN \*\/[\s\S]*?\/\* ruflo-seg:END \*\/\n?/, '');
-  s = s.replace(/ \+ rufloActivationSegments\(process\.cwd\(\)\)/g, '');
-  // (d) retired security overlay (ruvnet/ruflo#2694): strip a block an older ak
-  //     injected; never re-injected. Remove after one release.
-  s = s.replace(SEC_WRAP_STRIP, '');
-  // (e) bin wrapper: stripped unconditionally like the others, re-injected always —
-  //     no gate (see BIN_WRAP), it self-neutralizes on a template it doesn't fit.
-  s = s.replace(BIN_WRAP_STRIP, '');
-  const lines = s.split('\n');
-  const at = lines[0]?.startsWith('#!') ? 1 : 0;
-  lines.splice(at, 0, [footer, BIN_WRAP].join('\n'));
-  s = lines.join('\n');
-  s = s.replace(/console\.log\(generateStatusline\(\)\)/, 'console.log(generateStatusline() + rufloActivationSegments(process.cwd()))');
-
-  const out = ending === '\r\n' ? s.replace(/\n/g, '\r\n') : s;
-  if (out !== raw && !dryRun) {
-    fs.writeFileSync(file, out);
-    // syntax gate — a broken statusline is worse than an unpatched one
-    try {
-      execFileSync(process.execPath, ['--check', file], { stdio: 'ignore' });
-    } catch {
-      fs.writeFileSync(file, raw); // roll back
-      return { file, applied: false, reason: 'injected file failed node --check — rolled back', ...version };
-    }
+  // Ruflo 3.51+ restores any edit to statusline.cjs (signed manifest), so the kit never writes
+  // there: strip what an older ak injected, then install the loader and footer beside it.
+  const restored = restoreSignedHelper(file, fs.readFileSync(file, 'utf8'), dryRun);
+  if (restored.failed) return { file, applied: false, reason: restored.failed, ...version };
+  let wroteFooter; let wroteLoader; let wired;
+  try {
+    wroteFooter = writeIfChanged(projectStatuslineFooter(root), footerSource(), dryRun);
+    wroteLoader = writeIfChanged(projectStatuslineLoader(root), loaderSource(), dryRun);
+    wired = wireStatusLine(root, dryRun);
+  } catch (error) {
+    // A helpers folder ak cannot write to must not abort sync: report it and keep going.
+    return { file, applied: restored.changed, reason: `cannot write the kit statusline files (${error.code ?? error.message})`, ...version };
   }
 
-  // (c) legacy statusLine repoint (aqe <3.12.1 era)
-  const settingsFile = projectSettings(root);
-  const settings = readJson(settingsFile);
-  const cmd = settings?.statusLine?.command ?? '';
-  let repointed = false;
-  if (cmd.includes('statusline-v3.cjs') && !cmd.includes('helpers/statusline.cjs')) {
-    if (!dryRun) {
-      settings.statusLine = {
-        type: 'command',
-        command: 'sh -c \'node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/statusline.cjs" 2>/dev/null || node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/statusline-v3.cjs" 2>/dev/null || echo "▊ RuFlo + Agentic QE v3"\'',
-        refreshMs: settings.statusLine?.refreshMs ?? 5000,
-        enabled: true,
-      };
-      writeJsonWithBackup(settingsFile, settings);
-    }
-    repointed = true;
-  }
-
-  return { file, applied: out !== raw, repointed, ...version };
+  return { file, applied: restored.changed || wroteFooter || wroteLoader || wired, repointed: wired, ...version };
 }

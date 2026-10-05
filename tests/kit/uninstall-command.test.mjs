@@ -23,6 +23,7 @@ const HOME = sandboxHome('ak-uninstall');
 const paths = await import('../../src/lib/paths.mjs');
 const { BEGIN, END } = await import('../../src/lib/blocks.mjs');
 const uninstall = await import('../../src/commands/uninstall.mjs');
+const { LOADER_COMMAND, RUFLO_STATUSLINE_COMMAND } = await import('../../src/lib/statusline.mjs');
 assertSandboxed(paths, HOME);
 isolateProject('ak-uninstall-command');
 
@@ -180,6 +181,32 @@ test('--this-project reverts the statusline footer and backs the helper up', asy
   assert.ok(!after.includes('rufloActivationSegments(process.cwd())'), 'call site removed');
   assert.ok(after.includes('const base = () => "x";'), 'the rest of the helper survives');
   assert.equal(fs.readFileSync(`${sl}.bak`, 'utf8'), body, 'pre-revert helper is backed up');
+  rmrf(project);
+});
+
+test('--this-project removes the kit loader and puts Ruflo\'s statusLine command back', async () => {
+  seedHome();
+  const project = sandboxProject('ak-uninstall-loader');
+  const helpers = path.dirname(paths.projectStatusline(project));
+  fs.mkdirSync(helpers, { recursive: true });
+  const stock = 'console.log("stock");\n';
+  fs.writeFileSync(paths.projectStatusline(project), stock);
+  fs.writeFileSync(paths.projectStatuslineLoader(project), '// loader\n');
+  fs.writeFileSync(paths.projectStatuslineFooter(project), '// footer\n');
+  fs.writeFileSync(paths.projectSettings(project), JSON.stringify({
+    statusLine: { type: 'command', command: LOADER_COMMAND, refreshMs: 5000 },
+  }));
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    await captureLog(() => uninstall.run({ flags: { yes: true, 'this-project': true } }));
+  } finally { process.chdir(cwd); }
+  assert.equal(fs.readFileSync(paths.projectStatusline(project), 'utf8'), stock, 'the signed helper is not touched');
+  assert.equal(fs.existsSync(paths.projectStatuslineLoader(project)), false, 'loader removed');
+  assert.equal(fs.existsSync(paths.projectStatuslineFooter(project)), false, 'footer removed');
+  const settings = JSON.parse(fs.readFileSync(paths.projectSettings(project), 'utf8'));
+  assert.equal(settings.statusLine.command, RUFLO_STATUSLINE_COMMAND);
+  assert.equal(settings.statusLine.refreshMs, 5000, 'other statusLine keys survive');
   rmrf(project);
 });
 

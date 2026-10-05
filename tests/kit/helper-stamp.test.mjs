@@ -194,14 +194,14 @@ test('a BLOCKED refresh (signature gate resolved {blocked}) returns false', () =
 
 // --- fixStatusline ordering: refresh BEFORE inject; dryRun stays read-only -----
 
-test('refresh-then-inject: footer survives the wipe the refresh performs', () => {
-  // The faithful fake WIPES statusline.cjs when it runs. Only the correct
-  // ordering (refresh first, inject second) leaves the footer present; an
-  // inject-then-refresh regression ends with a pristine file and FAILS here.
+test('refresh first: the signed helper stays stock and the kit footer lands beside it', () => {
+  // The faithful fake WIPES statusline.cjs when it runs. The kit no longer writes the footer into
+  // that signed file (Ruflo restores edits to it), so the refresh can never take the footer.
   const { proj, sl } = fixture({ refreshModule: 'faithful' });
   fixStatusline(proj);
   assert.ok(fs.existsSync(path.join(proj, 'REFRESHED')), 'refresh must have run');
-  assert.match(fs.readFileSync(sl, 'utf8'), /ruflo-seg:BEGIN/);
+  assert.doesNotMatch(fs.readFileSync(sl, 'utf8'), /ruflo-seg:BEGIN/, 'nothing is injected into the signed helper');
+  assert.ok(fs.existsSync(path.join(proj, '.claude', 'helpers', 'ak-statusline-footer.cjs')), 'footer file installed');
 });
 
 test('dryRun never triggers the refresh (status stays read-only)', () => {

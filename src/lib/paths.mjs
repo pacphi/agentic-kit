@@ -138,6 +138,10 @@ export function tempRoots({ env = process.env, platform = process.platform, p = 
 export const projectSettings = (root) => path.join(root, '.claude', 'settings.json');
 export const projectSettingsLocal = (root) => path.join(root, '.claude', 'settings.local.json');
 export const projectStatusline = (root) => path.join(root, '.claude', 'helpers', 'statusline.cjs');
+// Kit-owned siblings of Ruflo's signed statusline.cjs: Ruflo restores any edit to the signed helper,
+// so the footer lives here and the loader patches the helper in memory (src/lib/statusline.mjs).
+export const projectStatuslineLoader = (root) => path.join(root, '.claude', 'helpers', 'ak-statusline.cjs');
+export const projectStatuslineFooter = (root) => path.join(root, '.claude', 'helpers', 'ak-statusline-footer.cjs');
 export const projectMemoryDb = (root, p = path) => p.join(root, '.swarm', 'memory.db');
 export const projectAgentDbMemoryDb = (root) => path.join(root, '.swarm', 'agentdb-memory.db');
 export const projectClaudeFlowDir = (root) => path.join(root, '.claude-flow');

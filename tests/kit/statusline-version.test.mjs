@@ -149,13 +149,14 @@ test('the drift nudge names the statusline Ruflo version too', async () => {
 
 // ── sync repair through Ruflo's own refresh ─────────────────────────────────
 
-test('fixStatusline clears the stamp so Ruflo regenerates the helper, then re-injects the footer', () => {
+test('fixStatusline clears the stamp so Ruflo regenerates the helper, then installs the kit footer beside it', () => {
   const fx = fixture();
   const r = fixStatusline(fx.proj);
   assert.equal(r.versionRepair, 'repaired');
   assert.equal(fx.baked(), '3.32.8', 'Ruflo\'s own baked floor, never a value ak wrote');
   assert.equal(fx.read('.helpers-version'), CLI_VERSION, 'Ruflo re-stamped the regenerated helpers');
-  assert.match(fx.read('statusline.cjs'), /ruflo-seg:BEGIN/);
+  assert.doesNotMatch(fx.read('statusline.cjs'), /ruflo-seg:BEGIN/, 'the signed helper is never injected');
+  assert.match(fx.read('ak-statusline-footer.cjs'), /ruflo-seg:BEGIN/);
   assert.equal(statuslineVersionAhead(fx.proj), null);
 });
 
@@ -173,11 +174,11 @@ test('a blocked refresh restores the stamp and reports the repair as failed', ()
   assert.equal(r.versionRepair, 'failed');
   assert.equal(fx.read('.helpers-version'), CLI_VERSION, 'the stamp ak cleared is put back');
   assert.equal(fx.baked(), '9.9.9', 'ak never writes the version itself');
-  assert.match(fx.read('statusline.cjs'), /ruflo-seg:BEGIN/, 'the footer is still injected');
+  assert.match(fx.read('ak-statusline-footer.cjs'), /ruflo-seg:BEGIN/, 'the kit footer is still installed');
 });
 
 // contracts-5: a helpers folder ak cannot remove the stamp from must not
-// abort sync; the repair is reported as failed and the footer still lands.
+// abort sync; the repair is reported as failed and the unwritable footer is reported, not thrown.
 test('a stamp that cannot be removed reports a failed repair instead of throwing', {
   skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs POSIX folder permissions as a non-root user' : false,
 }, (t) => {
@@ -187,7 +188,7 @@ test('a stamp that cannot be removed reports a failed repair instead of throwing
   const r = fixStatusline(fx.proj);
   assert.equal(r.versionRepair, 'failed');
   assert.equal(fx.read('.helpers-version'), CLI_VERSION, 'the stamp is untouched');
-  assert.match(fx.read('statusline.cjs'), /ruflo-seg:BEGIN/, 'the footer is still injected');
+  assert.match(r.reason, /cannot write the kit statusline files/, 'the failed write is reported');
 });
 
 test('dryRun never clears the stamp', () => {

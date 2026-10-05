@@ -1,9 +1,21 @@
 # ADR-0015 — Manage Codex's native user-wide status line without claiming rich-renderer parity
 
 - **Status:** Accepted; user-wide ownership superseded by [ADR-0064](0064-project-scoped-management.md)
+- **Updated:** 2026-10-05 — the Claude footer no longer lives inside Ruflo's `statusline.cjs`. Ruflo 3.51+ signs that helper and restores any edit to it, so the kit renders the footer through its own loader (see the update note). The Codex decision is unchanged
 - **Updated:** 2026-10-03 — user-wide ownership superseded by [ADR-0064](0064-project-scoped-management.md); ownership moves to receipts and the Codex exception register. The capability limits stand. Not yet implemented, so the text below describes current behaviour.
 - **Date:** 2026-07-28
 - **Updated:** 2026-08-14
+- **Update note (2026-10-05):** Ruflo 3.51 ships `.claude/helpers/helpers.manifest.json`, a
+  signed list of per-file hashes for its critical helpers, including `statusline.cjs`. Every
+  Ruflo CLI call that is not exempt checks those hashes and restores a helper that differs, and
+  the statusline's own data call (`ruflo hooks statusline --json`) is one of them. A footer
+  injected into `statusline.cjs`, as this ADR originally described, was therefore removed within
+  a render or two. The kit now installs `.claude/helpers/ak-statusline.cjs` (a loader) and
+  `ak-statusline-footer.cjs` (the footer and the real-bin fix) beside the signed file. The loader
+  reads the helper, splices the footer in memory and runs the result, so `statusline.cjs` stays
+  byte-identical. The project's `statusLine` command prefers the loader and falls back to the
+  stock helper. `ak status` checks the loader files and the command rather than markers in the
+  signed helper. A custom `statusLine` command is never overwritten.
 - **Update note:** The boolean `statuslineSupported` consumer this ADR's context
   describes was removed as dead code in the Phase 0 consistency pass (finding
   F-07): it had zero call sites. The registry capability `commandStatusline` is
@@ -16,9 +28,10 @@
 
 ## Context
 
-Agentic-kit gives Claude Code a rich, project-scoped status display by repairing ruflo's
-`.claude/helpers/statusline.cjs`, injecting `src/templates/statusline-footer.cjs`, and pointing
-Claude Code's command-backed `statusLine` setting at that renderer. The footer can read local
+Agentic-kit gives Claude Code a rich, project-scoped status display by running ruflo's signed
+`.claude/helpers/statusline.cjs` through a kit-owned loader that splices in
+`src/templates/statusline-footer.cjs`, and by pointing Claude Code's command-backed `statusLine`
+setting at that loader. The footer can read local
 ruflo, SONA, reinforcement-learning, daemon, RuvNet Brain, and agentic-qe state and render several
 ANSI-styled lines.
 
