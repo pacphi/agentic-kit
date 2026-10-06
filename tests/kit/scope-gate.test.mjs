@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  checkWrite, clearViolations, droppedViolations, isInside, MAX_VIOLATIONS, OutOfScopeWrite,
-  violations, withWriteScope,
+  checkCommand, checkWrite, clearViolations, droppedViolations, isInside, MAX_VIOLATIONS,
+  OutOfScopeCommand, OutOfScopeWrite, violations, withWriteScope,
 } from '../../src/lib/scope-gate.mjs';
 import { cacheDir } from '../../src/lib/cache-dir.mjs';
 import { rmrf, sandboxHome } from './helpers/home-sandbox.mjs';
@@ -131,4 +131,85 @@ test('clearViolations empties the list and the dropped count', (t) => {
   clearViolations();
   assert.deepEqual(violations(), []);
   assert.equal(droppedViolations(), 0);
+});
+
+test('blocked commands are reported under the matching rule', (t) => {
+  const root = tempDir('scope-root', t);
+  const cases = [
+    ['npm', ['install', '-g', 'ruflo'], 'npm-install-global'],
+    ['npm', ['i', '--global', 'x'], 'npm-install-global'],
+    ['npm', ['install', '--location=global', 'x'], 'npm-install-global'],
+    ['npm', ['install', '--location', 'global', 'x'], 'npm-install-global'],
+    ['claude', ['mcp', 'add', '-s', 'user', 'srv', 'cmd'], 'claude-mcp-user-scope'],
+    ['claude', ['mcp', 'add', '--scope=user', 'srv', 'cmd'], 'claude-mcp-user-scope'],
+    ['claude', ['plugin', 'install', '--scope', 'user', 'p'], 'claude-plugin-user-scope'],
+    ['claude', ['plugins', 'install', '-s', 'user', 'p'], 'claude-plugin-user-scope'],
+    ['codex', ['mcp', 'add', 'srv', '--', 'cmd'], 'codex-mcp-add'],
+    ['launchctl', ['load', 'x.plist'], 'launchctl'],
+    ['/usr/local/bin/launchctl', ['list'], 'launchctl'],
+    ['C:\\Program Files\\nodejs\\npm.cmd', ['install', '-g', 'x'], 'npm-install-global'],
+  ];
+  for (const [cmd, args, rule] of cases) {
+    clearViolations();
+    withWriteScope({ root }, () => checkCommand(cmd, args, root));
+    assert.equal(violations().length, 1, `${cmd} ${args.join(' ')}`);
+    assert.equal(violations()[0].rule, rule, `${cmd} ${args.join(' ')}`);
+  }
+});
+
+test('ordinary commands and in-root project-scoped claude commands are not reported', (t) => {
+  const root = tempDir('scope-root', t);
+  const sub = path.join(root, 'sub');
+  fs.mkdirSync(sub);
+  const cases = [
+    ['npm', ['install']],
+    ['npm', ['install', 'left-pad']],
+    ['npm', ['run', 'build']],
+    ['claude', ['mcp', 'list']],
+    ['claude', ['mcp', 'add', '-s', 'project', 'srv', 'cmd']],
+    ['claude', ['mcp', 'add', '-s', 'local', 'srv', 'cmd']],
+    ['claude', ['plugin', 'install', '-s', 'project', 'p']],
+    ['claude', ['mcp', 'add', 'srv', 'cmd']],
+    ['codex', ['exec', 'x']],
+    ['git', ['status']],
+  ];
+  for (const [cmd, args] of cases) {
+    withWriteScope({ root }, () => checkCommand(cmd, args, sub));
+  }
+  assert.deepEqual(violations(), []);
+});
+
+test('a project-scoped claude command from outside the root is reported', (t) => {
+  const root = tempDir('scope-root', t);
+  const outside = tempDir('scope-outside', t);
+  withWriteScope({ root }, () => checkCommand('claude', ['mcp', 'add', '-s', 'project', 'srv', 'cmd'], outside));
+  assert.equal(violations().length, 1);
+  assert.equal(violations()[0].rule, 'claude-mcp-scope-outside-root');
+});
+
+test('a project-scoped claude command with no scope set is reported', (t) => {
+  const outside = tempDir('scope-outside', t);
+  checkCommand('claude', ['plugin', 'install', '-s', 'local', 'p'], outside);
+  assert.equal(violations()[0].rule, 'claude-plugin-scope-outside-root');
+});
+
+test('a command report names the full command line and the working folder', (t) => {
+  const root = tempDir('scope-root', t);
+  withWriteScope({ root }, () => checkCommand('npm', ['install', '-g', 'x'], root));
+  const [only] = violations();
+  assert.equal(only.kind, 'OutOfScopeCommand');
+  assert.equal(only.target, 'npm install -g x');
+  assert.equal(only.op, 'exec');
+  assert.equal(only.cwd, root);
+  assert.equal(only.scopeRoot, root);
+});
+
+test('a missing args list is ignored without throwing', () => {
+  assert.doesNotThrow(() => checkCommand('git', undefined));
+  assert.deepEqual(violations(), []);
+});
+
+test('the enforce mode records the command and throws OutOfScopeCommand', () => {
+  assert.throws(() => checkCommand('launchctl', ['list'], undefined, { mode: 'enforce' }), OutOfScopeCommand);
+  assert.equal(violations().length, 1);
 });

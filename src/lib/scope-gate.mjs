@@ -101,3 +101,67 @@ export function checkWrite(file, op = 'write', { mode = ENFORCEMENT } = {}) {
   } catch { /* a failed probe must not break the write it observes */ }
   return settle(violation, OutOfScopeWrite, mode);
 }
+
+const NPM_INSTALL_VERBS = new Set(['install', 'i', 'add']);
+const CLAUDE_VERBS = {
+  mcp: new Set(['add', 'add-json', 'add-from-claude-desktop', 'remove', 'reset-project-choices']),
+  plugin: new Set(['install', 'uninstall', 'enable', 'disable', 'update']),
+};
+
+/** The command's bare name: any folder and a Windows shim extension are dropped. */
+const commandName = (cmd) => String(cmd).split(/[\\/]/).pop().replace(/\.(cmd|exe|bat|ps1)$/i, '').toLowerCase();
+
+const isGlobalNpm = (args) => args.some((arg, index) => arg === '-g' || arg === '--global'
+  || arg === '--location=global' || (arg === '--location' && args[index + 1] === 'global'));
+
+/** The value of `-s`, `--scope`, `-s=` or `--scope=`, or null when no scope is given. */
+function scopeOption(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '-s' || args[index] === '--scope') return args[index + 1] ?? null;
+    const inline = /^(?:-s|--scope)=(.+)$/.exec(args[index]);
+    if (inline) return inline[1];
+  }
+  return null;
+}
+
+/** A claude change with no `-s` is not classified: `--help` does not state the default scope. */
+function claudeRule(args, cwd, root) {
+  const area = args[0] === 'plugins' ? 'plugin' : args[0];
+  if (!CLAUDE_VERBS[area]?.has(args[1])) return null;
+  const scope = scopeOption(args);
+  if (scope === 'user') return `claude-${area}-user-scope`;
+  if (scope === 'local' || scope === 'project') {
+    return root && isInside(root, cwd) ? null : `claude-${area}-scope-outside-root`;
+  }
+  return null;
+}
+
+function commandRule(cmd, args, cwd, root) {
+  const name = commandName(cmd);
+  if (name === 'launchctl') return 'launchctl';
+  if (name === 'npm') return args.some((arg) => NPM_INSTALL_VERBS.has(arg)) && isGlobalNpm(args) ? 'npm-install-global' : null;
+  if (name === 'codex') return args[0] === 'mcp' && args[1] === 'add' ? 'codex-mcp-add' : null;
+  if (name === 'claude') return claudeRule(args, cwd, root);
+  return null;
+}
+
+/** Report a command that changes user-level state, or runs a project-scoped claude change from
+ *  outside the scope root. Matching is on parsed argv, never on a joined string.
+ *  @param {string} cmd @param {string[]} [args] @param {string} [cwd] @param {{ mode?: string }} [options]
+ *  @returns {object | null} the violation, or null when the command is allowed */
+export function checkCommand(cmd, args = [], cwd = undefined, { mode = ENFORCEMENT } = {}) {
+  let violation = null;
+  try {
+    const argv = (args ?? []).map(String);
+    const root = scopeRoot();
+    const where = realPath(cwd ?? process.cwd());
+    const rule = commandRule(cmd, argv, where, root);
+    if (rule) {
+      violation = {
+        kind: 'OutOfScopeCommand', rule, target: [String(cmd), ...argv].join(' '),
+        op: 'exec', scopeRoot: root, cwd: where, time: now(),
+      };
+    }
+  } catch { /* observing a command must not break it */ }
+  return settle(violation, OutOfScopeCommand, mode);
+}
