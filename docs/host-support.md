@@ -222,13 +222,15 @@ check fails
 ([#778](https://github.com/proffesor-for-testing/agentic-qe/issues/778), from 3.14.6).
 
 The remaining dated AQE risk inventory includes
-[test-generation quality and the GOAP world-state `activeAgents` count](https://github.com/proffesor-for-testing/agentic-qe/issues/535)
-(not re-exercised on 3.14.7; the other items in that issue pass),
+[test-generation output](https://github.com/proffesor-for-testing/agentic-qe/issues/535)
+(on 3.14.8 `test_generate_enhanced` returns skipped scaffolding for a plain exported function; the
+other items in that issue pass),
 [RVF recovery loop](https://github.com/proffesor-for-testing/agentic-qe/issues/574),
 and [local-embedding audit findings](https://github.com/proffesor-for-testing/agentic-qe/issues/615).
-[#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)'s pattern index binding is
-unverified: the embedding-space manifest is written, but index binding and semantic search were
-not shown. [#753](https://github.com/proffesor-for-testing/agentic-qe/issues/753)'s fresh native
+[#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)'s pattern index binds on
+3.14.5 and later through the shipped CLI and MCP server when an embedder is configured, but the
+kit's own live check cannot show it yet and reports the binding as unverified.
+[#753](https://github.com/proffesor-for-testing/agentic-qe/issues/753)'s fresh native
 macOS witness append produced valid 4001-row chains in one sequential and three
 synchronized two-process rounds; only one concurrent round demonstrably interleaved. That
 does not justify removing the kit's stray-store live-holder refusal or claim old-fork

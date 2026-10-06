@@ -2173,16 +2173,19 @@
       "kind": "issue",
       "title": "MCP smoke: pre-existing tool bugs (memory_delete no-op, cross_phase stats, GOAP maxSteps/plan lookup, test-gen quality, coherence text)",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.8" } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["docs/host-support.md"] },
-      "adjustment": "Keep the host-support.md risk link limited to what 3.14.7 did not re-exercise: test-generation quality and the GOAP world-state activeAgents count. memory_delete, cross-phase stats, GOAP maxSteps, goap_execute dryRun and the coherence recommendation text were fixed.",
-      "status": "watching",
+      "adjustment": "Done: docs/host-support.md names only that test_generate_enhanced returns skipped scaffolding for a plain exported function. memory_delete, cross-phase stats, GOAP maxSteps, the GOAP world-state activeAgents count, goap_execute dryRun and the coherence recommendation text were fixed.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-28", "event": "commented", "note": "re-verified on 3.14.4: memory_delete and cross-phase stats fixed; GOAP maxSteps, GOAP world state, test generation and coherence text still reproduce; goap_execute not exercised (issuecomment-5878245564)" },
-        { "date": "2026-10-05", "event": "reviewed", "note": "re-verified on 3.14.7: memory_delete and cross-phase stats fixed; GOAP maxSteps honored and goap_execute dryRun finds the plan; the coherence recommendation text matches the vote tally. Not re-exercised: test-generation quality and the GOAP activeAgents count. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." }
+        { "date": "2026-10-05", "event": "reviewed", "note": "re-verified on 3.14.7: memory_delete and cross-phase stats fixed; GOAP maxSteps honored and goap_execute dryRun finds the plan; the coherence recommendation text matches the vote tally. Not re-exercised: test-generation quality and the GOAP activeAgents count. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "reviewed", "note": "re-verified on 3.14.8: GOAP world-state activeAgents reads 0 after fleet_init and 1 after agent_spawn; test_generate_enhanced for a plain exported function returns generationMode scaffolding with a skipped test and no wrong code. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-8-verification.md." },
+        { "date": "2026-10-05", "event": "adopted", "note": "docs/host-support.md risk link narrowed to the scaffolding-only test generation" },
+        { "date": "2026-10-05", "event": "retired", "note": "closed upstream and verified on a released artifact; the remaining limitation is test generation output, not a bug awaiting a fix" }
       ]
     },
     {
@@ -2655,18 +2658,20 @@
       "kind": "issue",
       "title": "RVF pattern index never binds when an embedder endpoint is configured, and `RUVECTOR_USE_RVF_PATTERN_STORE` cannot switch it off",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": ["src/commands/status/sections/aqe.mjs", "src/lib/live-checks.mjs", "src/lib/aqe-embedding-lifecycle.mjs"]},
-      "adjustment": "Once a released agentic-qe binds the pattern index with a configured embedder, ak may report semantic pattern search as working after a live check.",
-      "status": "fixed-unreleased",
+      "adjustment": "The fix is released: through the shipped CLI and MCP bundle, a configured embedder binds the RVF pattern index. ak may report semantic pattern search as working once it has a live check that drives the shipped bundle (aqe hooks learn, then aqe hooks search, in a disposable project). Do not probe AQE's unbundled dist modules: the native RVF binding is unavailable there and the probe fails on every release. aqe learning embedding-health cannot serve as the check; it reports unverified with the runtime not initialized.",
+      "status": "released",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact (issuecomment-5863212811)" },
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 768; no release contains it yet" },
-        { "date": "2026-10-05", "event": "reviewed", "note": "3.14.7 disposable repro: patterns.rvf.space.json is now written, but aqe learning embedding-health still reports unverified (71 mismatched vectors, runtime not initialized); index binding and semantic search not shown. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." }
+        { "date": "2026-10-05", "event": "reviewed", "note": "3.14.7 disposable repro: patterns.rvf.space.json is now written, but aqe learning embedding-health still reports unverified (71 mismatched vectors, runtime not initialized); index binding and semantic search not shown. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
+        { "date": "2026-10-05", "event": "released", "note": "upstream PR 768 is in 3.14.5 and later and not in 3.14.4, so 3.14.5 is the first release containing the fix" },
+        { "date": "2026-10-05", "event": "reviewed", "note": "on 3.14.8 with a local 384-dimension embedder: aqe hooks learn then aqe hooks search returned the stored pattern first as a vector match; patterns.rvf.space.json carries the embedder's space id; without the endpoint the search refuses with VECTOR_SPACE_UNVERIFIED and falls back to lexical. A probe that imports the unbundled dist modules reports not-bound, a false negative. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-8-verification.md." }
       ]
     },
     {
@@ -2765,16 +2770,19 @@
       "kind": "issue",
       "title": "`brain import` copies the source's `witness_chain` rows with their original `prev_hash`, so the target's audit chain verifies as BROKEN",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": {"refs": ["Branch 5: ak x aqe-store merge deletes each stray copy's witness_chain rows before export (the archived stray keeps them)"], "files": ["src/lib/aqe-store-merge.mjs"]},
-      "adjustment": "Once a released agentic-qe imports witness rows without breaking the target chain, ak x aqe-store merge can stop deleting the stray copy's witness_chain rows before export.",
-      "status": "fixed-unreleased",
+      "adjustment": "Done: no ak change. On 3.14.5 and later brain import skips the stray store's witness_chain rows and appends one BRAIN_IMPORT row, so the target chain stays valid. ak x aqe-store merge keeps deleting each stray copy's witness_chain rows before export: that is redundant on 3.14.5 and later, changes no result there, and is still needed on the 3.14.4 minimum.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 766; no release contains it yet" }
+        { "date": "2026-09-28", "event": "closed", "note": "completed by PR 766; no release contains it yet" },
+        { "date": "2026-10-05", "event": "released", "note": "upstream PR 766 is in 3.14.5 and later and not in 3.14.4, so 3.14.5 is the first release containing the fix" },
+        { "date": "2026-10-05", "event": "adopted", "note": "on 3.14.8 an import of a stray with its witness rows intact leaves the root chain valid (4 entries: its own 3 plus one BRAIN_IMPORT) and skips the stray's rows; the same import with them deleted first gives the same chain. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-8-verification.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "closed upstream; ak needed no change" }
       ]
     },
     {
@@ -2807,15 +2815,18 @@
       "kind": "issue",
       "title": "fix: MCP EOF shutdown leaves the shared patterns.rvf lock marker",
       "dependency": "agentic-qe",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.7" } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["M1 MCP shutdown conformance; separate from #240's original busy-startup criteria"], "files": ["tests/live/aqe-mcp-lock-conformance.test.mjs", "docs/archive/2026-09-30-upstream-aqe-mcp-shutdown-contribution.md"] },
-      "adjustment": "After a fixing commit lands in a published AQE artifact, rerun real packaged-MCP EOF shutdown and packed-kit startup/preservation conformance on supported platforms. Keep stock-release failure separate from passing source-module controls; do not manually unlink locks, patch installed artifacts, retire unrelated constraints or claim a universal managed floor.",
-      "status": "watching",
+      "adjustment": "Done: on 3.14.8 the packaged MCP releases its own patterns.rvf.lock on stdin-EOF shutdown, and the packed kit sees ordinary busy startup with RVF bytes unchanged (macOS). The live suite stays an opt-in conformance check; stock-release results stay separate from source-module controls.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-10-01", "event": "filed", "note": "Maintainer approved exact issue text only; published at 00:22:49Z and remote title/body matched SHA-256 275cbffec6cdfd1f152bc89d8781163dec5d612c2d661a5d0a98cac8077a949d. Source fix remains private." },
-        { "date": "2026-10-01", "event": "registered", "note": "Published 3.14.6 macOS real-MCP/packed-kit busy startup and patterns.rvf preservation passed; EOF leaves dead-PID marker. Explicit adapter close and proposed matched source-module control remove it; normal rebuilt bundle, other platforms and broad fleet readiness unverified. Receipt: docs/archive/2026-09-30-aqe-m1-mcp-lock-proof.md." }
+        { "date": "2026-10-01", "event": "registered", "note": "Published 3.14.6 macOS real-MCP/packed-kit busy startup and patterns.rvf preservation passed; EOF leaves dead-PID marker. Explicit adapter close and proposed matched source-module control remove it; normal rebuilt bundle, other platforms and broad fleet readiness unverified. Receipt: docs/archive/2026-09-30-aqe-m1-mcp-lock-proof.md." },
+        { "date": "2026-10-05", "event": "released", "note": "upstream PRs 802 and 808 are in 3.14.7 and 3.14.8 and not in 3.14.6, so 3.14.7 is the first release containing the fix" },
+        { "date": "2026-10-05", "event": "adopted", "note": "tests/live/aqe-mcp-lock-conformance.test.mjs passes on 3.14.8 (1 test, 0 skipped; macOS; Linux and Windows not run; 3.14.7 not run). Evidence: docs/archive/2026-10-05-audit-aqe-3-14-8-verification.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "closed upstream and verified on a released artifact; nothing left to watch" }
       ]
     }
   ]
