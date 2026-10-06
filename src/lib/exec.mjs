@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isWindows } from './paths.mjs';
 import { npmShimInvocation, windowsEnvValue, mergeWindowsEnv } from './windows-npm-shim.mjs';
+import { checkCommand } from './scope-gate.mjs';
 
 const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
 
@@ -280,6 +281,7 @@ function runOwned(command, args, execOpts, { windows, input }) {
  *  `opts.input` (a string) is delivered on the child's stdin instead of argv;
  *  `runOwned` keeps that payload out of the process table. */
 export async function run(cmd, args = [], opts = {}) {
+    checkCommand(cmd, args, opts.cwd);
   try {
     const windows = opts.windows ?? isWindows;
     const env = opts.env
