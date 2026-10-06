@@ -61,3 +61,9 @@ test('run does not report an ordinary command', async () => {
   await run('git', ['--version']);
   assert.deepEqual(violations(), []);
 });
+
+test('run keeps its never-throws shape when called with null options', async () => {
+  const result = await run('git', ['--version'], null);
+  assert.equal(typeof result.code, 'number');
+  assert.equal(typeof result.stderr, 'string');
+});

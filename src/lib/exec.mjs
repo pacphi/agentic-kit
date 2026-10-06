@@ -281,7 +281,7 @@ function runOwned(command, args, execOpts, { windows, input }) {
  *  `opts.input` (a string) is delivered on the child's stdin instead of argv;
  *  `runOwned` keeps that payload out of the process table. */
 export async function run(cmd, args = [], opts = {}) {
-    checkCommand(cmd, args, opts.cwd);
+    checkCommand(cmd, args, opts?.cwd);
   try {
     const windows = opts.windows ?? isWindows;
     const env = opts.env
