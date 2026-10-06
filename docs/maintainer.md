@@ -360,6 +360,14 @@ Two further workflows cover surfaces `ci.yml` doesn't:
 
 ---
 
+### Reading the scope gate
+
+`src/lib/scope-gate.mjs` records writes outside the project root and the cache, and user-level
+commands, until the gate starts refusing in 4.0.0-beta.4. Nothing prints. A test reads the list
+with `violations()` and clears it with `clearViolations()`; wrap the code under test in
+`withWriteScope({ root }, fn)` to set the project root. `pnpm run lint` shows the writers that
+bypass `file-write.mjs` as warnings that mention ADR-0064.
+
 ## 5. Branching methodology
 
 - **Default branch:** `main`. CI runs on every push; release readiness still requires the relevant
