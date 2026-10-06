@@ -10,7 +10,12 @@ overrides:
   # unbounded intermediate arrays). It reaches us only via eslint ->
   # minimatch. Drop once eslint ships a bumped minimatch.
   'brace-expansion@>=4.0.0 <5.0.9': '>=5.0.9'
-  # smol-toml <=1.7.0 carries GHSA-7w5x-hrqm-74c2 (malformed-input DoS)
-  # through markdownlint-cli. Retain the compatible patched 1.7 line until
-  # markdownlint-cli updates its direct dependency.
-  'smol-toml@<=1.7.0': 1.7.2
+  # smol-toml <=1.8.0 carries GHSA-7w5x-hrqm-74c2 (malformed-input DoS) and
+  # GHSA-r4xh-jqrq-34v2 (quadratic-time parse), both patched in 1.8.1. It
+  # reaches us only through markdownlint-cli, which pins ~1.7.0. Drop once
+  # markdownlint-cli ships a bumped smol-toml.
+  'smol-toml@<=1.8.0': '>=1.8.1'
+  # katex <0.18.2 carries a prototype-pollution trust bypass (low). It reaches
+  # us only through markdownlint -> micromark-extension-math. Drop once
+  # markdownlint ships a bumped micromark-extension-math.
+  'katex@>=0.11.0 <0.18.2': '>=0.18.2'
