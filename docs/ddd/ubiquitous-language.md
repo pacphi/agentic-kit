@@ -20,11 +20,6 @@ contradictory meaning.
 | Capability | Explicit behavior supported by an adapter; identity alone never implies it |
 | Integration intent | Desired, persisted host and binding configuration |
 | Integration facts | Immutable normalized observations about hosts, providers, and bindings |
-| Managed companion | Opt-in tool that projects a bounded service into enabled hosts without becoming a host, provider, binding, routing target, or memory authority |
-| Companion intent | Persisted enablement, selected-host, and per-host service/injection choice for a managed companion |
-| Companion fact | Content-free observation of companion package ownership, target wiring, plugin/trust state, schema compatibility, and data health |
-| Companion projection | Exact host-native wiring by which a companion exposes MCP or consented automatic events to one enabled host |
-| Auto-recall | Explicitly consented injection of untrusted historical context at a named host event; not a uniform session-start capability |
 | Hook source | One host-native settings, TOML, JSON, plugin or adapter-manifest origin inspected without executing its contents |
 | Hook occurrence | One physical event/matcher/handler definition retained with its source pointer and digest |
 | Hook behavior | Material execution identity used to link only genuinely equivalent occurrences |
@@ -107,7 +102,6 @@ token estimates never become observed token evidence. An absent or incompatible 
 | Drift | Current state differs from the last value written or expected by `ak` |
 | Repair contract | Who performs a status row's fix: `sync` (an `ak sync` step does it, so sync plans it) or `manual` (a human must; sync never plans it). A row without a fix has none |
 | Unresolved repair | A fix `ak sync` planned that did not take: its row is still present after the apply phase, or no sync step performs it. Sync reports it and exits 1. A subsystem left out with `--skip` is "skipped by request", never unresolved |
-| Companion data | User-owned index, notes, privacy state, imports, and source transcripts; invoking a managed companion does not transfer ownership to `ak` |
 | ObservationSpec | A bounded virtual-walk declaration: lexical root, contract version, budgets, pruning, accepted metadata, reducer, and one scan timestamp |
 | Observation forest | A scan-local lexical trie that routes each physical filesystem event to independent compatible ObservationSpecs without retaining a cross-scan file index |
 
@@ -351,8 +345,6 @@ runtime state is a chip word, never a prose word. See
 - Say **compatible candidate** only when required mechanical facts are established. Reserve
   **cheaper equivalent** and **premium justified** for Route Intelligence evidence.
 - Do not infer an inference provider from a transcript host alone.
-- Do not call a managed companion a host, memory authority, or observability source. Name the exact
-  companion projection or automatic event when injection behavior matters.
 - Do not replace an unknown fact with a convenient default.
 - Do not call a hook configured, selected, trusted, reachable, healthy, or authorized unless the
   evidence establishes that exact dimension. A coverage statement never upgrades those facts.

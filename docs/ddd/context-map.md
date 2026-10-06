@@ -7,8 +7,7 @@ identify who owns each decision and where translation is required.
 Configuration Intent
         |
         +----> Integration Management ----> Native Configuration Surfaces
-        |                 |       |
-        |                 |       +----> Managed Companion Surfaces
+        |                 |
         |                 +----> Hook Configuration Assurance
         |                 +----> Supervised Hook Execution ----> Hook Runtime Receipts
         |                 +----> Routing and Orchestration
@@ -49,10 +48,8 @@ does not prove that an executable, credential, or endpoint is usable.
 ### Integration management
 
 Owns the registries, capabilities, binding validation, normalized integration facts, managed
-projection lifecycle, companion lifecycle specialization, config migration, and value-precise
-ownership. Native JSON, TOML, environment, CLI, and companion surfaces are downstream
-representations. A managed companion consumes enabled-host identity but gains no host, provider,
-routing, observability, or curated-memory authority.
+projection lifecycle, config migration, and value-precise ownership. Native JSON, TOML,
+environment, and CLI surfaces are downstream representations.
 
 See [Integration management](integration-management.md).
 
@@ -251,7 +248,6 @@ and credential policy is distinct from the offline-first dashboard and integrati
 |----------|------------|--------------|
 | Configuration intent | Integration management | Desired state; detection and verification remain independent |
 | Integration management | Native surfaces | Configuration projections with ownership receipts |
-| Integration management | Managed companion surfaces | Opt-in package and explicit per-host projections; plugin/data ownership stays separate |
 | Integration management | Routing and orchestration | Capability-qualified host and binding facts |
 | Integration management | Hook configuration assurance | Host identity and validated external adapter data; admission, consent, grants and execution stay upstream |
 | Project census | Hook configuration assurance | Explicit project roots for bounded source discovery; no project trust is inferred |
@@ -345,9 +341,6 @@ observed before the split was made explicit.
 - Component directory authors identity, it does not observe it. Editorial prose never asserts
   runtime state; installed, version, and configured render exclusively as chips fed by detection
   facts borrowed from existing collectors.
-- Managed companion surfaces stay downstream of Integration management. Their ability to read host
-  history or inject recalled context does not make them hosts, evidence owners, or policy
-  authorities; consent, content-free observation, and ownership-safe teardown remain upstream.
 - Hook assurance discovery is read-only. It never imports an OpenCode plugin, executes a hook,
   fetches a remote adapter by default, changes trust, or treats a diagnostic as write authority.
   The separate healing port requires an exact action, plan, profile, preimage and explicit apply.
