@@ -228,8 +228,9 @@ other items in that issue pass),
 [RVF recovery loop](https://github.com/proffesor-for-testing/agentic-qe/issues/574),
 and [local-embedding audit findings](https://github.com/proffesor-for-testing/agentic-qe/issues/615).
 [#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)'s pattern index binds on
-3.14.5 and later through the shipped CLI and MCP server when an embedder is configured, but the
-kit's own live check cannot show it yet and reports the binding as unverified.
+3.14.5 and later through the shipped CLI and MCP server when an embedder endpoint is configured.
+The kit's live check confirms it on that release (`ak status --refresh=live` reads "AQE pattern
+index binding verified") and reports the binding as unverified on an older AQE or another backend.
 [#753](https://github.com/proffesor-for-testing/agentic-qe/issues/753)'s fresh native
 macOS witness append produced valid 4001-row chains in one sequential and three
 synchronized two-process rounds; only one concurrent round demonstrably interleaved. That

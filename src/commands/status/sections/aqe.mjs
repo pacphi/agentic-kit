@@ -7,7 +7,7 @@ import { aqeEmbeddingConfiguration } from '../../../lib/aqe-readiness.mjs';
 import { resolveAqeEmbedding } from '../../../lib/aqe-embedding-config.mjs';
 import { inspectAqeEmbeddingProjections } from '../../../lib/aqe-embedding-projection.mjs';
 import {
-  readLiveCheck, liveCheckInputsKey, describeLiveCheck, liveCheckLevel,
+  readLiveCheck, liveCheckInputsKey, describeLiveCheck, liveCheckLevel, describePatternIndex,
 } from '../../../lib/live-check-evidence.mjs';
 
 /** The embedding rows: configuration from disk, plus the last LIVE result that
@@ -31,9 +31,9 @@ export function embeddingRows(cfg, cwd, resolved, backend, projection, {
       const evidenceLevel = liveCheckLevel(evidence);
       const level = !projection.ok ? 'warn' : evidenceLevel === 'ok' && fix ? 'info' : evidenceLevel;
       return row('aqe-embedding', level,
-        // A pass proves the embedder only: AQE 3.14.4 does not bind its pattern
-        // index to a configured embedder (agentic-qe#754), and the corpus is separate.
-        `${resolved.mode}; backend ${backend.status}; ${describeLiveCheck(evidence, { recheck: 'ak status --refresh=live --only aqe', passed: 'embedder verified' })}${evidence.status === 'passed' && !evidence.invalidated ? '; AQE pattern index binding unverified (agentic-qe#754)' : ''}; corpus compatibility unverified${projectionNote}`,
+        // A pass proves the embedder; the pattern index (agentic-qe#754) is shown
+        // verified only when the live check bound it, and the corpus is separate.
+        `${resolved.mode}; backend ${backend.status}; ${describeLiveCheck(evidence, { recheck: 'ak status --refresh=live --only aqe', passed: 'embedder verified' })}${evidence.status === 'passed' && !evidence.invalidated ? `; ${describePatternIndex(evidence.patternIndex)}` : ''}; corpus compatibility unverified${projectionNote}`,
         fix);
     })();
   if (conflicts.length === 0) return [main];

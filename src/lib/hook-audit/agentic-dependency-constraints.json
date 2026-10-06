@@ -2661,8 +2661,8 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.5" } },
       "mapping": "mapped",
       "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": ["src/commands/status/sections/aqe.mjs", "src/lib/live-checks.mjs", "src/lib/aqe-embedding-lifecycle.mjs"]},
-      "adjustment": "The fix is released: through the shipped CLI and MCP bundle, a configured embedder binds the RVF pattern index. ak may report semantic pattern search as working once it has a live check that drives the shipped bundle (aqe hooks learn, then aqe hooks search, in a disposable project). Do not probe AQE's unbundled dist modules: the native RVF binding is unavailable there and the probe fails on every release. aqe learning embedding-health cannot serve as the check; it reports unverified with the runtime not initialized.",
-      "status": "released",
+      "adjustment": "Done: ak's live embedding check drives the shipped aqe command (hooks learn, then hooks search, in a disposable project) and reports the pattern index as verified only for a vector match, on an endpoint backend and AQE 3.14.5 or later; otherwise it reports unverified with the reason. Do not probe AQE's unbundled dist modules: the native RVF binding is unavailable there.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
@@ -2671,7 +2671,9 @@
         { "date": "2026-09-28", "event": "closed", "note": "completed by PR 768; no release contains it yet" },
         { "date": "2026-10-05", "event": "reviewed", "note": "3.14.7 disposable repro: patterns.rvf.space.json is now written, but aqe learning embedding-health still reports unverified (71 mismatched vectors, runtime not initialized); index binding and semantic search not shown. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-7-conformance.md." },
         { "date": "2026-10-05", "event": "released", "note": "upstream PR 768 is in 3.14.5 and later and not in 3.14.4, so 3.14.5 is the first release containing the fix" },
-        { "date": "2026-10-05", "event": "reviewed", "note": "on 3.14.8 with a local 384-dimension embedder: aqe hooks learn then aqe hooks search returned the stored pattern first as a vector match; patterns.rvf.space.json carries the embedder's space id; without the endpoint the search refuses with VECTOR_SPACE_UNVERIFIED and falls back to lexical. A probe that imports the unbundled dist modules reports not-bound, a false negative. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-8-verification.md." }
+        { "date": "2026-10-05", "event": "reviewed", "note": "on 3.14.8 with a local 384-dimension embedder: aqe hooks learn then aqe hooks search returned the stored pattern first as a vector match; patterns.rvf.space.json carries the embedder's space id; without the endpoint the search refuses with VECTOR_SPACE_UNVERIFIED and falls back to lexical. A probe that imports the unbundled dist modules reports not-bound, a false negative. Evidence: docs/archive/2026-10-05-audit-aqe-3-14-8-verification.md." },
+        { "date": "2026-10-05", "event": "adopted", "note": "ak status --refresh=live, ak sync and ak setup now run the pattern-index check; against 3.14.8 and a local 384-dimension embedder it passes, and against an endpoint that does not answer it fails with learn-failed. Evidence: docs/archive/2026-10-05-aqe-pattern-index-live-check-receipt.md." },
+        { "date": "2026-10-05", "event": "retired", "note": "closed upstream and adopted in ak; nothing left to watch" }
       ]
     },
     {

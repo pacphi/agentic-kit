@@ -325,3 +325,72 @@ test('sync remembers a pass and nothing when the backend is unmanaged', async ()
 });
 
 test.after(() => rmrf(HOME, PROJECT));
+
+// ── agentic-qe#754: the pattern-index result beside the embedder result ─────
+
+test('a pattern-index probe result is remembered as one short value, or nothing when no check ran', () => {
+  assert.equal(evidence.patternIndexValue(undefined), null);
+  assert.equal(evidence.patternIndexValue({ status: 'passed' }), 'verified');
+  assert.equal(evidence.patternIndexValue({ status: 'failed', reason: 'lexical-fallback' }), 'lexical-fallback');
+  assert.equal(evidence.patternIndexValue({ status: 'unavailable', reason: 'version-below-fix' }), 'version-below-fix');
+  assert.equal(evidence.patternIndexValue({ status: 'failed', reason: 'free text from somewhere' }), 'unverified',
+    'only enumerated reasons are stored');
+});
+
+test('the pattern-index clause says verified only for a verified result and keeps the old wording otherwise', () => {
+  assert.equal(evidence.describePatternIndex(null), 'AQE pattern index binding unverified (agentic-qe#754)');
+  assert.equal(evidence.describePatternIndex('unverified'), 'AQE pattern index binding unverified (agentic-qe#754)');
+  assert.equal(evidence.describePatternIndex('verified'), 'AQE pattern index binding verified (agentic-qe#754)');
+  assert.equal(evidence.describePatternIndex('lexical-fallback'), 'AQE pattern index binding unverified (agentic-qe#754; lexical-fallback)');
+});
+
+test('the pattern-index value reads back with the record and is absent when none was recorded', () => {
+  reset();
+  evidence.recordLiveCheck({ id: 'aqe-embedding', status: 'passed', source: 'sync', inputsKey: 'k', patternIndex: 'verified' }, { now: NOW });
+  assert.equal(evidence.readLiveCheck('aqe-embedding', { inputsKey: 'k', now: NOW }).patternIndex, 'verified');
+  evidence.recordLiveCheck({ id: 'aqe-embedding', status: 'passed', source: 'sync', inputsKey: 'k' }, { now: NOW });
+  assert.equal('patternIndex' in evidence.readLiveCheck('aqe-embedding', { inputsKey: 'k', now: NOW }), false);
+  assert.throws(() => evidence.recordLiveCheck({ id: 'aqe-embedding', status: 'passed', source: 'sync', inputsKey: 'k', patternIndex: 'free text' }), TypeError);
+});
+
+test('a stored pattern-index value that is not recognised reads back as absent', () => {
+  reset();
+  writeEvidence('live-check', 'aqe-embedding', { source: 'sync', inputsKey: 'k', inputs: null,
+    result: { status: 'passed', reason: null, patternIndex: '<script>' } }, { now: NOW });
+  assert.equal('patternIndex' in evidence.readLiveCheck('aqe-embedding', { inputsKey: 'k', now: NOW }), false);
+});
+
+test('the embedding outcome helpers carry the pattern-index value only when a check ran', () => {
+  assert.deepEqual(evidence.embeddingProbeOutcome({ status: 'passed' }), { status: 'passed', reason: null });
+  assert.deepEqual(evidence.embeddingProbeOutcome({ status: 'passed', patternIndex: { status: 'passed' } }),
+    { status: 'passed', reason: null, patternIndex: 'verified' });
+  assert.deepEqual(evidence.embeddingProbeOutcome({ status: 'failed', reason: 'endpoint-unreachable', patternIndex: { status: 'passed' } }),
+    { status: 'failed', reason: 'endpoint-unreachable' }, 'an embedder that failed has no index claim');
+  assert.deepEqual(evidence.embeddingCheckOutcome({ ok: true, status: 'ok', evidence: { status: 'passed', patternIndex: { status: 'failed', reason: 'lexical-fallback' } } }),
+    { status: 'passed', reason: null, patternIndex: 'lexical-fallback' });
+  assert.deepEqual(evidence.embeddingCheckOutcome({ ok: true, status: 'ok', evidence: { status: 'passed' } }), { status: 'passed', reason: null });
+});
+
+test('rememberLiveCheck stores the pattern-index value from an outcome', () => {
+  reset();
+  evidence.rememberLiveCheck('aqe-embedding', { status: 'passed', reason: null, patternIndex: 'verified' },
+    { source: 'sync', inputsKey: 'k', now: NOW });
+  assert.equal(evidence.readLiveCheck('aqe-embedding', { inputsKey: 'k', now: NOW }).patternIndex, 'verified');
+});
+
+test('status shows the pattern index as verified only when the remembered pass verified it', async () => {
+  const verified = await embeddingRow({ record: { status: 'passed', patternIndex: 'verified' } });
+  assert.match(verified.message, /; embedder verified 5m ago \(ak sync\); AQE pattern index binding verified \(agentic-qe#754\); corpus compatibility unverified$/);
+  const lexical = await embeddingRow({ record: { status: 'passed', patternIndex: 'lexical-fallback' } });
+  assert.match(lexical.message, /; AQE pattern index binding unverified \(agentic-qe#754; lexical-fallback\); corpus/);
+});
+
+test('the embedding check records which AQE release it ran against, so an AQE change clears the claim', () => {
+  const cfg = offlineKitConfig();
+  const key = () => evidence.liveCheckInputsKey('aqe-embedding', { cfg, cwd: PROJECT });
+  const before = key();
+  fs.writeFileSync(path.join(GLOBAL_ROOT, 'agentic-qe', 'package.json'), JSON.stringify({ name: 'agentic-qe', version: '9.9.10' }));
+  try { assert.notEqual(key(), before); }
+  finally { fs.writeFileSync(path.join(GLOBAL_ROOT, 'agentic-qe', 'package.json'), JSON.stringify({ name: 'agentic-qe', version: '9.9.9' })); }
+  assert.equal(key(), before);
+});
