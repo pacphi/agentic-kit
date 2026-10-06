@@ -282,6 +282,8 @@ routing target, or observability authority. Package, target, plugin, and data ow
 separate; normal diagnosis parses offline doctor schema version 2; indexing uses bounded
 `deja index` rather than guidance-writing `deja warmup`; teardown preserves external installs and
 user data unless a separately previewed purge is confirmed.
+[ADR-0064](0064-project-scoped-management.md) retired the companion and #321 removed it in 4.0.0-beta.1;
+the record stays as history.
 
 **0036** answers a 2026-08 complexity audit of the dashboard/admin implementation, not a
 user-facing change. `dashboard-server.mjs`'s 15-route request handler becomes a route table plus

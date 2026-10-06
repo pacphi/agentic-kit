@@ -31,7 +31,6 @@ changes with the behavior it describes. Subfolders have one purpose.
 | [Observability](observability.md) | Observability tab |
 | [AQE embeddings](aqe-embeddings.md) | AQE embedding backend selection and recovery |
 | [Codex status line](codex-statusline.md) | Managed Codex status line |
-| [deja-vu (archived)](archive/2026-10-03-guide-deja-vu.md) | Retired transcript search companion; removal ships in 4.0.0-beta.1 |
 | [Dev containers](devcontainers.md) | Development container configurations |
 | [Hermes host adapter](hermes-host-adapter.md) | External host-adapter contract |
 | [Codex usage diagnostic](codex-usage-diagnostic.md) | Usage-parser verification |
