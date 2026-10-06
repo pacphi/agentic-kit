@@ -10,6 +10,10 @@ import { cacheDir } from '../../src/lib/cache-dir.mjs';
 import { rmrf, sandboxHome } from './helpers/home-sandbox.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
+// The gate reports the native canonical path. On Windows that expands 8.3 short names
+// (RUNNER~1) that tempDir() keeps, so expected values go through the same call.
+const real = (dir) => fs.realpathSync.native(dir);
+
 const home = sandboxHome('scope-gate');
 after(() => rmrf(home));
 beforeEach(() => clearViolations());
@@ -33,9 +37,9 @@ test('a write outside the root and the cache is reported with its details', (t) 
   assert.equal(violations().length, 1);
   const [only] = violations();
   assert.equal(only.kind, 'OutOfScopeWrite');
-  assert.equal(only.target, target);
+  assert.equal(only.target, path.join(real(outside), 'settings.json'));
   assert.equal(only.op, 'write');
-  assert.equal(only.scopeRoot, root);
+  assert.equal(only.scopeRoot, real(root));
 });
 
 test('with no scope set every write outside the cache is reported', (t) => {
@@ -75,7 +79,7 @@ test('a relative file path is resolved against the working directory and reporte
   const target = path.join(outside, 'rel.txt');
   checkWrite(path.relative(process.cwd(), target), 'write');
   assert.equal(violations().length, 1);
-  assert.equal(violations()[0].target, target);
+  assert.equal(violations()[0].target, path.join(real(outside), 'rel.txt'));
 });
 
 test('isInside accepts the folder itself and a trailing separator', () => {
@@ -200,8 +204,8 @@ test('a command report names the full command line and the working folder', (t) 
   assert.equal(only.kind, 'OutOfScopeCommand');
   assert.equal(only.target, 'npm install -g x');
   assert.equal(only.op, 'exec');
-  assert.equal(only.cwd, root);
-  assert.equal(only.scopeRoot, root);
+  assert.equal(only.cwd, real(root));
+  assert.equal(only.scopeRoot, real(root));
 });
 
 test('a missing args list is ignored without throwing', () => {

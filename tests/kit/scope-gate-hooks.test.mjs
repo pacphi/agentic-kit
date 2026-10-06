@@ -9,6 +9,10 @@ import { clearViolations, violations, withWriteScope } from '../../src/lib/scope
 import { rmrf, sandboxHome } from './helpers/home-sandbox.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
+// The gate reports the native canonical path. On Windows that expands 8.3 short names
+// (RUNNER~1) that tempDir() keeps, so expected values go through the same call.
+const real = (dir) => fs.realpathSync.native(dir);
+
 const home = sandboxHome('scope-gate-hooks');
 after(() => rmrf(home));
 beforeEach(() => clearViolations());
@@ -20,7 +24,7 @@ test('writeFileWithBackup reports a write outside the root and still performs it
   withWriteScope({ root }, () => writeFileWithBackup(file, '{}\n'));
   assert.equal(fs.readFileSync(file, 'utf8'), '{}\n');
   assert.equal(violations().length, 1);
-  assert.equal(violations()[0].target, file);
+  assert.equal(violations()[0].target, path.join(real(outside), 'settings.json'));
 });
 
 test('writeFileWithBackup inside the root is not reported', (t) => {
@@ -54,7 +58,7 @@ test('run reports a global npm install made from its working folder', async (t) 
   assert.notEqual(result.code, 0);
   assert.equal(violations().length, 1);
   assert.equal(violations()[0].rule, 'npm-install-global');
-  assert.equal(violations()[0].cwd, root);
+  assert.equal(violations()[0].cwd, real(root));
 });
 
 test('run does not report an ordinary command', async () => {
