@@ -21,7 +21,7 @@ breaks an import cycle. A new `src/**` block in `eslint.config.mjs` warns on dir
 **Tech Stack:** Node 22+ ES modules (`.mjs`), `node:test`, ESLint 10 flat config, zero runtime
 dependencies.
 
-**Spec:** [2026-10-06-write-and-command-gate-design.md](2026-10-06-write-and-command-gate-design.md)
+**Spec:** [2026-10-06-write-and-command-gate-design.md](2026-10-06-design-write-and-command-gate.md)
 
 ## Global Constraints
 

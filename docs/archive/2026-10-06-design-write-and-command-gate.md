@@ -10,7 +10,7 @@ in report-only mode on `feat/327-write-and-command-gate`. The enforcing version 
 ## Outcome
 
 The rule in [ADR-0064](../adr/0064-project-scoped-management.md) and the
-[design](2026-10-01-project-scope-only-design.md) ("Making it stick", items 1 and 2) becomes
+[design](../plans/2026-10-01-project-scope-only-design.md) ("Making it stick", items 1 and 2) becomes
 measurable: ak writes only inside the project root, the cache and the Codex register. This card
 reports every write and command that breaks the rule and changes no behaviour. It does not throw,
 refuse or block anything.

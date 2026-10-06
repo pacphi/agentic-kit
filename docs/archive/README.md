@@ -278,3 +278,10 @@ captured, not today. Two further designs from the same program moved to
 | File | Original location | What it was | Why it's historical |
 |---|---|---|---|
 | [2026-10-04-aqe-3146-init-settings-conformance-receipt.md](2026-10-04-aqe-3146-init-settings-conformance-receipt.md) | Written here | AQE 3.14.6 init-settings conformance receipt (2026-10-04) | Dated capture for the dispatched upstream/proffesor-for-testing-agentic-qe-778 adjustment; maintainer review, broader-mode/platform conformance and the registry retirement decision remain separate. |
+
+## Added 2026-10-06 — report-only write gate and command gate
+
+| File | Original location | What it was | Why it's historical |
+|---|---|---|---|
+| [2026-10-06-design-write-and-command-gate.md](2026-10-06-design-write-and-command-gate.md) | `docs/plans/2026-10-06-write-and-command-gate-design.md` | The design for the report-only write gate and command gate (card P0-07, #327): `scope-gate.mjs`, the two hooks, the lint rule and the tests. | Implemented in report-only mode; P7-01 makes it enforcing, and the code and ADR-0064 now describe the gate. |
+| [2026-10-06-plan-write-and-command-gate.md](2026-10-06-plan-write-and-command-gate.md) | `docs/plans/2026-10-06-write-and-command-gate.md` | The six-task plan that built the gate, with the test code for each task. | Executed on `feat/327-write-and-command-gate`; the shipped code and tests supersede the snippets. |
