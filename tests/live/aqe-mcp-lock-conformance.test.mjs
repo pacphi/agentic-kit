@@ -1,7 +1,8 @@
 // Explicit opt-in: released AQE MCP holder + extracted packed-kit command.
 // No package acquisition, real-project mutation or provider credentials here.
-// proffesor-for-testing/agentic-qe#801: stock 3.14.6 omits shared-patterns
-// cleanup. Preserve the failed shutdown gate until a fixing artifact is proved.
+// proffesor-for-testing/agentic-qe#801: stock 3.14.6 omitted shared-patterns
+// cleanup on EOF shutdown; 3.14.7 and later release it (proved on 3.14.8, macOS).
+// The shutdown assertions stay, so a release that regresses fails here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
