@@ -4,6 +4,18 @@
 import js from '@eslint/js';
 import globals from 'globals';
 
+// Project-scope write gate (ADR-0064, "Making it stick"): writers go through file-write.mjs, and
+// user-level folders are resolved only in paths.mjs. A warning today; P7-01 makes it an error.
+const FS_WRITE_METHODS = [
+  'writeFile', 'writeFileSync', 'appendFile', 'appendFileSync', 'rename', 'renameSync', 'rm', 'rmSync',
+  'rmdir', 'rmdirSync', 'mkdir', 'mkdirSync', 'mkdtemp', 'mkdtempSync', 'copyFile', 'copyFileSync',
+  'cp', 'cpSync', 'unlink', 'unlinkSync', 'symlink', 'symlinkSync', 'link', 'linkSync', 'chmod',
+  'chmodSync', 'chown', 'chownSync', 'truncate', 'truncateSync', 'utimes', 'utimesSync', 'createWriteStream',
+];
+const USER_DIR_HELPERS = ['claudeDir', 'codexDir', 'opencodeDir'];
+const FS_MESSAGE = 'Write through file-write.mjs so the project-scope write gate sees it (ADR-0064).';
+const USER_DIR_MESSAGE = 'Resolve user-level folders only in paths.mjs; a project writer must not target them (ADR-0064).';
+
 export default [
   {
     ignores: [
@@ -56,6 +68,30 @@ export default [
       complexity: ['warn', 25],
       'max-depth': ['warn', 5],
       'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
+    // Writer modules: all of src/ except the three modules that own writes and locations.
+    files: ['src/**/*.mjs'],
+    ignores: ['src/lib/file-write.mjs', 'src/lib/scope-gate.mjs', 'src/lib/paths.mjs'],
+    rules: {
+      'no-restricted-imports': ['warn', {
+        paths: ['node:fs', 'fs', 'node:fs/promises', 'fs/promises']
+          .map((name) => ({ name, importNames: FS_WRITE_METHODS, message: FS_MESSAGE })),
+        patterns: [{ regex: '(^|/)paths\\.mjs$', importNames: USER_DIR_HELPERS, message: USER_DIR_MESSAGE }],
+      }],
+      'no-restricted-properties': ['warn', ...['fs', 'fsp', 'fsImpl'].flatMap((object) => FS_WRITE_METHODS
+        .map((property) => ({ object, property, message: FS_MESSAGE })))],
+      'no-restricted-syntax': ['warn',
+        {
+          selector: `CallExpression[callee.object.property.name='promises'][callee.property.name=/^(${FS_WRITE_METHODS.join('|')})$/]`,
+          message: FS_MESSAGE,
+        },
+        {
+          selector: `CallExpression[callee.object.name='paths'][callee.property.name=/^(${USER_DIR_HELPERS.join('|')})$/]`,
+          message: USER_DIR_MESSAGE,
+        },
+      ],
     },
   },
   {
