@@ -6,9 +6,9 @@
 
 ## Status
 
-**Active** (2026-10-06). Implements card P0-07, issue
-[#327](https://github.com/pacphi/agentic-kit/issues/327), release `4.0.0-beta.1`. Nothing is
-implemented yet. #328 is blocked by this card.
+**Done** (2026-10-06). Implements card P0-07, issue
+[#327](https://github.com/pacphi/agentic-kit/issues/327), release `4.0.0-beta.1`. Executed on
+`feat/327-write-and-command-gate`. This card unblocks #328.
 
 **Goal:** Report every write outside the project root and the cache, and every user-level command,
 without changing any behaviour, and add a warn-level lint rule for direct `fs` writes.

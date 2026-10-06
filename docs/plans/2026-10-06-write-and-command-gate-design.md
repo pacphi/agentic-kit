@@ -2,10 +2,10 @@
 
 ## Status
 
-**Active** (2026-10-06). Design for card P0-07, issue [#327](https://github.com/pacphi/agentic-kit/issues/327),
-epic [#295](https://github.com/pacphi/agentic-kit/issues/295), release `4.0.0-beta.1`. Not
-implemented. The enforcing version is P7-01 (`4.0.0-beta.4`). #328 (contract tests) is blocked by
-this card.
+**Done** (2026-10-06). Design for card P0-07, issue [#327](https://github.com/pacphi/agentic-kit/issues/327),
+epic [#295](https://github.com/pacphi/agentic-kit/issues/295), release `4.0.0-beta.1`. Implemented
+in report-only mode on `feat/327-write-and-command-gate`. The enforcing version is P7-01
+(`4.0.0-beta.4`). This card unblocks #328 (contract tests).
 
 ## Outcome
 
