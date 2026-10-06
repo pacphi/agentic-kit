@@ -39,8 +39,12 @@ Success is the card's two acceptance criteria:
 
 ### 1. `src/lib/scope-gate.mjs`
 
-One new module. It imports only `node:` built-ins and `paths.mjs`, and not `exec.mjs`, so
-`run()` can call it without a cycle.
+One new module. It imports only `node:` built-ins and a new leaf module, `cache-dir.mjs`.
+
+`paths.mjs` imports `file-write.mjs`, so `scope-gate.mjs` cannot import `paths.mjs` for
+`cacheDir()` without a cycle (`file-write` → `scope-gate` → `paths` → `file-write`). The plan
+therefore moves `xdgBase`, `cacheBase` and `cacheDir` into `src/lib/cache-dir.mjs`, which imports
+only `node:` built-ins, and `paths.mjs` re-exports them unchanged. No caller changes.
 
 - **Scope.** `withWriteScope({ root }, fn)` runs `fn` with the project root held in an
   `AsyncLocalStorage`. With no scope set, the root is empty and only the cache is allowed.
@@ -60,6 +64,10 @@ One new module. It imports only `node:` built-ins and `paths.mjs`, and not `exec
 
   `claude mcp|plugin … -s local|project` is allowed only when `cwd` is inside the scope root.
   Matching is on the parsed argv, never on a joined string.
+
+  A `claude mcp` or `claude plugin` change with no `-s` is not reported. `--help` does not state
+  the default scope for either command, and this card does not guess it. Pinning the defaults
+  is a follow-up for P7-01.
 - **Collector.** Violations go to an in-process list: `{ kind, target, op, scopeRoot, time }`.
   Tests read it through `violations()` and reset it with `clearViolations()`. The list holds at
   most 1,000 entries and counts what it drops, because the dashboard server is long-lived.
@@ -89,8 +97,8 @@ plugin to maintain:
 "Writer modules" means all of `src/**` except `file-write.mjs`, `scope-gate.mjs` and `paths.mjs`.
 `bin/**` and `tests/**` are not covered.
 
-Warnings do not fail CI (`eslint .` has no `--max-warnings`). Expect roughly 245 new warnings.
-The PR records the count so later migration cards can show it falling.
+Warnings do not fail CI (`eslint .` has no `--max-warnings`). Measured against `main`, the rule adds about 326 warnings in 103 files, on top of 73 today. The PR
+records the count so later migration cards can show it falling.
 
 ### 4. Tests
 
