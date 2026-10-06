@@ -48,7 +48,7 @@ const timedOut = (result) => /timed out after/.test(result.stderr ?? '');
  * @param {{packageRoot?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number,runner?:typeof run}} options
  * @returns {Promise<PatternIndexResult>}
  */
-export async function probeAqePatternIndex({ packageRoot, env = process.env, timeoutMs = 20_000, runner = run } = {}) {
+export async function probeAqePatternIndex({ packageRoot, env = process.env, timeoutMs = 10_000, runner = run } = {}) {
   const request = checkRequest({ packageRoot, env, timeoutMs });
   if ('status' in request) return request;
   const { aqe } = request;
