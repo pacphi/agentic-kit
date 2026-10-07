@@ -269,6 +269,23 @@ writes your API keys.
 Fallback-derived defaults carry an exact ownership receipt, so removing a managed chain preserves
 any user-selected replacement even when that provider was another rung in the old chain.
 
+> Model IDs above are examples current as of July 2026 (Claude Opus 5, OpenAI GPT-5.6 —
+> or `gpt-5.3-codex` for agentic coding — Google Gemini 3.5 Flash). Use whatever IDs your
+> provider currently offers; `ak` writes the strings you give it verbatim.
+
+**GLM via OpenRouter.** Zhipu/Z.ai's GLM models are reachable through the `openrouter`
+provider — add them to the chain and put `OPENROUTER_API_KEY` in your env:
+
+```bash
+ak host pick \
+  --aqe-provider claude-code \
+  --aqe-fallback 'claude-code:claude-opus-5-5; openrouter:z-ai/glm-5.2'
+```
+
+Curated picks (verified September 8, 2026): `z-ai/glm-5.2` (flagship — 1M context, strong
+tool-use, long-horizon agent work) and `z-ai/glm-5` (value — 205K context; compare current provider per-token prices). Both are **metered** — GLM is never an auto-seed target (seeding only ever
+routes to subscription/local providers).
+
 ## Level 3.5 — seeded Claude + Codex defaults, explicit OpenCode routes
 
 When **both** hosts are enabled and `agentic-qe ≥ 3.13.1` is installed, `ak` seeds a
