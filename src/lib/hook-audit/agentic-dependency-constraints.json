@@ -418,7 +418,7 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["docs/troubleshooting.md", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs", "tests/kit/host-adapters-cli.test.mjs"]
+        "files": ["docs/troubleshooting.md", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs"]
       },
       "adjustment": "None: the workaround was already removed; remaining citations are comments and format examples.",
       "status": "retired",
@@ -572,7 +572,7 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["constraint agentic-qe-3.13-external-provider-contract (sunset 2026-09-27)"],
-        "files": ["docs/host-adapter-freeze-checklist.md", "docs/adr/0029-host-adapter-extension-point.md", "src/lib/adapters/admission.mjs", "src/lib/providers.mjs", "tests/live/aqe-external-provider-transport.test.mjs"]
+        "files": ["docs/adr/0029-host-adapter-extension-point.md", "src/lib/adapters/admission.mjs", "src/lib/providers.mjs", "tests/live/aqe-external-provider-transport.test.mjs"]
       },
       "adjustment": "Done: constraint agentic-qe-3.13-external-provider-contract sunset after the live external-provider participant and advisor conformance (tests/live/aqe-external-provider-transport.test.mjs) passed on 3.14.4. Also cited as \"issue #628\".",
       "status": "retired",
@@ -1128,7 +1128,7 @@
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
-      "kitImpact": { "refs": [], "files": ["tests/kit/adapter-conformance.test.mjs"] },
+      "kitImpact": { "refs": ["cited only by a test removed with the external host-adapter contract (P0-04)"], "files": [] },
       "adjustment": "None: the test cites it as a counter-example; nothing in ak changes when it is fixed.",
       "status": "retired",
       "constraintIds": [],
@@ -1183,7 +1183,7 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["docs/providers.md", "src/commands/setup.mjs", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs", "tests/kit/host-adapters-cli.test.mjs"]
+        "files": ["docs/providers.md", "src/commands/setup.mjs", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs"]
       },
       "adjustment": "None while ak declares no Ruflo floor: providers.mjs gates on 3.38.8, the first fixed release. Drop the gate if ak declares ruflo >= 3.38.8.",
       "status": "retired",
@@ -1257,7 +1257,7 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["constraint ruflo-3x-capability-gap", "ADR-0029 (declarative manifest + subprocess hooks)", "ADR-0031"],
-        "files": ["docs/host-adapter-freeze-checklist.md", "docs/adr/0031-capability-graduation-and-upstream-requests.md"]
+        "files": ["docs/adr/0031-capability-graduation-and-upstream-requests.md"]
       },
       "adjustment": "Answered from the requester side on 2026-09-26 (manifest + subprocess, ADR-0029). Once a released Ruflo documents a backend-registration surface, verify it against the released artifact and sunset constraint ruflo-3x-capability-gap.",
       "status": "watching",

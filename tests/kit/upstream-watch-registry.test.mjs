@@ -18,11 +18,7 @@ const document = () => JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'
 const now = () => new Date(`${document().lastCheckedAt}T12:00:00Z`);
 const ids = (text) => findCitations(text).map((citation) => citation.id);
 // Synthetic fixture ids a test uses on purpose; each must still be cited where listed.
-const SYNTHETIC = new Map([
-  ['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']],
-  // A placeholder id in an example command, not a real thread.
-  ['ruvnet/ruflo#1234', ['docs/authoring-host-adapters.md']],
-]);
+const SYNTHETIC = new Map();
 // The watch tooling's own tests and fixtures spell citations as data.
 const SELF_CITING = ['tests/kit/upstream-watch-', 'tests/fixtures/upstream-watch/'];
 
