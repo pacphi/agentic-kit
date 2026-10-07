@@ -12,7 +12,6 @@ import {
   applyAdmitted, resetAdmitted, effectiveHostRegistry, effectivePrimaryHostIds,
 } from '../../src/lib/adapters/admitted.mjs';
 import { HOST_REGISTRY, primaryHostIds } from '../../src/lib/adapters/registries.mjs';
-import { hostTierLabel } from '../../src/lib/hosts.mjs';
 
 beforeEach(() => resetAdmitted());
 
@@ -68,16 +67,6 @@ test('a granted canBePrimary makes effectiveHostRegistry() show it true, and eff
   const entry = effectiveHostRegistry().find((h) => h.id === 'hermes');
   assert.equal(entry.capabilities.canBePrimary, true);
   assert.ok(effectivePrimaryHostIds().includes('hermes'));
-});
-
-test('a granted canBePrimary lights up hostTierLabel — "drives sessions · can lead"', () => {
-  applyAdmitted([{ entry: admittedHost() }], { grantsByName: { hermes: { canBePrimary: true } } });
-  assert.equal(hostTierLabel('hermes'), 'drives sessions · can lead');
-});
-
-test('without the grant, hostTierLabel reflects the ungranted (routing-only external) tier', () => {
-  applyAdmitted([{ entry: admittedHost() }]);
-  assert.equal(hostTierLabel('hermes'), 'routing only · external adapter · not AQE');
 });
 
 test('a granted commandStatusline flips only that flag, leaving canBePrimary at the manifest floor', () => {

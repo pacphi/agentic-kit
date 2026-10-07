@@ -79,12 +79,12 @@ test('materializeRunPlan attaches the route ladder, dropping self-equal rungs', 
     'only the non-self rung survives, with its model');
 });
 
-test('materializeRunPlan rejects an escalation rung to a non-routable host', () => {
+test('materializeRunPlan rejects an escalation rung to an unknown host', () => {
   const cfg = { routing: { routes: { implementation: {
     host: 'claude', provenance: 'user', escalation: [{ host: 'not-a-host' }],
   } } } };
   assert.throws(() => buildRunPlan(cfg, 'feature', 'probe'),
-    /escalation rung for "implementation" cannot materialize: host "not-a-host" requires canRouteActivities/);
+    /escalation rung for "implementation" cannot materialize: unknown host "not-a-host" \(expected: claude\|codex\|opencode\)/);
 });
 
 test('--dry-run shows the escalation ladder on ladder-carrying workers', async () => {
