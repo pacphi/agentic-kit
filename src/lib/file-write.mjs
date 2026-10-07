@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { checkWrite } from './scope-gate.mjs';
 
 let sequence = 0;
 
@@ -26,6 +27,7 @@ function backupState(file, fsImpl) {
  * non-regular backup paths fail closed.
  */
 export function writeFileWithBackup(file, content, { fsImpl = fs } = {}) {
+    checkWrite(file, 'write');
   const dir = path.dirname(file);
   fsImpl.mkdirSync(dir, { recursive: true });
   const existed = fsImpl.existsSync(file);
@@ -80,6 +82,7 @@ export function writeFileWithBackup(file, content, { fsImpl = fs } = {}) {
  * durable dismissal state) deliberately do not.
  */
 export function writePrivateFileAtomic(file, content, { fsImpl = fs } = {}) {
+    checkWrite(file, 'write');
   fsImpl.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${randomBytes(8).toString('hex')}.tmp`;
   let fd;
