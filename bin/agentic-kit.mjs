@@ -45,7 +45,6 @@ const PORCELAIN = Object.assign(Object.create(null), {
 const PLUMBING = Object.assign(Object.create(null), {
   'aqe-embedding': () => import('../src/commands/x/aqe-embedding.mjs'),
   'admin': () => import('../src/commands/x/admin.mjs'),
-  'aqe-provider': () => import('../src/commands/x/aqe-provider.mjs'),
   'aqe-store': () => import('../src/commands/x/aqe-store.mjs'),
   'daemon-gc': () => import('../src/commands/x/daemon-gc.mjs'),
   'dashboard': () => import('../src/commands/x/dashboard.mjs'),
@@ -213,23 +212,6 @@ async function main() {
   const { values, positionals } = parsed;
   jsonRequested = values.json === true;
 
-  // Experimental host-adapter bootstrap (Wave 4, adapter door) — the single
-  // place every command passes through. Gated on the env var BEFORE anything
-  // else runs so the default (flag unset) is truly zero calls, zero output,
-  // zero behavior change: no dynamic import, no config read, nothing.
-  // Refusals are warnings on stderr, never fatal — a bad external adapter
-  // must never block a command that doesn't use it.
-  if (cmd !== 'telemetry' && process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
-    try {
-      const { loadKitConfig } = await import('../src/lib/config.mjs');
-      const { bootstrapHostAdapters } = await import('../src/lib/adapters/admission.mjs');
-      const { warnings } = await bootstrapHostAdapters({ cfg: loadKitConfig(), env: process.env });
-      for (const w of warnings) {
-        console.error(dim(`⚠ host adapter '${w.name}' not admitted (${w.reason}): ${w.detail ?? ''}`.trimEnd()));
-      }
-    } catch { /* experimental surface — never blocks a command */ }
-  }
-
   const code = await mod.run({ flags: values, positionals, pkgRoot: PKG_ROOT });
 
   // Drift nudge: one line, cached, never blocks (skipped in --json contexts).
@@ -250,7 +232,7 @@ async function main() {
   // parse error never used to.
   // uninstall is leaving: the nudge runs `npm view` and saves the version cache,
   // which writes a default kit.json back after `--purge` removed the config folder.
-  if (code !== 2 && !values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store', 'uninstall'].includes(cmd)) {
+  if (code !== 2 && !values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-embedding', 'aqe-store', 'uninstall'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {

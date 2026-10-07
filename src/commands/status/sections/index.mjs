@@ -30,8 +30,6 @@ import hostAlignment from './host-alignment.mjs';
 
 import hosts from './hosts.mjs';
 import providersStatus from './providers-status.mjs';
-import providersExternalIntent from './providers-external-intent.mjs';
-import providersExternalProjection from './providers-external-projection.mjs';
 import providersRufloModels from './providers-ruflo-models.mjs';
 import providersLocalBindings from './providers-local-bindings.mjs';
 import routing from './routing.mjs';
@@ -51,7 +49,7 @@ export const SECTIONS_BEFORE_HOST_DETAIL = [
 
 // Everything from `hosts` onward — after those direct calls.
 export const SECTIONS_AFTER_HOST_DETAIL = [
-  hosts, providersStatus, providersExternalIntent, providersExternalProjection,
+  hosts, providersStatus,
   providersRufloModels, providersLocalBindings, routing, daemons, blocks,
   statusline, codexContext, context, qeCourt, liveChecks,
 ];
