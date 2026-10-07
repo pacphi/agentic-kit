@@ -124,14 +124,17 @@ Delete the nine unreferenced adapter modules (`admission`, `admitted`, `aqe-prov
 11 test files, the live proof test, `tests/fixtures/adapters/` and the `package.json` entries for the
 live test. Trim `adapters/index.mjs`. Fix the constraints-registry entries that name them. Mark ADR-0029
 and ADR-0031 "Withdrawn from v4; carried to v5", fix the ADR README, the DDD docs and the remaining docs
-that mention adapters, and correct `docs/proposals/v5-planning-sources.md` (it wrongly lists
-`live-adapters.test.mjs` as an adapter test; that file reads transcripts and stays).
+that mention adapters, and correct `docs/proposals/v5-planning-sources.md`: it wrongly lists
+`live-adapters.test.mjs` as an adapter test (that file reads transcripts and stays), and it names files PR A
+deleted (`conformance.mjs` and the three guides) without saying they now live only at the archive tag.
 
 ## Rulings
 
 - **Stale `kit.json` keys.** A saved `hostAdapters` list or an external id under `integrations.hosts`
-  stays on disk as inert data, so the source never needs to name them again (the #454 precedent for
-  `tools.dejaVu`). The exit release and the single legacy check cover users who still have them.
+  stays on disk, so the source never needs to name them again (the #454 precedent for `tools.dejaVu`). A
+  host key is **not** inert on its own: `enabledHostIds` ignores any id the registry does not know, so a
+  leftover `hermes: true` cannot make `ak host pick` fail (a review finding; PR A task 6). The exit release
+  and the single legacy check cover users who still have these keys.
 - **Archive files** stay frozen. Only broken links become plain text.
 - **No aliases or hints** for the removed commands. The old-to-new mapping goes in the PR bodies and the
   release notes.

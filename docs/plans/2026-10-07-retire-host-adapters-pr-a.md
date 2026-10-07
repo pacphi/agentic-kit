@@ -25,8 +25,8 @@ dependencies.
 
 **How this plan was checked.** Every edit below comes from one machine-readable edit script. I replayed
 that script in a fresh worktree from `main`, task by task, and ran each task's focused tests. The replayed
-tree is byte-identical to the tree I first built and validated by hand (38 files, +116 / -6,600 lines).
-The numbers in each "Expected" line are from those runs.
+tree is byte-identical to the tree I first built and validated by hand (38 files, +116 / -6,600 lines after Task 5; 40 files, +138 / -6,585 after Task 6).
+The numbers in each "Expected" line are from those runs. Task 6 records two fixes a fresh reviewer asked for after the plan was first executed; the replay was repeated with them and is again identical to the branch.
 
 ## Global Constraints
 
@@ -1355,7 +1355,7 @@ File: `docs/providers.md`
 
 In `docs/providers.md`, delete everything from the line that starts with `## External host adapters (experimental)` up to, but **not including**, the line that starts with `## Level 0 — do nothing (the point)`.
 
-In `docs/providers.md`, delete everything from the line that starts with `### External-provider release proof` up to, but **not including**, the line that starts with `## Level 3.5 — seeded Claude + Codex defaults`.
+In `docs/providers.md`, delete everything from the line that starts with `### External-provider release proof` up to, but **not including**, the line that starts with `> Model IDs above are examples`.
 
 In `docs/providers.md`, replace:
 
@@ -1726,7 +1726,8 @@ node scripts/run-tests.mjs unit
 
 Expected: `tsc` prints nothing. `eslint .` exits 0 with 0 errors (395 warnings). The complexity run exits 0.
 The comment guard passes 12 tests. `build-check: OK`. markdownlint prints nothing. lychee reports 0 errors.
-The unit run reports **6,456 tests, 0 failures, 8 skipped**, and exits 0.
+The unit run reports **6,456 tests, 0 failures, 8 skipped** after Task 4, and **6,458** after Task 6 (two new
+tests), and exits 0. Run the gate again after Task 6.
 
 - [ ] **Step 2: Check the change set**
 
@@ -1735,7 +1736,8 @@ git diff --stat main...HEAD | tail -1
 git status --short | wc -l
 ```
 
-Expected: `38 files changed, 116 insertions(+), 6600 deletions(-)` and `0`.
+Expected: `38 files changed, 116 insertions(+), 6600 deletions(-)` after Task 4, `40 files changed, 138 insertions(+),
+6585 deletions(-)` after Task 6, and `0`.
 
 - [ ] **Step 3: Ask for the go-ahead, then push and open the pull request**
 
@@ -1766,6 +1768,8 @@ the built-in code from it. Claude Code, Codex and OpenCode behave as before.
   Seven archive links to the deleted guides became plain text.
 - Deleted the two external status sections and the tests of every removed command.
 - Fixed five upstream-watch registry entries that named deleted files.
+- Review fixes: restored the GLM-via-OpenRouter guidance that an over-wide docs cut had removed, and made a leftover
+  external host key (`hermes: true`) in `kit.json` unable to block `ak host pick`.
 
 ## Not in this PR
 
@@ -1775,10 +1779,205 @@ the external hook-audit host, and the external lifecycle entries.
 
 ## Verification
 
-- `node scripts/run-tests.mjs unit`: 6,456 tests, 0 failures, 8 skipped.
+- `node scripts/run-tests.mjs unit`: 6,458 tests, 0 failures, 8 skipped.
 - `tsc`, `eslint` (0 errors), the complexity ceiling, the comment guard, `build-check`, markdownlint and
   lychee (0 errors) pass.
 - Not run: `test:ui` (no dashboard change) and a Windows run.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
+
+---
+
+### Task 6: Fixes from the whole-branch review
+
+A fresh reviewer read the finished branch and found two Important problems. This task records them, because the
+pull request carries both fixes.
+
+**Files:**
+
+- Modify:
+  - `tests/kit/provider-cli.test.mjs`
+  - `tests/kit/host-management.test.mjs`
+  - `src/lib/host-management.mjs`
+  - `src/commands/x/host.mjs`
+
+**Interfaces:**
+
+- Consumes: Tasks 1 to 4.
+- Produces: `enabledHostIds(cfg)` in `src/lib/host-management.mjs` returns only enabled hosts the host registry
+  knows. `ak host pick` reads the enabled set through it when `--host` is omitted, and `ak host status` builds
+  its hint from it.
+
+**Fix 1: the GLM guidance.** The second cut in `docs/providers.md` (Task 3, Step 2) originally ended at
+`## Level 3.5`. That removed the "Model IDs above are examples" note and the "GLM via OpenRouter" recipe, which are
+built-in guidance. The cut above now ends at `> Model IDs above are examples`, so Task 3 as written is correct.
+On the branch this was a separate restore, commit `2a1dd51c`.
+
+**Fix 2: a leftover external host key.** An `integrations.hosts.hermes: true` key, which `pick` wrote for every
+alpha user of the Hermes adapter, made every provider-only `ak host pick` fail with
+`unknown host(s): hermes`, and `ak host status` printed a hint that failed the same way. The spec called such keys
+inert. They were not.
+
+- [ ] **Step 1: Write the failing tests**
+
+File: `tests/kit/provider-cli.test.mjs`
+
+In `tests/kit/provider-cli.test.mjs`, replace:
+
+```js
+test('host off clears the OpenCode catalog override after a successful teardown', () => {
+```
+
+with:
+
+```js
+test('a provider retune is not blocked by a leftover external host key in kit.json', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false, hermes: true } });
+  try {
+    const r = akPick(['x', 'host', 'pick', '--aqe-provider', 'openai', '--yes'], sb);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(kitJson(sb.home).providers.aqeProvider, 'openai', 'the retune landed');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
+test('host off clears the OpenCode catalog override after a successful teardown', () => {
+```
+
+File: `tests/kit/host-management.test.mjs`
+
+In `tests/kit/host-management.test.mjs`, replace:
+
+```js
+  assert.deepEqual(enabledHostIds({}), []);
+});
+```
+
+with:
+
+```js
+  assert.deepEqual(enabledHostIds({}), []);
+});
+
+test('an id the host registry does not know is not an enabled host', () => {
+  const cfg = { integrations: { hosts: { claude: true, hermes: true } } };
+  assert.deepEqual(enabledHostIds(cfg), ['claude']);
+});
+```
+
+In `tests/kit/host-management.test.mjs`, replace:
+
+```js
+  // Admitted external hosts are part of the enabled set pick replaces; dropping one would disable it.
+  assert.equal(hostEnableCommand(cfg({ claude: true, gizmo: true }), 'codex'), 'ak host pick --host claude,codex,gizmo');
+```
+
+with:
+
+```js
+  // A key for an id the host registry does not know is not a host: pick rejects it, so the hint omits it.
+  assert.equal(hostEnableCommand(cfg({ claude: true, gizmo: true }), 'codex'), 'ak host pick --host claude,codex');
+```
+
+- [ ] **Step 2: Run them and confirm they fail**
+
+```bash
+node scripts/run-tests.mjs focus tests/kit/host-management.test.mjs
+node scripts/run-tests.mjs focus tests/kit/provider-cli.test.mjs
+```
+
+Expected: each reports 1 failure: `an id the host registry does not know is not an enabled host` and
+`a provider retune is not blocked by a leftover external host key in kit.json`.
+
+- [ ] **Step 3: Make `enabledHostIds` read only registry hosts**
+
+File: `src/lib/host-management.mjs`
+
+In `src/lib/host-management.mjs`, replace:
+
+```js
+/** The enabled set exactly as `ak host pick` reads it when `--host` is omitted
+ *  (parsePickInputFromFlags): every truthy `integrations.hosts` key, including
+ *  admitted external hosts. */
+export function enabledHostIds(cfg) {
+  return Object.entries(cfg?.integrations?.hosts ?? {}).filter(([, on]) => on).map(([id]) => id);
+}
+```
+
+with:
+
+```js
+/** The enabled set exactly as `ak host pick` reads it when `--host` is omitted:
+ *  every truthy `integrations.hosts` key the host registry knows. A leftover key
+ *  for an id the registry does not know (a retired external host) stays on disk
+ *  but is not an enabled host, so it cannot block a provider-only retune. */
+export function enabledHostIds(cfg) {
+  const known = new Set(HOST_REGISTRY.map((host) => host.id));
+  return Object.entries(cfg?.integrations?.hosts ?? {}).filter(([id, on]) => on && known.has(id)).map(([id]) => id);
+}
+```
+
+In `src/lib/host-management.mjs`, replace:
+
+```js
+export const HOST_MANAGEMENT_LABELS = Object.freeze({
+```
+
+with:
+
+```js
+import { HOST_REGISTRY } from './adapters/registries.mjs';
+
+export const HOST_MANAGEMENT_LABELS = Object.freeze({
+```
+
+File: `src/commands/x/host.mjs`
+
+In `src/commands/x/host.mjs`, replace:
+
+```js
+    : Object.entries(cfg.integrations.hosts).filter(([, v]) => v).map(([k]) => k);
+```
+
+with:
+
+```js
+    : enabledHostIds(cfg);
+```
+
+In `src/commands/x/host.mjs`, replace:
+
+```js
+  hostManagement, hostEnableCommand, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
+```
+
+with:
+
+```js
+  hostManagement, hostEnableCommand, enabledHostIds, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
+```
+
+- [ ] **Step 4: Run the focused suites, the typecheck and the lint**
+
+```bash
+for f in host-management provider-cli host-dry-run status-command; do
+  node scripts/run-tests.mjs focus tests/kit/$f.test.mjs
+done
+node_modules/.bin/tsc -p tsconfig.json
+node_modules/.bin/eslint --quiet src tests/kit
+```
+
+Expected: host-management 5, provider-cli 21, host-dry-run 20, status-command 60 tests pass. `tsc` and
+`eslint --quiet` print nothing.
+
+- [ ] **Step 5: Commit, then run the full gate again (Task 5, Step 1)**
+
+```bash
+git add -A src tests
+git commit -m "fix(host): ignore host keys the registry does not know when reading the enabled set (P0-04)"
+```
+
+A leftover key for a retired host stays on disk. The next `ak host pick --host <set>` rewrites the host map
+without it.
