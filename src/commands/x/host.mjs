@@ -19,17 +19,16 @@ import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { reconcileOpencodeGuidance } from '../../lib/opencode.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { lifecycleAdapterFor } from '../../lib/adapters/lifecycle-registry.mjs';
-import { bootstrapHostAdapters } from '../../lib/adapters/admission.mjs';
 import { hostTierLabel, hostAsymmetryNote } from '../../lib/hosts.mjs';
 import {
-  routableHostIds, effectiveRoutableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
+  routableHostIds, defaultHostMap, validateBinding, HOST_REGISTRY, PROVIDER_REGISTRY,
 } from '../../lib/adapters/index.mjs';
 import {
   newlyEnabledHostTrustManifest, trustManifestLines,
 } from '../../lib/trust-manifest.mjs';
 import { have } from '../../lib/exec.mjs';
 import {
-  hostManagement, hostEnableCommand, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
+  hostManagement, hostEnableCommand, enabledHostIds, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
 } from '../../lib/host-management.mjs';
 import {
   ok, warn, fail, info, dim, bold, yellow, humanOutputToStderr, reportFailure,
@@ -56,9 +55,6 @@ export const options = {
   provider: { type: 'string' },      // csv of ruflo API providers, optional id:model (openai:gpt-5.6)
   route: { type: 'string', multiple: true }, // repeatable: 'activity:host[:model]' per-activity routing override
   activity: { type: 'string' },      // reset-routes: csv of activities to re-seed (default = prompt)
-  'expect-hash': { type: 'string' }, // adapters trust: required sha256 pin when --yes resolves a non-file source
-  timeout: { type: 'string' },       // adapters conformance: outer ms budget override (default: manifest's own execution.run.hook.timeoutMs, else 120000)
-  dev: { type: 'boolean', default: false }, // adapters conformance: run without persisting evidence/grants
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
   project: { type: 'string', multiple: true },
@@ -70,7 +66,7 @@ export const options = {
 /** Billing is the non-obvious axis of the aqe provider list. Three categories,
  *  and claude-code is the ONLY same-vendor subscription alternative to a metered
  *  key (codex/gemini OAuth live on the host axis, not as aqe provider types). */
-export const AQE_BILLING_HINT = 'billing: claude-code/codex = host subscription, ollama/onnx = local, built-in APIs = metered; external billing is adapter-declared and unverified';
+export const AQE_BILLING_HINT = 'billing: claude-code/codex = host subscription, ollama/onnx = local, built-in APIs = metered';
 
 export const help = `ak host — frontier-host + LLM-provider detection and wiring
 
@@ -107,17 +103,6 @@ Subcommands:
   check-connection <claude|codex|opencode>
              consent-gated paid connection check, the dashboard dialog's CLI
              twin; needs --yes or a y/N prompt; --dry-run previews it
-  adapters record hash-pinned consent for external host-adapter manifests
-             (experimental — set AK_EXPERIMENTAL_HOST_ADAPTERS=1; revoke
-             always works, list/trust need the flag; --dry-run refused, exit
-             2 — its verbs have no preview)
-             list        show each configured adapter's trust state (default)
-             trust <name> [--expect-hash <sha256>]   grant consent (required
-                          with --yes against a non-file source); revoke <name>
-             conformance <name> [--timeout <ms>] [--dev]
-                          run the tiered black-box harness; --dev is a loud,
-                          non-persistent self-test and never produces
-                          graduation evidence
 
 Options (pick, all optional — omit for interactive):
   --host <csv>                 the complete desired enabled-host set, e.g.
@@ -131,8 +116,7 @@ Options (pick, all optional — omit for interactive):
                                  alternate
   --aqe-provider <type>        set aqe's primary LLM (or 'none' to unset)
                                  billing: claude-code = Claude sub ($0),
-                                 ollama/onnx = local ($0); external billing is
-                                 adapter-declared and shown as unverified
+                                 ollama/onnx = local ($0)
   --aqe-fallback '<chain>'     ordered aqe chain, e.g.
                                  'claude-code:claude-opus-5; openai:gpt-5.6'
                                  (metered providers work too, e.g. add
@@ -196,22 +180,9 @@ export async function run({ flags, positionals, pkgRoot, deps = { hostLifecycle:
   if (sub === 'pick') return pick({ flags, cwd, pkgRoot, deps });
   if (sub === 'reset-routes') return resetRoutes({ flags, cwd });
   if (sub === 'align') return (await import('./host-align.mjs')).run({ flags });
-  if (sub === 'adapters') {
-    // Every adapters verb (list/trust/revoke/conformance/grant/gate/status)
-    // mutates or executes something the moment it runs — there is no
-    // read-only preview to give --dry-run, so it is refused outright
-    // instead of silently behaving like a real run: a flag we declare is a
-    // flag we honor, or refuse.
-    if (flags['dry-run']) {
-      const error = 'ak host adapters has no preview; run it without --dry-run';
-      reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
-      return 2;
-    }
-    return (await import('./host-adapters.mjs')).run({ flags, positionals: positionals.slice(1) });
-  }
   if (sub === 'check-connection') return (await import('./host-connection.mjs')).run({ flags, positionals: positionals.slice(1) });
 
-  const error = `unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|adapters|align)`;
+  const error = `unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|align)`;
   reportFailure({ json: flags.json, payload: { error, exitCode: 2 }, human: () => fail(error) });
   return 2;
 }
@@ -618,7 +589,7 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 function parsePickInputFromFlags(flags, cfg) {
   const enabled = flags.host !== undefined
     ? flags.host.split(',').map((s) => s.trim()).filter(Boolean)
-    : Object.entries(cfg.integrations.hosts).filter(([, v]) => v).map(([k]) => k);
+    : enabledHostIds(cfg);
   let aqeProvider = cfg.providers.aqeProvider ?? null;
   if (flags['aqe-provider'] !== undefined) {
     const v = flags['aqe-provider'].trim().toLowerCase();
@@ -741,10 +712,8 @@ function validatePickAqeSelections({
 }
 
 /** Stage 2/3: validate the enabled-host set, resolve primary-host + routing
- *  intent, refresh host-adapter admission against that final intent,
- *  validate the aqe provider/fallback selections against the (possibly
- *  refreshed) selectable sets, and build the resulting providers/routing
- *  policy. Mutates `cfg` in place (integrations.hosts, providers, routing) —
+ *  intent, validate the aqe provider/fallback selections against the
+ *  selectable sets, and build the resulting providers/routing policy. Mutates `cfg` in place (integrations.hosts, providers, routing) —
  *  this is the decision, not yet the apply step (see applyPickProviderStack).
  *  Returns `{code}` when pick() must return immediately (unknown host
  *  token), else the resolved decision. */
@@ -752,7 +721,7 @@ async function resolvePickDecision(cfg, {
   enabled: rawEnabled, aqeProvider: rawAqeProvider, aqeFallback: rawAqeFallback, models,
   flags, registries, prevPrimary, oldPolicy, aqeProviderTypes: initialAqeProviderTypes, aqeChainProviderTypes: initialAqeChainProviderTypes,
 }) {
-  const { ROUTING, EFFECTIVE_ROUTING, MANAGED_HOSTS } = registries;
+  const { ROUTING, MANAGED_HOSTS } = registries;
   let enabled = rawEnabled;
   let aqeProvider = rawAqeProvider;
   let aqeFallback = rawAqeFallback;
@@ -760,7 +729,7 @@ async function resolvePickDecision(cfg, {
   // validate hosts against the two tiers. An unknown token is a hard error,
   // never a silent drop: `--host claude,opencdoe` must not "succeed" as
   // claude-only and destructively tear the opencode host down (codex-review r3).
-  const known = new Set([...MANAGED_HOSTS, ...EFFECTIVE_ROUTING]);
+  const known = new Set([...MANAGED_HOSTS, ...ROUTING]);
   const unknown = enabled.filter((h) => !known.has(h));
   if (unknown.length) {
     const error = `unknown host(s): ${unknown.join(', ')} (valid: ${[...known].join(', ')}) — nothing changed`;
@@ -794,33 +763,11 @@ async function resolvePickDecision(cfg, {
     codex: routing.includes('codex'),
     opencode: enabled.includes('opencode'),
   };
-  // External host ids are not primary candidates, but they are first-class
-  // integration intent. Retain every live admitted external id as an explicit
-  // boolean so a provider-only pick cannot deactivate its own bridge; an
-  // explicit --host set can still disable it by omission.
-  for (const id of EFFECTIVE_ROUTING) {
-    if (!MANAGED_HOSTS.has(id)) hostIntent[id] = enabled.includes(id);
-  }
   cfg.integrations.hosts = hostIntent;
 
-  // Admission ran once at process bootstrap against the persisted pre-pick
-  // config. Re-run it against the final in-memory host intent before provider
-  // validation/projection: an admitted+granted provider can then be enabled
-  // and selected atomically, while a provider disabled by this command is
-  // removed from the AQE bridge before applyAqeRouter computes its projection.
-  let aqeProviderTypes = initialAqeProviderTypes;
-  let aqeChainProviderTypes = initialAqeChainProviderTypes;
-  if (process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
-    const refreshed = await bootstrapHostAdapters({ cfg, env: process.env });
-    for (const entry of refreshed.warnings) {
-      warn(`host adapter '${entry.name}' refresh refused (${entry.reason}): ${entry.detail}`);
-    }
-    aqeProviderTypes = aqeSelectableProviderTypes();
-    aqeChainProviderTypes = aqeSelectableChainProviderTypes();
-  }
-
   ({ aqeProvider, aqeFallback } = validatePickAqeSelections({
-    aqeProvider, aqeFallback, aqeProviderTypes, aqeChainProviderTypes,
+    aqeProvider, aqeFallback,
+    aqeProviderTypes: initialAqeProviderTypes, aqeChainProviderTypes: initialAqeChainProviderTypes,
   }));
 
   cfg.providers = {
@@ -1161,13 +1108,8 @@ export async function pick({ flags, cwd, pkgRoot, deps = { hostLifecycle: undefi
   // primary/AQE host because those are separate registry capabilities.
   // --host is the complete desired enabled-host set on BOTH tiers; excluding an
   // enabled host disables it (ak-managed wiring stripped, user config kept).
-  // Keep primary-host selection on the built-in routing set, but admit an
-  // explicitly named external host when the live adapter overlay proves it is
-  // routable. Provider-only retunes also carry already-enabled external ids
-  // through unchanged instead of mistaking them for unknown host tokens.
   const registries = {
     ROUTING: new Set(routableHostIds()),
-    EFFECTIVE_ROUTING: new Set(effectiveRoutableHostIds()),
     MANAGED_HOSTS: new Set(HOSTS.map((host) => host.id)),
   };
   const {

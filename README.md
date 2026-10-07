@@ -57,7 +57,7 @@ and transport.
 Those axes do not imply one another. OpenRouter is a provider behind a host, not another host.
 Ollama can have independent bindings through Claude and Codex. Built-in OpenCode is an opt-in,
 explicitly routable host through `ak run`, but it is not primary and has no built-in AQE provider
-identity. A separate external adapter may earn its own AQE 3.13.12+ identity. Provider, model,
+identity. Provider, model,
 and billing claims state whether they are observed, configured, inferred, or unknown. Design
 record: [docs/adr/0016-capability-driven-integration-adapters.md](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md).
 

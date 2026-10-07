@@ -573,10 +573,9 @@ test('registerAdmittedExecution/admittedExecutionAdapterFor/resetAdmittedExecuti
 
 // ── seam: executionAdapterFor falls through to the admitted overlay ─────
 
-test('executionAdapterFor falls through to an admitted execution adapter for a non-built-in host', () => {
+test('executionAdapterFor ignores an admitted execution adapter for a non-built-in host', () => {
+  registerAdmittedExecution(hermesManifest());
   assert.equal(executionAdapterFor('hermes'), null);
-  const registered = registerAdmittedExecution(hermesManifest());
-  assert.equal(executionAdapterFor('hermes'), registered);
 });
 
 // ── byte-zero pins (flag/overlay off vs on) ──────────────────────────────
@@ -587,12 +586,12 @@ test('byte-zero: with nothing admitted, executionAdapterFor is null and validate
   assert.ok(validateRoute({ host: 'acme' }).length > 0);
 });
 
-test('with the host + execution overlay applied, executionAdapterFor resolves and validateRoute accepts', () => {
+test('with the host and execution overlay applied, routing still refuses a non-built-in host', () => {
   const manifest = hermesManifest({ name: 'acme', host: validHost({ id: 'acme' }) });
   applyAdmitted([{ entry: manifest.host }]);
   registerAdmittedExecution(manifest);
 
-  assert.equal(isRoutableHost('acme'), true);
-  assert.deepEqual(validateRoute({ host: 'acme' }), []);
-  assert.notEqual(executionAdapterFor('acme'), null);
+  assert.equal(isRoutableHost('acme'), false);
+  assert.ok(validateRoute({ host: 'acme' }).length > 0);
+  assert.equal(executionAdapterFor('acme'), null);
 });

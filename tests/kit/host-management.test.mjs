@@ -28,14 +28,19 @@ test('enabled means exactly what pick --host reads as the current set', () => {
   assert.deepEqual(enabledHostIds({}), []);
 });
 
+test('an id the host registry does not know is not an enabled host', () => {
+  const cfg = { integrations: { hosts: { claude: true, hermes: true } } };
+  assert.deepEqual(enabledHostIds(cfg), ['claude']);
+});
+
 test('the enable hint is the complete host list, so running it never disables another host', () => {
   const cfg = (hosts) => ({ integrations: { hosts } });
   assert.equal(hostEnableCommand(cfg({ claude: true, codex: false, opencode: false }), 'codex'), 'ak host pick --host claude,codex');
   // The old hard-coded "--host claude,opencode" hint would have disabled codex here.
   assert.equal(hostEnableCommand(cfg({ claude: true, codex: true, opencode: false }), 'opencode'), 'ak host pick --host claude,codex,opencode');
   assert.equal(hostEnableCommand(cfg({ claude: false, codex: true, opencode: false }), 'claude'), 'ak host pick --host claude,codex');
-  // Admitted external hosts are part of the enabled set pick replaces; dropping one would disable it.
-  assert.equal(hostEnableCommand(cfg({ claude: true, gizmo: true }), 'codex'), 'ak host pick --host claude,codex,gizmo');
+  // A key for an id the host registry does not know is not a host: pick rejects it, so the hint omits it.
+  assert.equal(hostEnableCommand(cfg({ claude: true, gizmo: true }), 'codex'), 'ak host pick --host claude,codex');
   assert.equal(hostEnableCommand(cfg({}), 'codex'), 'ak host pick --host codex');
   assert.equal(hostEnableCommand(cfg({ claude: true, codex: true }), 'codex'), 'ak host pick --host claude,codex', 'no duplicate for an enabled host');
 });

@@ -148,8 +148,7 @@ const COMMAND_USAGE_ERRORS = [
   [['x', 'harvest', 'bogus', '--json'], /unexpected argument/],
   [['host', 'bogus', '--json'], /unknown host subcommand/],
   [['host', 'status', 'extra', '--json'], /unexpected argument/],
-  [['host', 'adapters', '--dry-run', '--json'], /has no preview/],
-  [['host', 'adapters', 'unknown', '--json'], /experimental host-adapter surface is disabled/],
+  [['host', 'adapters', '--json'], /unknown host subcommand: adapters \(status\|pick\|reset-routes\|off\|check-connection\|align\)/],
 ];
 
 for (const [args, message] of COMMAND_USAGE_ERRORS) {
@@ -165,18 +164,21 @@ for (const [args, message] of COMMAND_USAGE_ERRORS) {
 }
 
 for (const enabled of ['0', '1']) {
-  for (const verb of ['revoke', 'revoke-grant']) {
-    test(`ak host adapters ${verb} --json without a name is JSON with feature flag ${enabled}`, () => {
-      const child = ak(['host', 'adapters', verb, '--json'], { AK_EXPERIMENTAL_HOST_ADAPTERS: enabled });
-      const out = oneJson(child);
-      assert.equal(child.status, 2, child.stderr);
-      assert.deepEqual(Object.keys(out), ['error', 'exitCode']);
-      assert.equal(out.exitCode, 2);
-      assert.match(out.error, new RegExp(`usage: ak host adapters ${verb} <name>`));
-      assert.match(child.stderr, new RegExp(`usage: ak host adapters ${verb} <name>`));
-    });
-  }
+  test(`ak host adapters is an unknown subcommand even with the old feature flag set to ${enabled}`, () => {
+    const child = ak(['host', 'adapters', 'revoke', 'acme', '--json'], { AK_EXPERIMENTAL_HOST_ADAPTERS: enabled });
+    const out = oneJson(child);
+    assert.equal(child.status, 2, child.stderr);
+    assert.deepEqual(Object.keys(out), ['error', 'exitCode']);
+    assert.equal(out.exitCode, 2);
+    assert.match(out.error, /unknown host subcommand: adapters/);
+  });
 }
+
+test('ak x aqe-provider is an unknown command', () => {
+  const child = ak(['x', 'aqe-provider', 'acme']);
+  assert.equal(child.status, 2, child.stderr);
+  assert.match(child.stdout, /unknown plumbing command: aqe-provider/);
+});
 
 test('models rejects an unknown verb even when no snapshot exists', () => {
   const child = ak(['models', 'bogus', '--json']);

@@ -4,7 +4,6 @@ import { OPENCODE_EXECUTION_ADAPTER } from './opencode.mjs';
 import { CLAUDE_EXECUTION_ADAPTER } from './claude.mjs';
 import { CODEX_EXECUTION_ADAPTER } from './codex.mjs';
 import { routableHostIds } from '../adapters/index.mjs';
-import { admittedExecutionAdapterFor } from './admitted.mjs';
 
 export const EXECUTION_ADAPTERS = Object.freeze(new Map([
   ['claude', CLAUDE_EXECUTION_ADAPTER],
@@ -37,17 +36,9 @@ export function assertBuiltinAdaptersRoutable(routableIds = routableHostIds()) {
 
 assertBuiltinAdaptersRoutable();
 
-/** Merge seam (W1-B): resolve one host's execution adapter without exposing
- *  the underlying Map. Built-ins resolve here today; a later wave admits
- *  externally-registered adapters into this same lookup. Returns null for a
- *  host with no adapter wired yet — never throws, so callers can degrade a
- *  single worker instead of failing an entire run. */
+/** Resolve one host's execution adapter without exposing the underlying Map.
+ *  Returns null for a host with no adapter wired — never throws, so callers can
+ *  degrade a single worker (cli_unavailable) instead of failing an entire run. */
 export function executionAdapterFor(hostId) {
-  if (EXECUTION_ADAPTERS.has(hostId)) return EXECUTION_ADAPTERS.get(hostId);
-  // P2 (ADR-0031): an admitted external host whose manifest declared an
-  // execution block gets its adapter derived and registered at bootstrap
-  // (admission.mjs) into execution/admitted.mjs's overlay. A routable host
-  // with no execution block (or nothing admitted at all) still returns null
-  // here — the runner's existing cli_unavailable degradation, unchanged.
-  return admittedExecutionAdapterFor(hostId);
+  return EXECUTION_ADAPTERS.get(hostId) ?? null;
 }

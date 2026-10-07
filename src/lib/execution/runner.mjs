@@ -191,10 +191,8 @@ function validatePlan(plan) {
   }
 }
 
-// W1-B: an omitted `adapters` option resolves through the built-in merge
-// seam (executionAdapterFor) instead of a raw Map reference, so a future
-// externally-admitted adapter joins this same lookup without callers here
-// changing. Explicit injection (tests, callers with their own registry)
+// W1-B: an omitted `adapters` option resolves through the built-in lookup
+// (executionAdapterFor) instead of a raw Map reference. Explicit injection (tests, callers with their own registry)
 // still takes a Map or plain object, unchanged. Only `undefined` selects the
 // built-in seam: an explicit `null` disables ALL adapters (every worker
 // degrades cli_unavailable) rather than meaning "use defaults" — fail-safe,

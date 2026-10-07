@@ -245,13 +245,6 @@ test('ak host reset-routes --dry-run with nothing diverged is the existing no-op
   assert.match(r.all, /no seeded routes diverge/i);
 });
 
-test('ak host adapters list --dry-run refuses: adapters has no preview', (t) => {
-  const sb = sandbox(t);
-  const r = ak(sb, 'host', 'adapters', 'list', '--dry-run');
-  assert.equal(r.status, 2, r.all);
-  assert.match(r.all, /ak host adapters has no preview; run it without --dry-run/);
-});
-
 test('the reset-routes subcommand help documents the name and description on separate, aligned lines', (t) => {
   const sb = sandbox(t);
   const r = ak(sb, 'host', '--help');

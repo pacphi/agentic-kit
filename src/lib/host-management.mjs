@@ -5,6 +5,8 @@
 // `ak status` rows, `ak host status`, `ak about` and the dashboard (header
 // pill, health details, About, Hosts & Routing) all render these words.
 
+import { HOST_REGISTRY } from './adapters/registries.mjs';
+
 export const HOST_MANAGEMENT_LABELS = Object.freeze({
   managed: 'Managed by ak',
   found: 'Found, not managed',
@@ -35,11 +37,13 @@ export function hostManagement({ enabled, present }) {
   return { state, label: HOST_MANAGEMENT_LABELS[state] };
 }
 
-/** The enabled set exactly as `ak host pick` reads it when `--host` is omitted
- *  (parsePickInputFromFlags): every truthy `integrations.hosts` key, including
- *  admitted external hosts. */
+/** The enabled set exactly as `ak host pick` reads it when `--host` is omitted:
+ *  every truthy `integrations.hosts` key the host registry knows. A leftover key
+ *  for an id the registry does not know (a retired external host) stays on disk
+ *  but is not an enabled host, so it cannot block a provider-only retune. */
 export function enabledHostIds(cfg) {
-  return Object.entries(cfg?.integrations?.hosts ?? {}).filter(([, on]) => on).map(([id]) => id);
+  const known = new Set(HOST_REGISTRY.map((host) => host.id));
+  return Object.entries(cfg?.integrations?.hosts ?? {}).filter(([id, on]) => on && known.has(id)).map(([id]) => id);
 }
 
 const CANONICAL = ['claude', 'codex', 'opencode'];

@@ -5,7 +5,7 @@ import {
   AQE_CONSTRUCTIBLE_PROVIDERS, MODEL_CATALOG, MODEL_CATALOG_VERIFIED, modelChoices, formatModelHelp,
   resolveRoutes, seedActivityRoutes, policyToAgentOverrides, routedVendors, routingSummary,
   configuredPolicyToAgentOverrides, pruneRoutesForHosts, materializeRunPlan,
-  validateRoute, parseRouteSpecs,
+  validateRoute, parseRouteSpecs, ineligibleHostReason,
   RUN_TEMPLATE_NAMES,
 } from '../../src/lib/routing.mjs';
 
@@ -209,11 +209,22 @@ test('an explicit OpenCode route materializes for ak run', () => {
   assert.equal(plan.workers.find((worker) => worker.activity === 'implementation').host, 'opencode');
 });
 
-test('host-neutral run plan rejects a host without activity-routing capability', () => {
+test('host-neutral run plan rejects an unknown host and names the valid hosts', () => {
   const policy = { implementation: { host: 'zz-not-a-registered-host', provenance: 'user' } };
   assert.throws(
     () => materializeRunPlan(policy, { template: 'feature', task: 'x' }),
-    /route for "implementation" cannot materialize: host "zz-not-a-registered-host" requires canRouteActivities/,
+    /route for "implementation" cannot materialize: unknown host "zz-not-a-registered-host" \(expected: claude\|codex\|opencode\)/,
+  );
+});
+
+test('ineligibleHostReason separates an unknown host from a host without the routing capability', () => {
+  assert.equal(
+    ineligibleHostReason('hermes', { ok: false, reason: 'unknown-host' }),
+    'unknown host "hermes" (expected: claude|codex|opencode)',
+  );
+  assert.equal(
+    ineligibleHostReason('claude', { ok: false, reason: 'capability-canRouteActivities-required' }),
+    'host "claude" requires canRouteActivities',
   );
 });
 

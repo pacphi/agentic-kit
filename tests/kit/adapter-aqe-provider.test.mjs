@@ -1,10 +1,8 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
 import { bootstrapHostAdapters } from '../../src/lib/adapters/admission.mjs';
 import { resetAdmitted } from '../../src/lib/adapters/admitted.mjs';
@@ -21,9 +19,7 @@ import {
   runAdmittedAqeProvider,
   runAdmittedAqeProviderProbe,
 } from '../../src/lib/adapters/aqe-provider.mjs';
-import { sandboxConfigBase, spawnEnv } from './helpers/home-sandbox.mjs';
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+import { sandboxConfigBase } from './helpers/home-sandbox.mjs';
 
 beforeEach(() => {
   resetAdmittedAqeProviders();
@@ -491,26 +487,5 @@ test('evidence-first probe uses the production runner with a fixed bounded promp
     assert.equal(payload.model, 'default');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('hidden CLI transport never emits failure or drift diagnostics on stdout', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-provider-home-'));
-  try {
-    const result = spawnSync(process.execPath, [
-      path.join(ROOT, 'bin', 'agentic-kit.mjs'), 'x', 'aqe-provider', 'missing-provider', '--model', 'default',
-      '--expect-hash', 'a'.repeat(64), '--project-root', ROOT,
-    ], {
-      cwd: ROOT,
-      env: spawnEnv(home, { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' }),
-      input: 'prompt',
-      encoding: 'utf8',
-      timeout: 10_000,
-    });
-    assert.equal(result.status, 1);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /not active/);
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true });
   }
 });

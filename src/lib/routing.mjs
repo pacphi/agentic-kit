@@ -7,7 +7,7 @@
 // writers/UX that consume it live in providers.mjs / the commands.
 import { vendorOf } from './qeCourt.mjs';
 import {
-  routableHostIds, primaryHostIds, validateActivityHost, effectiveHostRegistry, effectiveRoutableHostIds,
+  routableHostIds, primaryHostIds, validateActivityHost, HOST_REGISTRY,
 } from './adapters/index.mjs';
 import { admittedAqeProviders } from './adapters/aqe-provider.mjs';
 
@@ -38,11 +38,9 @@ export function aqeProviderForHost(host) {
   const record = records.find((entry) => (entry.hostId ?? entry.host ?? entry.manifestId) === host);
   return record?.id ?? record?.providerId ?? record?.type ?? null;
 }
-// Frozen at import time — built-ins only. Display strings and built-in
-// listings ONLY (formatModelHelp, model catalogs below): every VALIDATION
-// path (isRoutableHost, validateRoute, materializeRunPlan) consults the lazy
-// effectiveRoutableHostIds()/effectiveHostRegistry() instead, so an admitted
-// external host routes without this constant ever needing to change.
+// Frozen at import time. Display strings and built-in listings (formatModelHelp,
+// model catalogs below); the validation paths (isRoutableHost, validateRoute,
+// materializeRunPlan) read the registry directly.
 export const HOSTS = routableHostIds();
 
 // Providers aqe's ProviderManager can construct — grounded in agentic-qe 3.13.1
@@ -228,20 +226,11 @@ export function formatModelHelp() {
 // reasoning roles). When codex is chosen as PRIMARY, we mirror each default route
 // to the opposite host so codex takes the lead and claude becomes the alternate —
 // a defaults/policy change only (DualModeOrchestrator workers are symmetric).
-// Frozen at import time — built-ins only, deliberately (audited for the D2
-// keystone wave, ADR-0031 §1). Every current reader of PRIMARY_HOSTS
-// (providers.mjs's applySetupHostFlags `--primary-host` validation, and
-// x/host.mjs's `ak host pick` primary-host flag + selection menu) is the
-// primary-host SELECTION UX, not an eligibility-VALIDATION path — extending
-// that picker surface to an admitted external host is explicitly out of
-// scope this wave (the deferred pick surface), mirroring how HOSTS above
-// stays display-only. hosts.mjs's drivingHost() does NOT use this constant —
-// it consults admitted.mjs's effectivePrimaryHostIds() (fresh per call)
-// instead, so the eligibility PRIMITIVE is live there. That said, no
-// production path drives kit.json's routing.primaryHost to an admitted
-// external id today (the picker that writes it stays built-in-only, as
-// above), so this is a live primitive with no live privileged caller yet —
-// not an active validation gate anything currently depends on.
+// Frozen at import time. Every reader of PRIMARY_HOSTS (providers.mjs's
+// applySetupHostFlags `--primary-host` validation, and x/host.mjs's `ak host
+// pick` primary-host flag and selection menu) is the primary-host selection UX.
+// hosts.mjs's drivingHost() does not use this constant; it calls
+// primaryHostIds() for its eligibility check.
 export const PRIMARY_HOSTS = primaryHostIds();
 export const DEFAULT_PRIMARY_HOST = 'claude';
 
@@ -312,12 +301,9 @@ export const AGENT_ACTIVITY_MAP = {
 
 // ── Policy resolution + projections (pure) ──────────────────────────────────
 
-/** True when `host` is routable: a built-in, or an admitted external host
- *  whose manifest declared capabilities.canRouteActivities (P2, ADR-0031).
- *  Lazy — re-reads the effective registry on every call, so it reflects an
- *  overlay applied after this module first loaded. */
+/** True when `host` is a built-in host that can route activities. */
 export function isRoutableHost(host) {
-  return effectiveRoutableHostIds().includes(host);
+  return routableHostIds().includes(host);
 }
 
 /** Substitute a retired model for its replacement, recording what was swapped.
@@ -648,6 +634,14 @@ export const RUN_TEMPLATES = {
 };
 export const RUN_TEMPLATE_NAMES = Object.keys(RUN_TEMPLATES);
 
+/** Why a host cannot take a route. An unknown id lists the valid hosts; a known
+ *  host without the capability names the capability. */
+export function ineligibleHostReason(host, eligibility) {
+  return eligibility.reason === 'unknown-host'
+    ? `unknown host "${host}" (expected: ${routableHostIds().join('|')})`
+    : `host "${host}" requires canRouteActivities`;
+}
+
 /**
  * Build a host-neutral execution plan. Each template node becomes a worker whose
  * host + model come from the policy's effective route for that node's activity.
@@ -657,17 +651,14 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
   const nodes = RUN_TEMPLATES[template];
   if (!nodes) throw new Error(`unknown template "${template}" (expected: ${RUN_TEMPLATE_NAMES.join(', ')})`);
   const routes = resolveRoutes(policy);
-  // Snapshot once per materialization (not per validateActivityHost call): an
-  // admitted overlay applied mid-call must not be able to make one worker's
-  // eligibility check see a different registry than another's in the same plan.
-  const hosts = effectiveHostRegistry();
+  const hosts = HOST_REGISTRY;
   return {
     template,
     workers: nodes.map((n) => {
     const r = routes[n.activity];
     const eligibility = validateActivityHost(r.host, hosts);
     if (!eligibility.ok) {
-      throw new Error(`route for "${n.activity}" cannot materialize: host "${r.host}" requires canRouteActivities`);
+      throw new Error(`route for "${n.activity}" cannot materialize: ${ineligibleHostReason(r.host, eligibility)}`);
     }
     // The escalation ladder travels with the worker (ADR-0019). Self-equal
     // rungs are dropped here (escalating to the same host+model would re-run
@@ -678,7 +669,7 @@ export function materializeRunPlan(policy = {}, { template = 'feature', task = '
       .map((rung) => {
         const rungEligibility = validateActivityHost(rung.host, hosts);
         if (!rungEligibility.ok) {
-          throw new Error(`escalation rung for "${n.activity}" cannot materialize: host "${rung.host}" requires canRouteActivities`);
+          throw new Error(`escalation rung for "${n.activity}" cannot materialize: ${ineligibleHostReason(rung.host, rungEligibility)}`);
         }
         return { host: rung.host, model: rung.model ?? null };
       });
@@ -732,7 +723,7 @@ export function routingSummary(policy = {}) {
 export function validateRoute(route = {}) {
   const { host, model } = route;
   const errs = [];
-  if (!isRoutableHost(host)) errs.push(`unknown host "${host}" (expected: ${effectiveRoutableHostIds().join('|')})`);
+  if (!isRoutableHost(host)) errs.push(`unknown host "${host}" (expected: ${routableHostIds().join('|')})`);
   else if (aqeProviderForHost(host) && !aqeConstructibleProviderTypes().includes(aqeProviderForHost(host))) errs.push(`host "${host}" maps to a non-constructible provider`);
   if (model != null && (typeof model !== 'string' || model.trim() === '')) errs.push('model must be a non-empty string');
   return errs;
