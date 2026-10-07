@@ -28,7 +28,7 @@ import {
 } from '../../lib/trust-manifest.mjs';
 import { have } from '../../lib/exec.mjs';
 import {
-  hostManagement, hostEnableCommand, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
+  hostManagement, hostEnableCommand, enabledHostIds, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
 } from '../../lib/host-management.mjs';
 import {
   ok, warn, fail, info, dim, bold, yellow, humanOutputToStderr, reportFailure,
@@ -589,7 +589,7 @@ async function maybeWriteQeCourtDefaults({ nonInteractive, cwd, enabled, aqeProv
 function parsePickInputFromFlags(flags, cfg) {
   const enabled = flags.host !== undefined
     ? flags.host.split(',').map((s) => s.trim()).filter(Boolean)
-    : Object.entries(cfg.integrations.hosts).filter(([, v]) => v).map(([k]) => k);
+    : enabledHostIds(cfg);
   let aqeProvider = cfg.providers.aqeProvider ?? null;
   if (flags['aqe-provider'] !== undefined) {
     const v = flags['aqe-provider'].trim().toLowerCase();

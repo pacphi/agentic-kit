@@ -359,6 +359,17 @@ test('a provider retune retires stale legacy Codex MCP while preserving current 
   }
 });
 
+test('a provider retune is not blocked by a leftover external host key in kit.json', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false, hermes: true } });
+  try {
+    const r = akPick(['x', 'host', 'pick', '--aqe-provider', 'openai', '--yes'], sb);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(kitJson(sb.home).providers.aqeProvider, 'openai', 'the retune landed');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
 test('host off clears the OpenCode catalog override after a successful teardown', () => {
   const sb = pickSandbox({
     hosts: { claude: true, codex: false, opencode: false },
