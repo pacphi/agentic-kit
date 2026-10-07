@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { run } from './exec.mjs';
+import { probeAqePatternIndex } from './aqe-pattern-index-probe.mjs';
 
 const CHILD = fileURLToPath(new URL('./aqe-embedding-probe-child.mjs', import.meta.url));
 const REASONS = new Set(['dimension-mismatch', 'semantic-smoke-failed', 'invalid-vectors',
@@ -25,9 +26,18 @@ function validEvidence(evidence) {
     && Number.isFinite(evidence.relatedSimilarity) && Number.isFinite(evidence.unrelatedSimilarity);
 }
 
-/** @param {{packageRoot?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number,backend?:string,allowDownload?:boolean,corpusPath?:string,modelCacheDir?:string}} options */
+/** The pattern-index check runs only on top of a passing embedder, and only an endpoint backend can bind the index. */
+async function addPatternIndex(outcome, { backend, packageRoot, env, endpoint, probe = probeAqePatternIndex }) {
+  if (outcome.status !== 'passed') return;
+  if (backend !== 'endpoint') { outcome.patternIndex = { status: 'unavailable', reason: 'backend-not-endpoint' }; return; }
+  try { outcome.patternIndex = await probe({ packageRoot, env: { AQE_EMBEDDER_ENDPOINT: endpoint, AQE_EMBEDDER_TOKEN: env.AQE_EMBEDDER_TOKEN } }); }
+  catch { outcome.patternIndex = { status: 'failed', reason: 'pattern-index-probe-failed' }; }
+}
+
+/** `verifyPatternIndex` adds the pattern-index check (agentic-qe#754) after a passing endpoint probe; it drives the installed `aqe` command, never AQE's unbundled modules.
+ * @param {{packageRoot?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number,backend?:string,allowDownload?:boolean,corpusPath?:string,modelCacheDir?:string,verifyPatternIndex?:boolean,patternIndexProbe?:typeof probeAqePatternIndex}} options */
 export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeoutMs = 30_000,
-  backend = 'endpoint', allowDownload = false, corpusPath, modelCacheDir }) {
+  backend = 'endpoint', allowDownload = false, corpusPath, modelCacheDir, verifyPatternIndex, patternIndexProbe }) {
   const endpoint = env.AQE_EMBEDDER_ENDPOINT;
   if (backend === 'endpoint' && !endpoint) return { status: 'not-configured', reason: 'embedding-endpoint-not-configured' };
   if (!['endpoint', 'in-process'].includes(backend)) return { status: 'invalid-config', reason: 'unsupported-backend' };
@@ -62,6 +72,7 @@ export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeo
           relatedSimilarity: evidence.relatedSimilarity, unrelatedSimilarity: evidence.unrelatedSimilarity, elapsedMs };
       } else outcome = { status: 'failed', reason: REASONS.has(evidence.reason) ? evidence.reason : 'invalid-probe-result', elapsedMs };
       if (corpusPath && evidence.corpus) outcome.corpus = evidence.corpus;
+      if (verifyPatternIndex) await addPatternIndex(outcome, { backend, packageRoot, env, endpoint, probe: patternIndexProbe });
       return outcome;
     } catch { return { status: 'failed', reason: 'invalid-probe-result', elapsedMs }; }
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }

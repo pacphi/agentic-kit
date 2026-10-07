@@ -858,6 +858,23 @@ test('a passing live embedding request says the embedder is verified, not the pa
   assert.match(out, /✓ embedder verified: live embedding request passed; dimension=384; AQE pattern index binding unverified \(agentic-qe#754\)/);
 });
 
+
+test('the live embedding request asks for the pattern-index check and reports what it found', async () => {
+  seedHome(offlineKitConfig({ aqeEmbedding: MANAGED_EMBEDDING }));
+  const asked = [];
+  const result = (patternIndex) => async (options) => { asked.push(options.verifyPatternIndex); return { status: 'passed', reason: null, dimension: 384, ...(patternIndex ? { patternIndex } : {}) }; };
+  const verified = await captureLog(() => live.checkAqeEmbedding({ cwd: PROJECT, corpus: false, probe: result({ status: 'passed' }) }));
+  assert.match(verified.out, /✓ embedder verified: live embedding request passed; dimension=384; AQE pattern index binding verified \(agentic-qe#754\)/);
+  const lexical = await captureLog(() => live.checkAqeEmbedding({ cwd: PROJECT, corpus: false, probe: result({ status: 'failed', reason: 'lexical-fallback' }) }));
+  assert.match(lexical.out, /dimension=384; AQE pattern index binding unverified \(agentic-qe#754; lexical-fallback\)/);
+  assert.deepEqual(asked, [true, true]);
+});
+
+test('the remembered outcome of the aqe-embedding check carries the pattern-index value', async () => {
+  const { embeddingProbeOutcome } = await import('../../src/lib/live-check-evidence.mjs');
+  assert.deepEqual(embeddingProbeOutcome({ status: 'passed', patternIndex: { status: 'passed' } }), { status: 'passed', reason: null, patternIndex: 'verified' });
+});
+
 test.after(() => rmrf(HOME, PROJECT));
 
 // Provider checks run from the project root, whatever folder `ak status` starts

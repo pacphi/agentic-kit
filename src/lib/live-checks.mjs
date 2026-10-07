@@ -28,7 +28,7 @@ import { HOSTS, collectIntegrationFacts, aqeRouterFile, aqeExternalProviderState
 import { readJson } from './settings.mjs';
 import { runHarvest } from './harvest.mjs';
 import { ok, warn, fail, info, heading, captureOutput } from './output.mjs';
-import { rememberLiveCheck, liveCheckInputsKey, embeddingProbeOutcome } from './live-check-evidence.mjs';
+import { rememberLiveCheck, liveCheckInputsKey, embeddingProbeOutcome, describePatternIndex, patternIndexValue } from './live-check-evidence.mjs';
 import { LIVE_CHECK_IDS, SLOW_PROOF_IDS } from './refresh.mjs';
 
 export { LIVE_CHECK_IDS, SLOW_PROOF_IDS };
@@ -294,10 +294,10 @@ export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.c
   const resolved = resolveAqeEmbedding(cfg);
   const embedding = aqeEmbeddingConfiguration({ env: resolved.env });
   const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
-  const live = await probe({ packageRoot: aqeRoot(), env: resolved.env, backend,
+  const live = await probe({ packageRoot: aqeRoot(), env: resolved.env, backend, verifyPatternIndex: true,
     ...(corpus ? { corpusPath: path.join(projectAqeDir(cwd), 'memory.db') } : {}) });
-  // A pass proves the embedder, not AQE's pattern index binding (agentic-qe#754).
-  if (live.status === 'passed') ok(`embedder verified: live embedding request passed; dimension=${live.dimension ?? 'unknown'}; AQE pattern index binding unverified (agentic-qe#754)`);
+  // A pass proves the embedder; the pattern index (agentic-qe#754) is verified only when its own check bound it.
+  if (live.status === 'passed') ok(`embedder verified: live embedding request passed; dimension=${live.dimension ?? 'unknown'}; ${describePatternIndex(patternIndexValue(live.patternIndex))}`);
   else fail(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
   return live;
 }
