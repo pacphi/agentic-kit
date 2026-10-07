@@ -4,22 +4,6 @@ This is the canonical compatibility reference for agentic-kit's three **built-in
 execution hosts. It compares the host itself, Ruflo, agentic-qe (AQE), and
 RuvNet Brain without treating those independent layers as interchangeable.
 
-Behind an experimental flag, agentic-kit can also admit **external host adapters**
-that extend this set with a host not shipped in-tree — see
-[External host adapters](providers.md#external-host-adapters-experimental),
-[Using Hermes through the external adapter](https://github.com/pacphi/agentic-kit/blob/main/docs/hermes-host-adapter.md),
-[authoring-host-adapters.md](https://github.com/pacphi/agentic-kit/blob/main/docs/authoring-host-adapters.md),
-[ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md), and
-[ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md). An admitted
-external host picks up the same capability-driven treatment described here, but it
-is not one of the three built-ins this reference compares. It can never
-**self-declare** primary-host, AQE-provider, or status-line status — that ban is
-permanent — while `canBePrimary`, `aqeProvider`, and `commandStatusline` are
-**earnable** through a passed conformance tier plus an explicit maintainer grant.
-The AQE path requires Agentic-QE 3.13.12 or newer. See
-[External host adapters](#external-host-adapters) below for what a grant does and
-does not buy today.
-
 Evidence cutoff: **2026-08-26**. The comparison was checked against agentic-kit
 `4.0.0-alpha.36`, Ruflo `3.34.0`, agentic-qe `3.13.x`, RuvNet Brain `4.0.7`,
 Claude Code `2.1.222`, Codex CLI `0.146.0`, and OpenCode `1.18.x`. Host and
@@ -176,7 +160,7 @@ not close that evidence gap.
 | Agents and skills | Native/default assets | Native Codex-compatible assets | Upstream OpenCode agent/skill assets when that platform is initialized |
 | MCP server | Supported | Supported | Supported upstream |
 | Subscription inference provider | `claude-code` | AQE upstream includes `codex` | None |
-| Direct `ak --aqe-provider` selection | `claude-code` | `codex` | No built-in id; an admitted external adapter may earn its own id |
+| Direct `ak --aqe-provider` selection | `claude-code` | `codex` | No built-in id |
 | Activity `agentOverrides` | Yes | Yes | No |
 | Default route projection | Yes | Yes | No |
 | QE-Court routed seat | Full routed role | Supported, with the integrated stall risk below | May call QE tools, but cannot be an AQE provider-backed seat |
@@ -194,9 +178,6 @@ by `ak sync` once neither applies.
 The OpenCode boundary is precise: AQE can provision OpenCode agents, skills, MCP,
 and permissions, but OpenCode is not a built-in AQE LLM-provider type. Agentic-kit
 therefore does not infer an AQE provider from the built-in OpenCode host/model route.
-An independently admitted adapter may declare a separate candidate under its own
-`host.id`, pass the `aqe-provider` tier, and receive an `aqeProvider` grant; that is
-earned provider support, not inference from the OpenCode name.
 
 Current AQE includes a subscription-backed `codex` provider. Agentic-kit accepts
 `ak host pick --aqe-provider codex`, admits Codex fallback rungs, enables Codex
@@ -327,8 +308,7 @@ MCP/plugin changes and keep generated guidance concise.
 ### OpenCode
 
 Built-in OpenCode remains non-primary, is never automatically routed, has no AQE
-provider identity, and has no native Brain plugin or managed status line. A separately admitted
-adapter may earn its own external provider id; that does not change the built-in descriptor. Operational risks
+provider identity, and has no native Brain plugin or managed status line. Operational risks
 include local MCP servers dropping during `serve`
 ([opencode #38266](https://github.com/anomalyco/opencode/issues/38266)), nested
 permission prompts hanging ([#13715](https://github.com/anomalyco/opencode/issues/13715)),
@@ -336,43 +316,6 @@ subagent permission rules being ignored
 ([#33223](https://github.com/anomalyco/opencode/issues/33223)), and global
 `AGENTS.md` guidance being forgotten
 ([#40348](https://github.com/anomalyco/opencode/issues/40348)).
-
-## External host adapters
-
-An external adapter is data, not code: a hash-pinned manifest plus subprocess
-hooks, admitted only behind `AK_EXPERIMENTAL_HOST_ADAPTERS=1` and only after
-`ak host adapters trust <name>` discloses the full validated manifest and records
-your consent. `contract: 1` is still experimental and **not frozen** — the freeze
-waits on a real external adapter clearing the conformance kit and soaking.
-
-`ak host adapters conformance <name>` reports each graduation tier honestly:
-
-| Tier | Status today | Gates | Why |
-| --- | --- | --- | --- |
-| `admission` | Genuinely passes | — | Manifest validation and consent are built |
-| `session-driving` | **Gated** | — | Being a native Ruflo backend is upstream's to grant |
-| `activity-routing` | Genuinely passes | — | Real supervised subprocess worker via `ak run` |
-| `aqe-provider` | Genuinely passes | `aqeProvider` | Real admitted stdin/stdout hook; projects through AQE 3.13.12+ |
-| `primary-eligible` | Genuinely passes | `canBePrimary` | Observes a real escalation |
-| `statusline` | **Gated** | `commandStatusline` | `ak` has no render surface for it yet |
-
-The two gated tiers are honest ceilings, not failures — they report `gated` or
-`skipped` and never `passed`, with `ak host adapters gate <name> <tier> <repo>#NNN`
-recording the upstream issue each waits on.
-
-What a maintainer grant (`ak host adapters grant`, alias `bless`) buys today, stated
-narrowly: the capability goes live in the effective host registry from the next
-flagged invocation, so the host's tier label reflects it and it joins
-primary-eligibility. No path yet **selects** an external host as primary — `ak host
-pick` stays built-in-scoped — and `commandStatusline` has no runtime reader, so a
-granted `commandStatusline` is currently inert. Grants are withdrawable with
-`revoke-grant`, and every tier result is stale-marked the moment the manifest
-changes.
-
-A graduated adapter ends in one of two places: a **blessed external adapter** that
-stays out-of-tree holding exactly the capabilities its tiers earned, or a
-**promoted built-in** whose descriptor a maintainer adopts as a first-party registry
-entry — an ordinary pull request, not a command.
 
 ## Known contract discrepancies
 
@@ -385,7 +328,7 @@ label:
    stale.
 2. “OpenCode is outside AQE” means the built-in OpenCode descriptor has no AQE
    provider identity. It does not mean AQE lacks OpenCode platform agents, skills,
-   or MCP support, or that a separately admitted adapter cannot earn an external id.
+   or MCP support.
 
 The governing decisions currently stand as follows: ADR-0017 and ADR-0018 are
 **Accepted** and were amended on 2026-08-04 and 2026-07-30 respectively;
@@ -393,12 +336,7 @@ ADR-0020 is **Implemented** as of 2026-07-30; ADR-0021 is **Accepted** and was
 updated 2026-08-03. See [ADR-0017](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0017-opencode-host.md),
 [ADR-0018](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0018-generalized-host-worker-execution.md),
 [ADR-0020](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0020-ga-stable-surfaces.md), and
-[ADR-0021](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0021-inference-provider-provenance.md). For the external-adapter
-section above, [ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md) is the
-extension point and [ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md)
-amends it with capability graduation — replacing ADR-0029's permanent
-capability caps with the earn-then-grant model, except for the permanent ban on
-self-declaring them.
+[ADR-0021](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0021-inference-provider-provenance.md).
 
 ## Operational guidance
 
@@ -406,8 +344,7 @@ self-declaring them.
   worker plan.
 - Use `ak models refresh` to capture host-scoped model evidence, then
   `ak models status|diff|explain|plan` for offline lifecycle and swap analysis. Claude, Codex,
-  OpenCode, and Ollama have registry-selected explicit source adapters; an external host receives no
-  inferred catalogue capability without an admitted descriptor and matching adapter.
+  OpenCode, and Ollama have registry-selected explicit source adapters.
 - Use Claude or Codex as primary. Choose based on which should lead the mirrored
   activity defaults, not on MCP availability alone.
 - Route OpenCode explicitly for bounded work whose `provider/model` and repository

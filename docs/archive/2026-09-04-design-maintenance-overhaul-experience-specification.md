@@ -386,7 +386,7 @@ project discovery is a policy toggle, not an extra filesystem root in the covera
 
 The filter rail keeps **Hosts** (Claude, Codex, OpenCode) separate from **Adapters**
 (external host integrations, including Hermes). This follows [Host support](../host-support.md)
-and the [Hermes external adapter guide](../hermes-host-adapter.md). An adapter filter counts
+and the Hermes external adapter guide. An adapter filter counts
 associated inventory resources; a zero count does not assert installation, admission, trust,
 or runtime health. Existing preview and capability gates continue to govern actions.
 

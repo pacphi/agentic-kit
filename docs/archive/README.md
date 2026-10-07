@@ -56,8 +56,8 @@ The twelve relocation artifacts found by the metadata audit for issue 211 were r
 | shell-kit README:352 | `docs/archive` | [Archive index](README.md) | The archive index is this file |
 | shell-kit troubleshooting:320 | `archive/2026-06-token-consumption-incident.md` | [June incident](2026-06-token-consumption-incident.md) | Same file, same folder |
 | shell-kit troubleshooting:321 | `archive/2026-06-11-token-consumption-recurrence.md` | [June recurrence](2026-06-11-token-consumption-recurrence.md) | Same file, same folder |
-| host-extensibility explainer:227 | `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
-| host-extensibility explainer:679 | `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../authoring-host-adapters.md) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
+| host-extensibility explainer:227 | `AUTHORING-HOST-ADAPTERS.md` | Current adapter authoring (removed in 4.0.0-beta.1) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
+| host-extensibility explainer:679 | `AUTHORING-HOST-ADAPTERS.md` | Current adapter authoring (removed in 4.0.0-beta.1) | Original file was `docs/HOST-EXTENSIBILITY-EXPLAINER.html` |
 | daemon-statusline spec:6 | `https://github.com/pacphi/ruflo-machine-ref/issues/3` | unlinked | Online check returned 404; no successor found |
 
 External links and upstream resolution claims are retained as historical evidence and were not

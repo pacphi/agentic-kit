@@ -32,21 +32,18 @@ changes with the behavior it describes. Subfolders have one purpose.
 | [AQE embeddings](aqe-embeddings.md) | AQE embedding backend selection and recovery |
 | [Codex status line](codex-statusline.md) | Managed Codex status line |
 | [Dev containers](devcontainers.md) | Development container configurations |
-| [Hermes host adapter](hermes-host-adapter.md) | External host-adapter contract |
 | [Codex usage diagnostic](codex-usage-diagnostic.md) | Usage-parser verification |
 
 ## Extending and maintaining ak
 
 | Guide | Covers |
 | --- | --- |
-| [Authoring host adapters](authoring-host-adapters.md) | Adding an agent CLI |
 | [Maintainer's guide](maintainer.md) | Architecture, testing, branching and releases |
 | [Managed tools](managed-tools.md) | Managed-tool install/update/display contract |
 | [Transcripts](transcripts.md) | Transcript pipeline and session detail |
 | [Usage scorecard metrics](usage-scorecard-metrics.md) | Scorecard formulae and evidence |
 | [Upstream watch](upstream-watch.md) | Registry and upstream monitor |
 | [Maintenance acceptance](maintenance-acceptance.md) | Requirements and open release gates |
-| [Host-adapter freeze checklist](host-adapter-freeze-checklist.md) | Evidence for adapter contract freeze |
 | [Local model validation](local-model-validation.md) | Protocol for ADR-0011 |
 | [Language coverage](language-coverage.md) | Language-detection baseline |
 | [Language logos](language-logos.md) | Bundled language-logo sources and licenses |
