@@ -105,3 +105,4 @@
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2889 reply 2026-10-08 by=ruvnet at=22:01:22Z","id":"ruvnet/ruflo#2889","event":"reply","date":"2026-10-08","fields":{"by":"ruvnet","at":"22:01:22Z"},"recordedAt":"2026-10-09T14:33:19Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2889 closed 2026-10-08 reason=completed","id":"ruvnet/ruflo#2889","event":"closed","date":"2026-10-08","fields":{"reason":"completed"},"recordedAt":"2026-10-09T14:33:19Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2889 released 2026-10-08 version=3.56.0 pr=3906","id":"ruvnet/ruflo#2889","event":"released","date":"2026-10-08","fields":{"version":"3.56.0","pr":3906},"recordedAt":"2026-10-09T14:33:19Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#2638 stale 2026-07-11","id":"ruvnet/ruflo#2638","event":"stale","date":"2026-07-11","fields":{},"recordedAt":"2026-10-10T14:26:39Z"}
