@@ -89,6 +89,20 @@ test('fallback retirement keeps a default the user chose from the old chain', (t
   assertByteAndMtimeStable(dir, () => applyAqeRouter(cfg({ chain: [] }), dir));
 });
 
+test('an explicitly chosen AQE provider becomes the default, ahead of the first chain rung', (t) => {
+  fakeAqe(t);
+  const dir = project(t);
+  const chain = [
+    { provider: 'codex', models: ['gpt-5.6'] },
+    { provider: 'ollama', models: ['qwen'] },
+  ];
+  assert.equal(applyAqeRouter(cfg({ provider: 'ollama', chain }), dir).ok, true);
+  const disk = readRouter(dir);
+  assert.equal(disk.defaultProvider, 'ollama');
+  assert.equal(disk._agenticKit.fallbackDefaultProvider.provider, 'ollama');
+  assert.deepEqual(disk.fallbackChain.entries.map((entry) => entry.provider), ['codex', 'ollama']);
+});
+
 test('a malformed fallback receipt is relinquished without deleting user values or throwing', (t) => {
   fakeAqe(t);
   const dir = project(t);
@@ -129,4 +143,28 @@ test('a router file that only holds receipts for removed external providers is l
   assert.equal(result.ok, true, result.detail);
   assert.equal(result.changed, false);
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'removed external entries are inert data, never rewritten');
+});
+
+test('removed external provider entries survive a router rewrite untouched', (t) => {
+  fakeAqe(t);
+  const dir = project(t);
+  const file = aqeRouterFile(dir);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const external = {
+    _agenticKit: {
+      externalDefaultProvider: { provider: 'hermes', writtenHash: 'x' },
+      externalProviders: { hermes: { writtenHash: 'x', providerWrittenHash: 'y' } },
+    },
+    externalProviders: { hermes: { kind: 'cli', command: ['hermes'] } },
+  };
+  fs.writeFileSync(file, JSON.stringify({ _managedBy: 'agentic-kit', ...external, providers: { hermes: { enabled: true } } }));
+
+  const result = applyAqeRouter(cfg(), dir);
+  const disk = readRouter(dir);
+  assert.equal(result.ok, true, result.detail);
+  assert.equal(disk.defaultProvider, 'codex', 'the router really did rewrite the file');
+  assert.deepEqual(disk.externalProviders, external.externalProviders);
+  assert.deepEqual(disk._agenticKit.externalDefaultProvider, external._agenticKit.externalDefaultProvider);
+  assert.deepEqual(disk._agenticKit.externalProviders, external._agenticKit.externalProviders);
+  assert.deepEqual(disk.providers.hermes, { enabled: true });
 });

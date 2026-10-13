@@ -381,7 +381,7 @@ test('Codex does not apply the Stop output contract to another lifecycle event',
 
 test('structured argv boundaries remain material to occurrence identity', () => {
   const source = {
-    file: '/fixture/adapter.json', digest: 'a'.repeat(64), sourceKind: 'external-adapter-manifest',
+    file: '/fixture/adapter.json', digest: 'a'.repeat(64), sourceKind: 'project',
     authority: 'operator-configured', generatedStatus: 'direct', owner: 'fixture', baseDir: '/fixture',
   };
   const first = normalizedOccurrence({

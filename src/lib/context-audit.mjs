@@ -10,7 +10,7 @@ export const CONTEXT_AUDIT_HOSTS = Object.freeze(['claude', 'codex', 'opencode']
 const HEALTH = new Set(['complete', 'partial', 'unavailable', 'not-recorded', 'unsupported']);
 const PROVENANCE = new Set([
   'runtime-observed', 'host-configured', 'provider-catalog',
-  'adapter-declared', 'configured-fallback',
+  'configured-fallback',
 ]);
 const INSTALLATION_STATES = new Set([
   'absent', 'user-authored-only', 'upstream-managed-only',

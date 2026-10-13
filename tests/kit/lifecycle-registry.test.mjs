@@ -89,15 +89,11 @@ for (const rel of [
   });
 }
 
-// ── P3: the loop bodies are now shape-agnostic (ADR-0031 P3) ───────────────
-// setup.mjs/sync.mjs/uninstall.mjs's lifecycle loops used to destructure an
-// opencode-shaped result (stack.oc / ret.undo / ret.artifacts) directly,
-// which is why they stuck to builtinHostsWithLifecycle() (built-ins only).
-// This wave routes every loop through lifecycle-render.mjs's shape-dispatching
-// renderer instead, so they now iterate hostsWithLifecycle() (built-ins +
-// admitted) safely, gated per-host by lifecycleExecutionEnabled — an admitted
-// host is never exercised without BOTH cfg enablement and the experimental
-// flag, so this never auto-enables anything.
+// ── the loop bodies are shape-agnostic ─────────────────────────────────────
+// setup.mjs/sync.mjs/uninstall.mjs render every runLifecycle result through
+// lifecycle-render.mjs's shape-dispatching renderer and iterate
+// hostsWithLifecycle(). setup and sync gate each host on lifecycleExecutionEnabled
+// (cfg enablement); uninstall tears down every lifecycle host.
 for (const [rel, gated] of [['commands/sync.mjs', true], ['commands/setup.mjs', true], ['commands/uninstall.mjs', false]]) {
   test(`${rel} loops hostsWithLifecycle()${gated ? ' gated by lifecycleExecutionEnabled' : ' without a config gate'}`, () => {
     const text = src(rel);
@@ -158,11 +154,7 @@ test('hostsWithLifecycle() ignores a registered admitted lifecycle host, and ope
   }
 });
 
-// ── ADR-0031 P3: execution-eligibility helpers ──────────────────────────────
-// isBuiltinHost / lifecycleExecutionEnabled / detectionBinFor are what let
-// setup.mjs/sync.mjs/uninstall.mjs iterate hostsWithLifecycle() safely: the
-// gate that keeps an admitted host opt-in (cfg enablement AND the
-// experimental flag), and the CLI-presence probe name for each shape.
+// ── fixtures for the admitted-adapter builder tests ────────────────────────
 
 function hermesHost(overrides = {}) {
   return {

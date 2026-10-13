@@ -107,7 +107,8 @@ export async function collectContextAudit({
   const hosts = selectedContextHosts(flags.host);
   const cfg = loadConfigFn();
   const hookAudit = hookCollectorFn({
-    flags: { ...flags, host: hosts },
+    // The unexpanded list: collectHookAudit loads the kit config only for `all`.
+    flags: { ...flags, host: flags.host?.length ? flags.host : ['all'] },
     loadConfigFn: () => cfg,
   });
   const evidence = await evidenceCollectorFn({ hosts, cfg, pkgRoot, cwd, hookAudit });

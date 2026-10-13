@@ -2,13 +2,13 @@
 
 ## Status
 
-**Approved** (2026-10-07). The maintainer approved the plan in chat with the recommendation on each of D1
-to D5. Plan for pull request B of three for card P0-04, issue
+**Executed on the branch, not pushed** (2026-10-13). The maintainer approved the plan on 2026-10-07 with the
+recommendation on each of D1 to D5. Plan for pull request B of three for card P0-04, issue
 [#324](https://github.com/pacphi/agentic-kit/issues/324). Pull request A is merged
-([#468](https://github.com/pacphi/agentic-kit/pull/468), `main` at `3d0e1142`). No code is written for B.
-The plan is checked by inventory and spot checks only. It has **not** been dry-run or replayed (see
-[How this plan was checked](#how-this-plan-was-checked)). Next: the edit script and a replay in a second
-worktree, then the maintainer's go-ahead before any push.
+([#468](https://github.com/pacphi/agentic-kit/pull/468)). Tasks 1 to 5 are committed on
+`refactor/324-pr-b-detach-consumers`, rebased onto `main` at `d8e02003`; Task 6 ran the full gate and a
+fresh whole-branch review, and its findings are fixed. The edits were applied from recorded edit scripts but
+**not** replayed into a second worktree. Next: the maintainer's go-ahead to push and open the pull request.
 
 **Goal:** after B, no built-in code reads the admitted-host overlay, so pull request C can delete the
 adapter cluster without touching a built-in file. Claude Code, Codex and OpenCode behave exactly as before.

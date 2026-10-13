@@ -18,7 +18,6 @@ const TRUSTED_PROVENANCE = new Set([
   'runtime-observed',
   'host-configured',
   'provider-catalog',
-  'adapter-declared',
   'configured-fallback',
 ]);
 

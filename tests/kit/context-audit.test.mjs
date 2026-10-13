@@ -268,3 +268,16 @@ test('ak audit context supports JSON and concise text through an injected read-o
   assert.match(text.stdout, /hooks 3 occurrence\(s\), 2 Stop/);
   assert.doesNotMatch(text.stdout, /private|secret command/);
 });
+
+test('the embedded hook audit receives the unexpanded host list, so the kit config loads only for all', async () => {
+  const seen = [];
+  const { collectContextAudit } = await import('../../src/commands/audit.mjs');
+  const common = {
+    flags: {}, loadConfigFn: () => ({}),
+    hookCollectorFn(options) { seen.push(options.flags.host); return { reports: {} }; },
+    evidenceCollectorFn: async () => ({ guidance: {}, windows: {}, skills: {}, mcp: {}, hookAudit: null }),
+  };
+  await collectContextAudit(common).catch(() => {});
+  await collectContextAudit({ ...common, flags: { host: ['codex'] } }).catch(() => {});
+  assert.deepEqual(seen, [['all'], ['codex']]);
+});

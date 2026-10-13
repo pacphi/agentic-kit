@@ -109,11 +109,11 @@ test('hook findings group across hosts and lifecycle points, then sort by import
           code: 'probable-timeout-unit-mismatch', severity: 'warning' }),
       ], summary: {}, coverage: { status: 'partial', gaps: [] }, plan: [],
     },
-    external: {
+    opencode: {
       records: [
-        record({ occurrenceId: 'h-stop', behaviorFingerprint: 'h-stop-b', host: 'hermes', event: 'lifecycle.stop',
+        record({ occurrenceId: 'h-stop', behaviorFingerprint: 'h-stop-b', host: 'opencode', event: 'session.stop',
           code: 'probable-timeout-unit-mismatch', severity: 'warning' }),
-        record({ occurrenceId: 'h-review', behaviorFingerprint: 'h-review-b', host: 'hermes', event: 'lifecycle.stop',
+        record({ occurrenceId: 'h-review', behaviorFingerprint: 'h-review-b', host: 'opencode', event: 'session.stop',
           code: 'dynamic-shell', severity: 'review', category: 'security' }),
       ], summary: {}, coverage: { status: 'partial', gaps: [] }, plan: [],
     },
@@ -123,9 +123,9 @@ test('hook findings group across hosts and lifecycle points, then sort by import
   assert.equal(model.findings[0].code, 'probable-timeout-unit-mismatch');
   assert.equal(model.findings[0].affectedDefinitions, 3);
   assert.deepEqual(model.findings[0].placements.map((placement) => placement.lifecyclePoint),
-    ['PostToolUse', 'Stop', 'lifecycle.stop']);
+    ['PostToolUse', 'Stop', 'session.stop']);
   assert.deepEqual(model.findings[0].placements.map((placement) => placement.host),
-    ['claude', 'claude', 'hermes']);
+    ['claude', 'claude', 'opencode']);
   assert.equal(model.findings[1].severity, 'review');
 });
 

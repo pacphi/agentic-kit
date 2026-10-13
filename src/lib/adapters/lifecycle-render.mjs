@@ -1,10 +1,8 @@
 // Shape-agnostic lifecycle report renderer (ADR-0031 P3). setup.mjs, sync.mjs
 // and uninstall.mjs used to destructure a runLifecycle() result directly
 // (stack.oc/.plugin/.agents/.skill for apply, ret.undo/.artifacts for undo) —
-// a shape only OPENCODE_LIFECYCLE_ADAPTER produces. That worked only because
-// the command loops iterated builtinHostsWithLifecycle() (opencode-only).
-// Now that the loops iterate hostsWithLifecycle() (built-ins + admitted
-// externals — see lifecycle-registry.mjs), an admitted host's adapter
+// a shape only OPENCODE_LIFECYCLE_ADAPTER produces. The command loops iterate
+// hostsWithLifecycle() (see lifecycle-registry.mjs), so a lifecycle host's adapter
 // (buildAdmittedLifecycleAdapter) returns the GENERIC lifecycleResult shape
 // instead ({ok, changed, facts, actions, ownership, warnings, errors} — see
 // lifecycle.mjs) and the raw destructure would throw on `stack.oc`. This
