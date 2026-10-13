@@ -44,6 +44,10 @@ const FINDINGS = Object.freeze({
     title: 'Stop output is not host-compatible',
     explanation: 'This generated Ruflo AutoMemory handler writes human-readable status lines to Codex Stop stdout, where the host requires an empty response or one valid hook JSON object.',
   }),
+  'ruflo-pre-bash-exit-not-blocking': Object.freeze({
+    title: 'Dangerous-command check does not block',
+    explanation: 'This project\'s Ruflo helper prints [BLOCKED] but exits 1, which Claude Code treats as a non-blocking error, so the command still runs. Ruflo 3.51.1 is the first release that exits 2; update Ruflo and run ruflo init upgrade in the project.',
+  }),
   'session-end-timeout-clamped': Object.freeze({
     title: 'Declared timeout exceeds the host limit',
     explanation: 'Codex applies a lower effective timeout than this SessionEnd definition declares.',

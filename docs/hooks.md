@@ -77,6 +77,13 @@ compatibility separate from trust, consent, grants, reachability, and organizati
 - `never-automatic`: unrecognized generated targets, plugin caches, opaque modules, trust
   bypasses, unsupported schemas, unsafe files, or unproven ownership.
 
+`ak audit hooks --host claude` also reads a project's `.claude/helpers/hook-handler.cjs`
+without running it. If its `pre-bash` path prints `[BLOCKED]` but does not exit 2, the
+audit reports an `upstream-required` finding: Claude Code blocks a command only on exit 2,
+so the command still runs. Ruflo `3.51.1` is the first release whose helper exits 2. The
+fix is to update Ruflo and run `ruflo init upgrade` in the project; agentic-kit does not
+edit the helper.
+
 Executable recipes cover canonical user-owned JSON for exact Codex CLI `0.151.0`,
 `0.152.1`, and `0.153.2`, plus Claude Code `2.1.258` and `2.1.266`, `SessionEnd` timeout normalization.
 Under the exact Codex `0.152.1` profile, the planner can also retire the frozen legacy Ruflo

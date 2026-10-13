@@ -1,5 +1,6 @@
 import os from 'node:os';
 import { auditAqeArtifacts } from '../aqe-artifacts.mjs';
+import { auditRufloPreBash } from '../ruflo-pre-bash.mjs';
 import path from 'node:path';
 
 import {
@@ -294,7 +295,9 @@ export function auditClaudeHooks({
   const records = sources.flatMap((source) => recordsFrom(source, claudeVersion)).sort((a, b) => a.source.file.localeCompare(b.source.file) || a.event.localeCompare(b.event));
   const artifacts = auditAqeArtifacts(projectRoots);
   sources.push(...artifacts.sources);
-  const plan = [...remediation(records), ...artifacts.plan];
+  const helpers = auditRufloPreBash(projectRoots);
+  sources.push(...helpers.sources);
+  const plan = [...remediation(records), ...artifacts.plan, ...helpers.plan];
   const gaps = [
     'Claude runtime selection, organization policy, and trust decisions are not inferred from static files',
     'Skill, subagent, and session-defined hooks outside settings/plugin manifests are reported only when declared through an inspected plugin hook document',
