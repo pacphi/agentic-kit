@@ -32,7 +32,6 @@ const PROVIDER_POLICIES = Object.freeze({
     trustImpact: 'Claude permission, managed-policy, and review state remain separate and may require user review after the bytes change.',
   }),
   opencode: Object.freeze({ version: '1.18.25', executableRecipes: false }),
-  external: Object.freeze({ executableRecipes: false }),
 });
 
 function publicAction(action) {

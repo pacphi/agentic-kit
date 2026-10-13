@@ -144,23 +144,6 @@ test('hook read model never fabricates an inspectable source reference', () => {
     'an unresolvable placement must render Location unavailable, never a broken Inspect source button');
 });
 
-test('adapter records retain their concrete host identity and unknown runtime stays unknown', () => {
-  const model = buildHookDashboardReadModel({ audit: { reports: { external: {
-    sources: [], plan: [], summary: { sources: 0, invalidSources: 0, hookOccurrences: 1, uniqueBehaviors: 1 },
-    coverage: { status: 'partial', gaps: [] }, records: [{
-      occurrenceId: 'hermes-1', behaviorFingerprint: 'hermes-b', host: 'hermes',
-      event: 'lifecycle.stop', type: 'argv-subprocess', matcher: '', handler: {}, command: {},
-      timeout: null, sideEffects: [], selected: null,
-      source: { file: '/adapter/hermes.json', sourceKind: 'external-adapter-manifest', owner: 'hermes' },
-      diagnostics: [],
-    }],
-  } } } });
-
-  assert.equal(model.definitionGroups[0].host, 'hermes');
-  assert.equal(model.runtime.state, 'not-recorded');
-  assert.equal(model.summary.executions, 0);
-});
-
 function upstreamModel({ code, dependency, owner, constraint }) {
   const file = '/workspace/project/.codex/hooks.json';
   return buildHookDashboardReadModel({

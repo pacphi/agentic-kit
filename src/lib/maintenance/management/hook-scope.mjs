@@ -7,7 +7,7 @@ const SYSTEM_KINDS = new Set(['managed']);
 const PROJECT_KINDS = new Set(['project', 'project-inline', 'project-plugin']);
 
 /** `system` for an administrator-managed source, `project` for one inside a repository, and `user` for
- *  everything else: the user's own settings, plugin caches, external adapter manifests, and a source
+ *  everything else: the user's own settings, plugin caches, and a source
  *  kind that is missing or not recognized (the scope every hook had before it was mapped). */
 export function hookScopeForKind(kind) {
   if (SYSTEM_KINDS.has(kind)) return 'system';

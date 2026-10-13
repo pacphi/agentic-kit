@@ -631,7 +631,7 @@ function lazyUsage() {
   };
 }
 
-const DASHBOARD_HOOK_HOSTS = new Set(['all', 'claude', 'codex', 'opencode', 'external']);
+const DASHBOARD_HOOK_HOSTS = new Set(['all', 'claude', 'codex', 'opencode']);
 const DEFAULT_HOOK_CACHE_MS = 30_000;
 
 /** Default Hook source: the same explicit, read-only audit used by
@@ -659,12 +659,6 @@ function hookJsonPointer(record) {
   }
   if (record?.type === 'package-plugin' && Number.isInteger(record?.indices?.plugin)) {
     return `/plugin/${record.indices.plugin}`;
-  }
-  if (record?.source?.sourceKind === 'external-adapter-manifest') {
-    const event = String(record.event ?? '');
-    if (event.startsWith('lifecycle.')) return `/lifecycle/${event.slice(10).replaceAll('~', '~0').replaceAll('/', '~1')}/hook`;
-    if (event === 'execution.run') return '/execution/run/hook';
-    if (event === 'aqe.provider') return '/aqe/provider/hook';
   }
   return null;
 }

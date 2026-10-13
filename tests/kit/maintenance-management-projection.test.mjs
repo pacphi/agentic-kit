@@ -395,7 +395,6 @@ test('hook scope follows where the host reads the hook: system, user and project
     hookAt('occ-project', 'Project', 'project'),
     hookAt('occ-inline', 'Inline', 'project-inline'),
     hookAt('occ-plugin', 'Plugin', 'plugin-cache'),
-    hookAt('occ-adapter', 'Adapter', 'external-adapter-manifest'),
     hookAt('occ-nokind', 'Unlabelled'),
     hookAt('occ-novel', 'Novel', 'a-kind-added-later'),
   ]);
@@ -406,7 +405,7 @@ test('hook scope follows where the host reads the hook: system, user and project
   const scopes = Object.fromEntries(inventory.placements.map((p) => [p.displayName.replace('SessionStart ', ''), p.administrativeScope]));
   assert.deepEqual(scopes, {
     Global: 'user', Managed: 'system', Project: 'project', Inline: 'project',
-    Plugin: 'user', Adapter: 'user', Unlabelled: 'user', Novel: 'user',
+    Plugin: 'user', Unlabelled: 'user', Novel: 'user',
   });
   // Only the project placements name a repository, and the two in one repository name the same one.
   for (const placement of inventory.placements) {

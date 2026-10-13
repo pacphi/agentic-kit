@@ -60,7 +60,7 @@ const recordsOf = (audit) => Object.values(audit.reports).flatMap((report) => /*
 test('hookScopeForKind maps every source kind the audit emits, and anything unknown to user scope', () => {
   const expected = {
     global: 'user', 'global-inline': 'user', 'global-plugin': 'user',
-    'plugin-cache': 'user', 'plugin-cache-inline': 'user', 'external-adapter-manifest': 'user',
+    'plugin-cache': 'user', 'plugin-cache-inline': 'user',
     managed: 'system',
     project: 'project', 'project-inline': 'project', 'project-plugin': 'project',
   };

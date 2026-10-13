@@ -52,8 +52,8 @@ const hookAudit = {
         { event: 'Stop' },
       ],
     },
-    external: {
-      coverage: { status: 'partial' },
+    opencode: {
+      coverage: { status: 'unsupported' },
       summary: { sources: 0, invalidSources: 0, hookOccurrences: 0 },
       records: [],
     },
@@ -64,26 +64,26 @@ function evidence() {
   return {
     guidance: {
       codex: guidance,
-      external: { status: 'unsupported', reason: 'external-contract-v1-no-native-guidance' },
+      opencode: { status: 'unsupported', reason: 'not-observable' },
     },
     windows: {
       codex: windows,
-      external: { status: 'unsupported', reason: 'external-contract-v1-no-context-observability' },
+      opencode: { status: 'unsupported', reason: 'not-observable' },
     },
     skills: {
       codex: { status: 'partial', count: 80, metadataBytes: null, omitted: 0, reason: 'host-rendered-metadata-not-recorded' },
-      external: { status: 'unsupported', count: null, metadataBytes: null, omitted: 0, reason: 'external-contract-v1-no-skill-observability' },
+      opencode: { status: 'unsupported', count: null, metadataBytes: null, omitted: 0, reason: 'not-observable' },
     },
     mcp: {
       codex: { status: 'partial', registrations: 2, configBytes: 420, schemaBytes: null, reason: 'tool-schemas-not-recorded' },
-      external: { status: 'unsupported', registrations: null, configBytes: null, schemaBytes: null, reason: 'external-contract-v1-no-mcp-observability' },
+      opencode: { status: 'unsupported', registrations: null, configBytes: null, schemaBytes: null, reason: 'not-observable' },
     },
     hookAudit,
   };
 }
 
 test('pure context audit preserves window fact distinctions and evaluates compatible startup units', () => {
-  const report = buildContextAudit({ hosts: ['codex', 'external'], evidence: evidence() });
+  const report = buildContextAudit({ hosts: ['codex', 'opencode'], evidence: evidence() });
   const codex = report.reports.codex;
 
   assert.equal(report.mode, 'read-only');
@@ -105,12 +105,11 @@ test('pure context audit preserves window fact distinctions and evaluates compat
   assert.equal(codex.startup.basis, 'estimated-startup-vs-token-window');
   assert.equal(codex.hooks.stopOccurrences, 2);
 
-  const external = report.reports.external;
-  assert.equal(external.hooks.status, 'unsupported');
-  assert.equal(external.hooks.reason, 'external-contract-v1-no-hook-runtime-observability');
-  assert.equal(external.sourceHealth.overall, 'unsupported');
-  assert.equal(external.startup.state, 'unknown');
-  assert.equal(external.guidance.bytes, null, 'unsupported is not rewritten as zero');
+  const unsupported = report.reports.opencode;
+  assert.equal(unsupported.hooks.status, 'unsupported');
+  assert.equal(unsupported.sourceHealth.overall, 'unsupported');
+  assert.equal(unsupported.startup.state, 'unknown');
+  assert.equal(unsupported.guidance.bytes, null, 'unsupported is not rewritten as zero');
 
   const json = JSON.stringify(report);
   assert.doesNotMatch(json, /private\/stop\.json|secret command/);
@@ -201,7 +200,6 @@ test('MCP config inspection reports only bounded counts/bytes and never names, c
   const codex = inspectMcpConfig('codex', codexRaw);
   assert.equal(codex.registrations, 2);
   assert.ok(codex.configBytes < Buffer.byteLength(codexRaw), 'unrelated TOML is not counted as MCP config');
-  assert.equal(inspectMcpConfig('external', '').status, 'unsupported');
   assert.equal(inspectMcpConfig('opencode', '{not-json').status, 'unavailable');
 });
 
@@ -252,9 +250,9 @@ async function captureConsole(fn) {
 }
 
 test('ak audit context supports JSON and concise text through an injected read-only collector', async () => {
-  const report = buildContextAudit({ hosts: ['codex', 'external'], evidence: evidence() });
+  const report = buildContextAudit({ hosts: ['codex', 'opencode'], evidence: evidence() });
   const json = await captureConsole(() => runAuditCommand({
-    flags: { json: true, host: ['codex', 'external'] }, positionals: ['context'],
+    flags: { json: true, host: ['codex', 'opencode'] }, positionals: ['context'],
     contextCollectorFn: async () => report,
   }));
   assert.equal(json.code, 0, json.stderr);
