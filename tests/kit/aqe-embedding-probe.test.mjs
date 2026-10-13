@@ -166,3 +166,57 @@ test('local-only control uses the same ESM conditional export as AQE runtime', a
   fs.writeFileSync(path.join(dir,'cjs.cjs'),'exports.env = {allowRemoteModels:true};');
   assert.equal((await probeAqeEmbeddings({packageRoot,env:{},backend:'in-process'})).status,'passed');
 });
+
+// agentic-qe#754: a passing embedder probe never proves the pattern index, so
+// the index check is opt-in and runs only on top of a passing embedder.
+test('the pattern index is not checked unless asked, and the result stays as it was', async t => {
+  const packageRoot = fixture(t, good);
+  let called = false;
+  const result = await probeAqeEmbeddings({ packageRoot, env, patternIndexProbe: async () => { called = true; return { status: 'passed' }; } });
+  assert.equal(result.status, 'passed');
+  assert.equal('patternIndex' in result, false);
+  assert.equal(called, false);
+});
+
+test('a passing embedder with the pattern index check on reports the index result beside it', async t => {
+  const packageRoot = fixture(t, good);
+  const calls = [];
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true,
+    patternIndexProbe: async (options) => { calls.push(options); return { status: 'passed' }; } });
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.patternIndex, { status: 'passed' });
+  assert.deepEqual(calls, [{ packageRoot, env: { AQE_EMBEDDER_ENDPOINT: env.AQE_EMBEDDER_ENDPOINT, AQE_EMBEDDER_TOKEN: env.AQE_EMBEDDER_TOKEN } }]);
+  assert.equal(JSON.stringify(result).includes('private-token'), false);
+});
+
+test('a failing index check does not fail the embedder result', async t => {
+  const packageRoot = fixture(t, good);
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true,
+    patternIndexProbe: async () => ({ status: 'failed', reason: 'lexical-fallback' }) });
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.patternIndex, { status: 'failed', reason: 'lexical-fallback' });
+});
+
+test('a failing embedder never reaches the index check', async t => {
+  const packageRoot = fixture(t, good.replace('return [a,b,c]', 'return [a,a,a]'));
+  let called = false;
+  const result = await probeAqeEmbeddings({ packageRoot, env, verifyPatternIndex: true, patternIndexProbe: async () => { called = true; return { status: 'passed' }; } });
+  assert.equal(result.status, 'failed');
+  assert.equal('patternIndex' in result, false);
+  assert.equal(called, false);
+});
+
+test('only an endpoint backend can bind the index: in-process reports it unavailable without checking', async t => {
+  const packageRoot = fixture(t, good.replace('if (texts.length', `
+    const { env } = await import('@huggingface/transformers');
+    if (texts.length`));
+  const transformerDir = path.join(packageRoot, 'node_modules/@huggingface/transformers');
+  fs.mkdirSync(transformerDir, { recursive: true });
+  fs.writeFileSync(path.join(transformerDir, 'package.json'), '{"type":"module","main":"index.js"}');
+  fs.writeFileSync(path.join(transformerDir, 'index.js'), 'export const env = {allowRemoteModels:true};');
+  let called = false;
+  const result = await probeAqeEmbeddings({ packageRoot, env, backend: 'in-process', verifyPatternIndex: true, patternIndexProbe: async () => { called = true; return { status: 'passed' }; } });
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.patternIndex, { status: 'unavailable', reason: 'backend-not-endpoint' });
+  assert.equal(called, false);
+});

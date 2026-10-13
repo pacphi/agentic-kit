@@ -3,6 +3,7 @@
 - **Status:** Implemented
 - **Release target:** `4.0.0-alpha.53`
 - **Date:** 2026-09-20
+- **Updated:** 2026-10-05 — the live embedding check also verifies AQE's pattern index (agentic-qe#754, fixed in 3.14.5) on an endpoint backend: it runs the installed `aqe hooks learn` and `hooks search` in a disposable project and needs a vector match. A remembered record carries the result (`verified` or an enumerated reason), AQE's version is part of the check's inputs key, and status, `ak sync` and setup say "verified" only for a verified result. An older AQE, an in-process backend or a failure keeps "unverified" with the reason. See [the 3.14.8 receipt](../archive/2026-10-05-audit-aqe-3-14-8-verification.md)
 - **Updated:** 2026-09-30 — [private released 3.14.6 MCP/packed-kit proof](../archive/2026-09-30-aqe-m1-mcp-lock-proof.md) observes ordinary busy startup and unchanged patterns.rvf/sidecar bytes on macOS; semantic readiness remains separate and stock MCP shutdown leaves its dead-PID marker. No Windows, installed-target or universal-floor claim
 - **Updated:** 2026-09-20 — implemented explicit defaults, owned Claude/Codex/OpenCode projections and qualified runtime proof
 - **Updated:** 2026-09-23 — project projections are scoped to the enclosing git repository root; outside a repository only the user Codex target applies (earlier project-scope values are relinquished by receipt), and the `.mcp.json` AQE registration is required only in an AQE-initialized project

@@ -42,6 +42,29 @@ const SOURCES = new Set([...WRITE_SOURCES, 'verify', 'status-live']);
 export const LIVE_CHECK_TTL_MS = 24 * 3600_000;
 const REASON_MAX = 200;
 
+/** What the AQE pattern-index check (agentic-qe#754) may leave in a record: a
+ *  verified result, or the probe's own enumerated reasons. Never free text. */
+const PATTERN_INDEX_VALUES = new Set(['verified', 'unverified', 'version-below-fix', 'backend-not-endpoint',
+  'aqe-package-unavailable', 'learn-failed', 'search-failed', 'invalid-output', 'pattern-not-retrieved',
+  'lexical-fallback', 'timeout', 'pattern-index-probe-failed']);
+
+/** A pattern-index probe result as the value a record keeps, or null when no check ran.
+ *  @param {{status?:string,reason?:string}|null|undefined} result */
+export function patternIndexValue(result) {
+  if (!result) return null;
+  if (result.status === 'passed') return 'verified';
+  return PATTERN_INDEX_VALUES.has(result.reason ?? '') ? /** @type {string} */ (result.reason) : 'unverified';
+}
+
+/** The status clause for a remembered pattern-index value. No value, or one that
+ *  is not a verification, keeps the wording from before the check existed.
+ *  @param {string|null|undefined} value */
+export function describePatternIndex(value) {
+  if (value === 'verified') return 'AQE pattern index binding verified (agentic-qe#754)';
+  const detail = value && value !== 'unverified' ? `; ${value}` : '';
+  return `AQE pattern index binding unverified (agentic-qe#754${detail})`;
+}
+
 /** `<stateBase>/agentic-kit/evidence/live-check` — the shared evidence envelope's directory
  *  for this kind (evidence.mjs). */
 export const liveCheckDir = () => path.join(paths.evidenceDir(), 'live-check');
@@ -64,17 +87,18 @@ function cleanReason(reason) {
  * Remember one live-check result. Invalid input is a programming error and
  * throws; an unwritable store returns false (the caller says so) and never
  * fails the sync or live refresh that produced the result.
- * @param {{id:string,status:string,reason?:string|null,source:string,inputsKey:string}} result
+ * @param {{id:string,status:string,reason?:string|null,source:string,inputsKey:string,patternIndex?:string|null}} result
  * @param {{now?:number}} [options]
  * @returns {boolean}
  */
-export function recordLiveCheck({ id, status, reason = null, source, inputsKey }, { now = Date.now() } = {}) {
+export function recordLiveCheck({ id, status, reason = null, source, inputsKey, patternIndex = null }, { now = Date.now() } = {}) {
   assertKnownId(id);
   if (!STATUSES.has(status)) throw new TypeError(`unknown live check status: ${String(status).slice(0, 40)}`);
   if (!WRITE_SOURCES.has(source)) throw new TypeError(`unknown live check source: ${String(source).slice(0, 40)}`);
   if (typeof inputsKey !== 'string' || !inputsKey) throw new TypeError('live check inputsKey is required');
+  if (patternIndex !== null && !PATTERN_INDEX_VALUES.has(patternIndex)) throw new TypeError(`unknown pattern index value: ${String(patternIndex).slice(0, 40)}`);
   return writeEvidence('live-check', id,
-    { source, inputsKey, inputs: null, result: { status, reason: cleanReason(reason) } }, { now });
+    { source, inputsKey, inputs: null, result: { status, reason: cleanReason(reason), ...(patternIndex ? { patternIndex } : {}) } }, { now });
 }
 
 /**
@@ -88,7 +112,7 @@ export function readLiveCheck(id, { inputsKey, now = Date.now(), ttlMs = LIVE_CH
   assertKnownId(id);
   const record = readEvidence('live-check', id, { inputsKey, maxAgeMs: ttlMs, now });
   if (!record) return null;
-  const result = /** @type {{status?: string, reason?: string|null}} */ (record.result) ?? {};
+  const result = /** @type {{status?: string, reason?: string|null, patternIndex?: string}} */ (record.result) ?? {};
   const status = result.status;
   if (!STATUSES.has(status) || !SOURCES.has(record.source)) return null;
   return {
@@ -99,6 +123,7 @@ export function readLiveCheck(id, { inputsKey, now = Date.now(), ttlMs = LIVE_CH
     ageMs: record.ageMs,
     stale: record.stale,
     invalidated: inputsKey !== undefined && record.inputsKey !== inputsKey,
+    ...(typeof result.patternIndex === 'string' && PATTERN_INDEX_VALUES.has(result.patternIndex) ? { patternIndex: result.patternIndex } : {}),
   };
 }
 
@@ -125,13 +150,20 @@ function rufloVersion() {
   catch { return null; }
 }
 
+/** Installed agentic-qe version, or null. Whether its pattern index binds depends
+ *  on the release, so a different one clears a remembered result. */
+function aqeVersion() {
+  try { return JSON.parse(fs.readFileSync(path.join(paths.aqeRoot(), 'package.json'), 'utf8')).version ?? null; }
+  catch { return null; }
+}
+
 /** The embedding check runs against the resolved backend: a managed selection
  *  pins the endpoint, while unmanaged mode probes the shell's endpoint. */
 function embeddingInputs(cfg, env) {
   try {
     const resolved = resolveAqeEmbedding(cfg, env);
     return { aqe: cfg.aqe !== false, mode: resolved.mode,
-      endpoint: resolved.env.AQE_EMBEDDER_ENDPOINT || null, provisioning: resolved.provisioning ?? null };
+      endpoint: resolved.env.AQE_EMBEDDER_ENDPOINT || null, provisioning: resolved.provisioning ?? null, aqeVersion: aqeVersion() };
   } catch { return { invalid: true }; }
 }
 
@@ -165,19 +197,25 @@ export function liveCheckInputsKey(id, { cfg = {}, env = process.env, cwd = proc
 
 const firstSentence = (text) => String(text ?? '').split(/\.\s/)[0].replace(/\.$/, '');
 
+/** A passing embedder, with the pattern-index value only when that check ran. */
+const passedOutcome = (patternIndex) => {
+  const value = patternIndexValue(patternIndex);
+  return { status: 'passed', reason: null, ...(value ? { patternIndex: value } : {}) };
+};
+
 /** A `prepareAqeEmbedding` result as a live-check outcome, or null when no
  *  live request ran (unmanaged embeddings are skipped, not passed). Any
  *  non-pass is a failure — the same reading `ak sync` prints. */
 export function embeddingCheckOutcome(result) {
   if (!result || result.status === 'skipped') return null;
-  if (result.ok === true && result.status === 'ok') return { status: 'passed', reason: null };
+  if (result.ok === true && result.status === 'ok') return passedOutcome(result.evidence?.patternIndex);
   return { status: 'failed', reason: result.evidence?.reason ?? (firstSentence(result.detail) || 'embedding setup incomplete') };
 }
 
 /** A `probeAqeEmbeddings` result as a live-check outcome (the live checks' reading). */
 export function embeddingProbeOutcome(live) {
   return live?.status === 'passed'
-    ? { status: 'passed', reason: null }
+    ? passedOutcome(live.patternIndex)
     : { status: 'failed', reason: live?.reason ?? live?.status ?? 'embedding probe failed' };
 }
 
@@ -185,12 +223,13 @@ export function embeddingProbeOutcome(live) {
  * Record `outcome` for `id` against the caller's current inputs, and say so
  * when it could not be remembered. Returns whether it was recorded.
  * @param {string} id
- * @param {{status:string,reason?:string|null}|null} outcome
+ * @param {{status:string,reason?:string|null,patternIndex?:string|null}|null} outcome
  * @param {{source:string,cfg?:any,env?:NodeJS.ProcessEnv,cwd?:string,now?:number,inputsKey?:string}} context
  */
 export function rememberLiveCheck(id, outcome, { source, cfg, env, cwd, now, inputsKey } = /** @type {any} */ ({})) {
   if (!outcome) return false;
   const recorded = recordLiveCheck({ id, status: outcome.status, reason: outcome.reason ?? null, source,
+    patternIndex: outcome.patternIndex ?? null,
     inputsKey: inputsKey ?? liveCheckInputsKey(id, { cfg, env, cwd }) }, { now });
   if (!recorded) warn(`${id}: could not remember this live check result; ak status will not show it`);
   return recorded;

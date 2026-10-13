@@ -141,6 +141,19 @@ test('a passing probe says the embedder is verified, and names what stays separa
   assert.equal(r.detail, 'embedder verified (384 dimensions); AQE pattern index binding and existing corpus compatibility remain separate');
 });
 
+test('setup and sync ask the probe to check the pattern index, and say what it found', async () => {
+  const request = async () => ({ models: [{ name: 'Xenova/all-MiniLM-L6-v2:latest' }] });
+  const asked = [];
+  const probe = (patternIndex) => async (options) => { asked.push(options.verifyPatternIndex); return { ...(await pass(options)), ...(patternIndex ? { patternIndex } : {}) }; };
+  const verified = await prepareAqeEmbedding(local, { probe: probe({ status: 'passed' }), request });
+  assert.equal(verified.detail, 'embedder verified (384 dimensions); AQE pattern index binding verified; existing corpus compatibility remains separate');
+  const lexical = await prepareAqeEmbedding(local, { probe: probe({ status: 'failed', reason: 'lexical-fallback' }), request });
+  assert.equal(lexical.detail, 'embedder verified (384 dimensions); AQE pattern index binding unverified (lexical-fallback); existing corpus compatibility remains separate');
+  const below = await prepareAqeEmbedding(local, { probe: probe({ status: 'unavailable', reason: 'version-below-fix' }), request });
+  assert.match(below.detail, /binding unverified \(version-below-fix\)/);
+  assert.deepEqual(asked, [true, true, true]);
+});
+
 test('no src/ surface claims AQE pattern search works', () => {
   const offenders = [];
   const walk = (dir) => {

@@ -5,6 +5,7 @@ import { probeAqeEmbeddings } from './aqe-embedding-probe.mjs';
 import { resolveAqeEmbedding, AQE_EMBEDDING_MODEL, OLLAMA_EMBEDDING_MODEL } from './aqe-embedding-config.mjs';
 import { aqeEmbeddingConfiguration } from './aqe-readiness.mjs';
 import { have } from './exec.mjs';
+import { patternIndexValue } from './live-check-evidence.mjs';
 
 const AQE_EMBEDDING_ALTERNATIVES = 'Alternatives: select an existing compatible endpoint, explicitly opt into in-process transformers, or leave semantic learning unmanaged. No hash fallback is substituted.';
 export const AQE_EMBEDDING_COACHING = `Recommended: local Ollama + MiniLM (no API key). Install Ollama from https://ollama.com/download and start it (ollama serve), then retry. ${AQE_EMBEDDING_ALTERNATIVES}`;
@@ -68,6 +69,14 @@ async function prepareLocalModel(request) {
   return true;
 }
 
+// agentic-qe#754: a passing embedder never proves AQE's pattern index; only its own check does.
+function passedDetail(patternIndex) {
+  const embedder = 'embedder verified (384 dimensions)';
+  if (!patternIndex) return `${embedder}; AQE pattern index binding and existing corpus compatibility remain separate`;
+  const index = patternIndex.status === 'passed' ? 'verified' : `unverified (${patternIndexValue(patternIndex)})`;
+  return `${embedder}; AQE pattern index binding ${index}; existing corpus compatibility remains separate`;
+}
+
 /** Explicit setup/sync mutation boundary, injectable external operations for tests.
  * @param {any} cfg
  * @param {{env?:NodeJS.ProcessEnv,packageRoot?:string,provision?:boolean,request?:(route:string,body?:any)=>Promise<any>,probe?:typeof probeAqeEmbeddings,ollamaInstalled?:()=>Promise<boolean>}} [options] */
@@ -94,11 +103,9 @@ export async function prepareAqeEmbedding(cfg, {
       return { ok: false, changed, status: 'failed', detail: `Local embedding setup incomplete. ${coaching}` };
     }
   }
-  const evidence = await probe({ packageRoot, env: resolved.env, backend: resolved.mode });
+  const evidence = await probe({ packageRoot, env: resolved.env, backend: resolved.mode, verifyPatternIndex: true });
   if (evidence.status === 'passed') {
-    return { ok: true, changed, status: 'ok', evidence,
-      // agentic-qe#754: the embedder is proven, not AQE's pattern index binding.
-      detail: 'embedder verified (384 dimensions); AQE pattern index binding and existing corpus compatibility remain separate' };
+    return { ok: true, changed, status: 'ok', evidence, detail: passedDetail(evidence.patternIndex) };
   }
   const coaching = evidence.reason === 'endpoint-unreachable'
     ? await unreachableCoaching(resolved, ollamaInstalled) : AQE_EMBEDDING_COACHING;

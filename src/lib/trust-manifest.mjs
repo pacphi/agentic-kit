@@ -131,8 +131,8 @@ export function setupTrustManifest(cfg, {
       changes: [{ id: 'aqe-embedding', kind: 'embedding-runtime', scope: 'user/project', owner: 'agentic-kit',
         value: cfg.aqeEmbedding.mode,
         effect: cfg.aqeEmbedding.provisioning === 'ollama'
-          ? 'use existing local Ollama, download all-minilm:22m (about 45 MB) and create missing AQE alias; configure enabled hosts; preserve existing vectors'
-          : 'project selected backend to enabled hosts and verify with synthetic text; no automatic package installation or corpus migration' }],
+          ? 'use existing local Ollama, download all-minilm:22m (about 45 MB) and create missing AQE alias; configure enabled hosts; check the pattern index in a disposable folder; preserve existing vectors'
+          : 'project selected backend to enabled hosts and verify with synthetic text, then check the pattern index in a disposable folder; no automatic package installation or corpus migration' }],
     }] : []),
     ...trustManifestForOperation(cfg, { ...options, operation: 'setup' }),
     ...codexMcpRepairTrustManifest(codexRepairPlan),

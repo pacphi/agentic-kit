@@ -61,12 +61,15 @@ ak x aqe-embedding configure --aqe-embedding-mode unmanaged --yes
 ```
 
 A passing check proves the embedder: ak sends synthetic text and gets a vector of
-the expected size back. It does not prove that AQE's pattern index uses that
-embedder. AQE 3.14.7 writes the embedding-space manifest, but its pattern index
-binding with a configured embedder endpoint is not shown to work
-([agentic-qe#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)),
-so `ak status` reads "embedder verified; AQE pattern index binding unverified", and
-compatibility with vectors already stored in the project is a separate question.
+the expected size back. That alone does not prove that AQE's pattern index uses the
+embedder. On AQE 3.14.5 and later with an endpoint backend, ak also checks it
+([agentic-qe#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)): it
+runs the installed `aqe` command in a disposable folder, learns one pattern, and must
+get it back as a vector match. Nothing is written to your project, and the check adds
+a few seconds. `ak status` then reads "embedder verified; AQE pattern index binding
+verified". On an older AQE, with in-process transformers, or when the check fails, it
+reads "AQE pattern index binding unverified" and says why. Compatibility with vectors
+already stored in the project is a separate question.
 
 In-process transformers are an explicit security opt-in in AQE's published
 runtime. Consult the installed AQE guidance and dependency advisories before
