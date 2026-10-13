@@ -63,10 +63,6 @@ const DEFAULTS = {
   statusline: { codex: null }, // {preset,lastProjection}: explicit ownership of Codex [tui] keys
   customBlocks: [],     // [{slug, templatePath, detector:{type:'command'|'dir'|'file', target}}]
   versionCheck: { ttlHours: 24, last: null, seen: {} },
-  // Experimental adapter door (staged behind AK_EXPERIMENTAL_HOST_ADAPTERS=1):
-  // [{name, source, contract}] entries admitted by admission.mjs's
-  // admitAdapters/bootstrapHostAdapters. Empty by default = zero effect.
-  hostAdapters: [],
   // ADR-0048 Maintenance discovery intent (user `kit.json` state — see
   // docs/maintenance.md). Owner-private
   // operational state (checkpoints, coverage, preferences) lives under
@@ -93,7 +89,7 @@ const plain = (value) => value !== null && typeof value === 'object' && !Array.i
 // agentdb CLI ak no longer installs (docs/audits/2026-09-26-issues-237-238-239-
 // verification-and-decisions.md, decision A); earlier saves wrote it into nearly
 // every kit.json.
-const RETIRED_TOP_LEVEL_KEYS = Object.freeze(['agentdb']);
+const RETIRED_TOP_LEVEL_KEYS = Object.freeze(['agentdb', 'hostAdapters']);
 const KNOWN_TOP_LEVEL_KEYS = new Set([...Object.keys(DEFAULTS), ...RETIRED_TOP_LEVEL_KEYS]);
 
 // Warn once per process per distinct unknown-key set, not once per load —
