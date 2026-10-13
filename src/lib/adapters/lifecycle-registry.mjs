@@ -62,86 +62,24 @@ export function lifecycleAdapterFor(hostId) {
 }
 
 /**
- * Host ids with a registered lifecycle adapter, in effectiveHostRegistry
- * order (HOST_REGISTRY plus any admitted externals — not Map-insertion
- * order) so callers get a deterministic, registry-driven iteration order.
- * With nothing admitted, effectiveHostRegistry() === HOST_REGISTRY (same
- * reference), so this is unchanged from the built-ins-only behavior.
+ * Host ids with a registered lifecycle adapter, in HOST_REGISTRY order so
+ * callers get a deterministic, registry-driven iteration order.
  * @returns {string[]}
  */
 export function hostsWithLifecycle() {
-  return effectiveHostRegistry().filter((host) => LIFECYCLE_ADAPTERS.has(host.id)).map((host) => host.id);
-}
-
-/**
- * Host ids with a registered lifecycle adapter, restricted to BUILT-IN hosts
- * (LIFECYCLE_ADAPTERS keys intersected with HOST_REGISTRY — never an
- * admitted external, even after applyAdmitted). Kept as a pure, built-ins-
- * only registry query — e.g. for an install-hint lookup that only makes
- * sense against HOSTS' own package metadata.
- *
- * setup.mjs/sync.mjs/uninstall.mjs no longer use this to pick their loop's
- * iteration source (ADR-0031 P3): their lifecycle loops used to destructure
- * an opencode-SHAPED result (stack.oc/.plugin/.agents/.skill,
- * ret.undo/.artifacts) directly, which would have crashed the moment a
- * non-opencode-shaped admitted host entered the loop. That crash risk is
- * exactly what lifecycle-render.mjs's shape-dispatching renderer removes —
- * the command loops now iterate hostsWithLifecycle() (built-ins + admitted)
- * and render through renderApplyReport/renderUndoReport instead of raw
- * destructuring, gated per-host by lifecycleExecutionEnabled() below.
- * @returns {string[]}
- */
-export function builtinHostsWithLifecycle() {
   return HOST_REGISTRY.filter((host) => LIFECYCLE_ADAPTERS.has(host.id)).map((host) => host.id);
 }
 
 /**
- * True when hostId is one of HOST_REGISTRY's own entries (never an admitted
- * external, even after applyAdmitted). Used by lifecycleExecutionEnabled and
- * detectionBinFor to tell a built-in from an admitted host without a command
- * reaching into registries.mjs directly.
- * @param {string} hostId
- * @returns {boolean}
- */
-export function isBuiltinHost(hostId) {
-  return HOST_REGISTRY.some((host) => host.id === hostId);
-}
-
-const EXPERIMENTAL_HOST_ADAPTERS_FLAG = 'AK_EXPERIMENTAL_HOST_ADAPTERS';
-
-/**
- * Whether setup/sync/uninstall should actually exercise hostId's lifecycle
- * adapter this run (ADR-0031 P3). A BUILT-IN host is gated only by cfg's own
- * enablement — unchanged from before this wave. An ADMITTED external host
- * needs BOTH: explicit cfg enablement (opt-in exactly like opencode — there
- * is no pick-UI for external hosts yet, so enablement is operator-set in
- * kit.json) AND the experimental flag. Neither condition is ever inferred or
- * set here — this function only reads, never auto-enables anything.
+ * Whether setup/sync/uninstall should exercise hostId's lifecycle adapter this
+ * run: the host must be enabled in cfg. This only reads; it never enables
+ * anything.
  * @param {string} hostId
  * @param {any} cfg
- * @param {NodeJS.ProcessEnv} [env]
  * @returns {boolean}
  */
-export function lifecycleExecutionEnabled(hostId, cfg, env = process.env) {
-  if (!cfg?.integrations?.hosts?.[hostId]) return false;
-  if (isBuiltinHost(hostId)) return true;
-  return env?.[EXPERIMENTAL_HOST_ADAPTERS_FLAG] === '1';
-}
-
-/**
- * The binary name a command loop should probe for hostId's CLI presence
- * before exercising its lifecycle adapter (mirrors the built-in convention
- * `have(hostId)` — a built-in's host id IS its binary name). An admitted
- * host's binary name is whatever its manifest declared
- * (manifest.detection.bin, always present on a validated manifest) —
- * buildAdmittedLifecycleAdapter stashes it on the registered adapter as
- * `.detectionBin` so this never needs a second store keyed by host id.
- * @param {string} hostId
- * @returns {string}
- */
-export function detectionBinFor(hostId) {
-  if (isBuiltinHost(hostId)) return hostId;
-  return lifecycleAdapterFor(hostId)?.detectionBin ?? hostId;
+export function lifecycleExecutionEnabled(hostId, cfg) {
+  return !!cfg?.integrations?.hosts?.[hostId];
 }
 
 // ── admitted (external) lifecycle adapters ─────────────────────────────────
@@ -270,9 +208,8 @@ export function buildAdmittedLifecycleAdapter(manifest, { runHook, baseDir = nul
   const hostId = manifest.host.id;
   const declared = manifest.lifecycle ?? {};
   // Stashed alongside the verb functions (validateLifecycleAdapter only
-  // requires id + the five verbs — extra own-properties are untouched) so
-  // detectionBinFor(hostId) can find the manifest's own CLI binary name
-  // without a second store keyed by host id.
+  // requires id + the five verbs — extra own-properties are untouched) so the
+  // manifest's own CLI binary name travels with the adapter.
   const adapter = { id: hostId, detectionBin: manifest.detection?.bin ?? hostId, unanchoredVerbs: [] };
   for (const verb of LIFECYCLE_OPERATIONS) {
     const hookEntry = declared[verb]?.hook;

@@ -4,9 +4,8 @@
 
 ## Hosts and inference providers
 
-Execution host and inference provider are independent facts. `claude`, `codex`,
-`opencode`, and admitted external adapters run work; configured model providers serve
-inference. A host/model route is intent, not proof of the vendor or live capability.
+Execution host and inference provider are independent facts. `claude`, `codex`
+and `opencode` run work; configured model providers serve inference. A host/model route is intent, not proof of the vendor or live capability.
 
 `ak host` persists host, provider, routing, and fallback intent in `kit.json`; `ak sync`
 reconciles owned projections and `ak status` reports evidence and drift. API keys remain

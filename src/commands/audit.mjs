@@ -30,7 +30,7 @@ Usage:
 
 Options:
   --project PATH   add an explicit project (repeatable)
-  --host HOST      audit codex, claude, opencode, external, or all (repeatable)
+  --host HOST      audit codex, claude, opencode, or all (repeatable)
   --all-projects   include Git projects in agentic-kit's bounded project census
   --json           emit the deterministic machine-readable report
 
@@ -86,7 +86,9 @@ export function collectHookAudit({
       ...(includesHost(hosts, 'claude') ? { claude: detectVersionFn('claude') } : {}),
       ...(includesHost(hosts, 'opencode') ? { opencode: detectVersionFn('opencode') } : {}),
     },
-    config: includesHost(hosts, 'external') ? loadConfigFn() : {},
+    // Only the OpenCode report reads the kit config (its ownership receipt), and it
+    // does so only for `all`; a run that names one host never loads it.
+    config: hosts.includes('all') ? loadConfigFn() : {},
     upstream: { observedVersions: Object.fromEntries([
       ['ruflo', 'ruflo'], ['agentic-qe', 'agentic-qe'], ['ruvnet-brain', 'ruvnet-brain'],
       ['ruvector', 'ruvector'], ['agentic-flow', 'agentic-flow'],
@@ -105,7 +107,8 @@ export async function collectContextAudit({
   const hosts = selectedContextHosts(flags.host);
   const cfg = loadConfigFn();
   const hookAudit = hookCollectorFn({
-    flags: { ...flags, host: hosts },
+    // The unexpanded list: collectHookAudit loads the kit config only for `all`.
+    flags: { ...flags, host: flags.host?.length ? flags.host : ['all'] },
     loadConfigFn: () => cfg,
   });
   const evidence = await evidenceCollectorFn({ hosts, cfg, pkgRoot, cwd, hookAudit });

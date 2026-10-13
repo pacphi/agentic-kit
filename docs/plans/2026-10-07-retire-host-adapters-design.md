@@ -4,7 +4,8 @@
 
 **Active** (2026-10-07). Design for card P0-04, issue
 [#324](https://github.com/pacphi/agentic-kit/issues/324), epic
-[#295](https://github.com/pacphi/agentic-kit/issues/295), release `4.0.0-beta.1`. Nothing is merged.
+[#295](https://github.com/pacphi/agentic-kit/issues/295), release `4.0.0-beta.1`. Pull request A is merged
+([#468](https://github.com/pacphi/agentic-kit/pull/468)); B is in progress; C is not started.
 The work ships as three pull requests (A, B, C). The maintainer approved the split and the error-message
 fix on 2026-10-07. #324 closes when C merges. #324 blocks #330 (the project layout) and #385
 (publish beta.1).

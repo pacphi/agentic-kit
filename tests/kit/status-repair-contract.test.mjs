@@ -246,9 +246,8 @@ function rowCalls(src) {
 // A `row(<variable>, …)` call names its subsystem at runtime; each such site
 // lists the values it can take. A new variable site fails the census until it
 // is added here.
-const ADMITTED_HOST = 'example-admitted-host';
 const VARIABLE_SUBSYSTEMS = {
-  'src/commands/status/host-detail.mjs': { subsystem: ['opencode'], hostId: [ADMITTED_HOST] },
+  'src/commands/status/host-detail.mjs': { subsystem: ['opencode'] },
 };
 // Repairs sync.run performs outside SYNC_STEPS, on every run.
 const TAIL_COVERAGE = {
@@ -274,7 +273,7 @@ test('every subsystem that can emit a sync fix has a sync step that runs for it'
     const steps = sync.SYNC_STEPS
       .filter((s) => s.id !== 'host-lifecycles' && s.when(subs, flags, cfg)).map((s) => s.id);
     // host-lifecycles runs every sync but acts only for a lifecycle host it is asked to refresh.
-    if ((lifecycleHosts.has(subsystem) || subsystem === ADMITTED_HOST) && sync.lifecycleRefreshRequired(subs, subsystem)) {
+    if (lifecycleHosts.has(subsystem) && sync.lifecycleRefreshRequired(subs, subsystem)) {
       steps.push('host-lifecycles');
     }
     if (TAIL_COVERAGE[subsystem]) steps.push('sync tail');

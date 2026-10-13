@@ -1,11 +1,10 @@
 import { auditCodexHooks } from './index.mjs';
 import { auditClaudeHooks } from './providers/claude.mjs';
 import { auditOpenCodeHooks } from './providers/opencode.mjs';
-import { auditExternalHooks } from './providers/external.mjs';
 import { loadUpstreamConstraints } from './upstream.mjs';
 import { sha256, stableJson, stableValue } from './common.mjs';
 
-export const BUILTIN_HOOK_AUDIT_HOSTS = Object.freeze(['codex', 'claude', 'opencode', 'external']);
+export const BUILTIN_HOOK_AUDIT_HOSTS = Object.freeze(['codex', 'claude', 'opencode']);
 
 function requestedHosts(hosts) {
   const values = Array.isArray(hosts) && hosts.length ? hosts : ['codex'];
@@ -40,11 +39,11 @@ function codexReport(options) {
 /** Run deterministic host providers. This function never executes hook code. */
 /**
  * @param {{hosts?:string[],projectRoots?:string[],versions?:Record<string,string>,config?:any,
- * codex?:any,claude?:any,opencode?:any,external?:any,upstream?:any}} options
+ * codex?:any,claude?:any,opencode?:any,upstream?:any}} options
  */
 export function auditHooks({
   hosts, projectRoots = [process.cwd()], versions = {}, config = {},
-  codex = {}, claude = {}, opencode = {}, external = {}, upstream = {},
+  codex = {}, claude = {}, opencode = {}, upstream = {},
 } = /** @type {any} */ ({})) {
   const selected = requestedHosts(hosts);
   const reports = {};
@@ -54,7 +53,6 @@ export function auditHooks({
     ...opencode, projectRoots, opencodeVersion: versions.opencode ?? opencode.opencodeVersion ?? 'unknown',
     ownership: opencode.ownership ?? config?.integrations?.ownership?.opencode ?? null,
   });
-  if (selected.includes('external')) reports.external = auditExternalHooks({ ...external, config });
   const constraints = loadUpstreamConstraints(upstream);
   const runtimeVersions = stableValue(Object.fromEntries(selected.map((host) => [
     host, reports[host]?.observedVersion ?? versions[host] ?? 'unknown',

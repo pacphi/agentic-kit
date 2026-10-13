@@ -287,3 +287,9 @@ captured, not today. Two further designs from the same program moved to
 |---|---|---|---|
 | [2026-10-06-design-write-and-command-gate.md](2026-10-06-design-write-and-command-gate.md) | `docs/plans/2026-10-06-write-and-command-gate-design.md` | The design for the report-only write gate and command gate (card P0-07, #327): `scope-gate.mjs`, the two hooks, the lint rule and the tests. | Implemented in report-only mode; P7-01 makes it enforcing, and the code and ADR-0064 now describe the gate. |
 | [2026-10-06-plan-write-and-command-gate.md](2026-10-06-plan-write-and-command-gate.md) | `docs/plans/2026-10-06-write-and-command-gate.md` | The six-task plan that built the gate, with the test code for each task. | Executed on `feat/327-write-and-command-gate`; the shipped code and tests supersede the snippets. |
+
+## Added 2026-10-07 — host-adapter retirement, pull request A
+
+| File | Original location | What it was | Why it's historical |
+|---|---|---|---|
+| [2026-10-07-plan-retire-host-adapters-pr-a.md](2026-10-07-plan-retire-host-adapters-pr-a.md) | `docs/plans/2026-10-07-retire-host-adapters-pr-a.md` | The plan for pull request A of card P0-04 (#324): remove `ak host adapters` and `ak x aqe-provider`, close the adapter door, detach routing, hosts and `ak run` from the admitted-host overlay. | Executed in [#468](https://github.com/pacphi/agentic-kit/pull/468); the shipped code supersedes the edit snippets. |

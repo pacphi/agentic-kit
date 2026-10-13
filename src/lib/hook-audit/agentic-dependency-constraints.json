@@ -572,7 +572,7 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["constraint agentic-qe-3.13-external-provider-contract (sunset 2026-09-27)"],
-        "files": ["docs/adr/0029-host-adapter-extension-point.md", "src/lib/adapters/admission.mjs", "src/lib/providers.mjs", "tests/live/aqe-external-provider-transport.test.mjs"]
+        "files": ["docs/adr/0029-host-adapter-extension-point.md", "src/lib/adapters/admission.mjs", "tests/live/aqe-external-provider-transport.test.mjs"]
       },
       "adjustment": "Done: constraint agentic-qe-3.13-external-provider-contract sunset after the live external-provider participant and advisor conformance (tests/live/aqe-external-provider-transport.test.mjs) passed on 3.14.4. Also cited as \"issue #628\".",
       "status": "retired",

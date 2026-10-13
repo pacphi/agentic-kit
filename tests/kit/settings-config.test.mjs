@@ -125,7 +125,7 @@ test('loadKitConfig merges partial files over defaults (user file wins)', () => 
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-// F-14: an unrecognized top-level key (e.g. a future ak's `hostAdapters`)
+// F-14: an unrecognized top-level key (e.g. a future ak's new setting)
 // must never silently round-trip as a no-op — loadKitConfig warns once,
 // naming the key, without dropping or throwing on it.
 
@@ -149,14 +149,24 @@ function captureConsole(fn) {
 test('loadKitConfig warns once on an unrecognized top-level key, naming it', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-unknown-'));
   const f = tmpFile(tmp, 'kit.json');
-  // NOT `hostAdapters` — Wave 4 (adapter door) recognizes that key now
-  // (src/lib/config.mjs DEFAULTS.hostAdapters), so it's a poor example of an
-  // unrecognized one. Any still-genuinely-unknown key exercises the same path.
+  // Any genuinely unknown key exercises this path; `hostAdapters` is a retired key
+  // and is covered by its own test below.
   fs.writeFileSync(f, JSON.stringify({ someUnknownFutureKey: { foo: true } }));
   const { errLines } = captureConsole(() => loadKitConfig(f));
   assert.equal(errLines.length, 1);
   assert.match(errLines[0], /someUnknownFutureKey/);
   assert.match(errLines[0], /not recognized/);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('loadKitConfig warns nothing for a retired hostAdapters key left in kit.json', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-cfg-retired-'));
+  const f = tmpFile(tmp, 'kit.json');
+  const saved = [{ name: 'hermes', source: '/somewhere/hermes.json', contract: 1 }];
+  fs.writeFileSync(f, JSON.stringify({ hostAdapters: saved }));
+  const { errLines } = captureConsole(() => loadKitConfig(f));
+  assert.deepEqual(errLines, [], 'a retired key is inert data, not an unrecognized one');
+  assert.equal(Object.hasOwn(loadKitConfig(f), 'hostAdapters'), true, 'the saved value stays on disk and in the loaded config');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

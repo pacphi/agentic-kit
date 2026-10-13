@@ -40,7 +40,7 @@ Usage:
   ak heal hooks --recover RECEIPT_ID [--apply --yes]
 
 Options:
-  --host HOST            codex, claude, opencode, external, or all (repeatable)
+  --host HOST            codex, claude, opencode, or all (repeatable)
   --project PATH         add an explicit project (repeatable)
   --all-projects         include bounded project census roots
   --action ID            select an exact executable action (repeatable)

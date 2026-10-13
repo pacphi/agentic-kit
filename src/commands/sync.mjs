@@ -18,7 +18,7 @@ import {
   repairCodexMcpTopology, legacyRufloRemovalCommands,
 } from '../lib/mcp.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { applyRufloDaemon, rufloDaemonProjectRoot } from '../lib/ruflo-daemon-config.mjs';
@@ -522,11 +522,9 @@ export const SYNC_STEPS = [
   // the agents-opencode guidance target is gated on the config home this step
   // creates — this order lets a fresh enable converge guidance in the SAME
   // sync (a second sync is then a true no-op). Registry-driven: loops
-  // hostsWithLifecycle() (built-ins + admitted, ADR-0031 P3) rather than
-  // naming opencode, so a second lifecycle host — built-in or admitted —
-  // needs no new step here. lifecycleExecutionEnabled gates each host exactly
-  // as setup.mjs does (built-in: cfg enablement only; admitted: cfg
-  // enablement AND the experimental flag — never auto-enabled).
+  // hostsWithLifecycle() rather than naming opencode, so a second lifecycle
+  // host needs no new step here. lifecycleExecutionEnabled gates each host
+  // exactly as setup.mjs does (cfg enablement only; never auto-enabled).
   // lifecycle-render.mjs's renderApplyReport dispatches on the runLifecycle
   // result's own shape, so this loop body never destructures a host-specific
   // result directly; opencode's per-surface lines render exactly as before.
@@ -538,7 +536,7 @@ export const SYNC_STEPS = [
         // --skip <host> also stops the refresh an upgrade (versions) would trigger.
         if (ctx.skip?.has(hostId)) continue;
         if (!lifecycleRefreshRequired(ctx.subsystems, hostId) || !lifecycleExecutionEnabled(hostId, ctx.cfg)) continue;
-        if (!(await have(detectionBinFor(hostId)))) {
+        if (!(await have(hostId))) {
           info(`${hostId}: enabled but CLI not installed — wiring skipped (hosts step installs it)`);
           continue;
         }

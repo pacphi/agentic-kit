@@ -273,7 +273,7 @@ test('a manual fail row never hides a recorded apply failure for its own subsyst
   const flags = FLAGS();
   const cases = [
     {
-      manual: row('providers', 'fail', 'external intent unavailable', 'revoke the grant yourself', { repair: 'manual' }),
+      manual: row('providers', 'fail', 'provider setup unavailable', 'revoke the grant yourself', { repair: 'manual' }),
       state: { applyFailures: [], aqeRouterApplyFailure: 'boom' },
       expected: { subsystem: 'providers', message: 'AQE router apply failed: boom', reason: 'apply-failed' },
     },

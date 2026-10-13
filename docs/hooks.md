@@ -106,7 +106,7 @@ that the selected plugin does not necessarily replace. Retained handler indexes 
 shift and require Codex review. The preview discloses both facts. A fresh Codex session
 is required after apply because hook definitions are loaded at session start.
 
-OpenCode, external adapters, JSONC, plugin caches, generated copies, unknown versions,
+OpenCode, JSONC, plugin caches, generated copies, unknown versions,
 and remote sources remain observable but non-executable, except for the exact reviewed AQE
 project-artifact compatibility migration below. Windows receives the full plan
 but no mutation until atomic replace-existing behavior has a proven platform port.

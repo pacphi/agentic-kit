@@ -109,11 +109,11 @@ test('hook findings group across hosts and lifecycle points, then sort by import
           code: 'probable-timeout-unit-mismatch', severity: 'warning' }),
       ], summary: {}, coverage: { status: 'partial', gaps: [] }, plan: [],
     },
-    external: {
+    opencode: {
       records: [
-        record({ occurrenceId: 'h-stop', behaviorFingerprint: 'h-stop-b', host: 'hermes', event: 'lifecycle.stop',
+        record({ occurrenceId: 'h-stop', behaviorFingerprint: 'h-stop-b', host: 'opencode', event: 'session.stop',
           code: 'probable-timeout-unit-mismatch', severity: 'warning' }),
-        record({ occurrenceId: 'h-review', behaviorFingerprint: 'h-review-b', host: 'hermes', event: 'lifecycle.stop',
+        record({ occurrenceId: 'h-review', behaviorFingerprint: 'h-review-b', host: 'opencode', event: 'session.stop',
           code: 'dynamic-shell', severity: 'review', category: 'security' }),
       ], summary: {}, coverage: { status: 'partial', gaps: [] }, plan: [],
     },
@@ -123,9 +123,9 @@ test('hook findings group across hosts and lifecycle points, then sort by import
   assert.equal(model.findings[0].code, 'probable-timeout-unit-mismatch');
   assert.equal(model.findings[0].affectedDefinitions, 3);
   assert.deepEqual(model.findings[0].placements.map((placement) => placement.lifecyclePoint),
-    ['PostToolUse', 'Stop', 'lifecycle.stop']);
+    ['PostToolUse', 'Stop', 'session.stop']);
   assert.deepEqual(model.findings[0].placements.map((placement) => placement.host),
-    ['claude', 'claude', 'hermes']);
+    ['claude', 'claude', 'opencode']);
   assert.equal(model.findings[1].severity, 'review');
 });
 
@@ -142,23 +142,6 @@ test('hook read model never fabricates an inspectable source reference', () => {
   });
   assert.equal(model.definitionGroups[0].placements[0].source.ref, null,
     'an unresolvable placement must render Location unavailable, never a broken Inspect source button');
-});
-
-test('adapter records retain their concrete host identity and unknown runtime stays unknown', () => {
-  const model = buildHookDashboardReadModel({ audit: { reports: { external: {
-    sources: [], plan: [], summary: { sources: 0, invalidSources: 0, hookOccurrences: 1, uniqueBehaviors: 1 },
-    coverage: { status: 'partial', gaps: [] }, records: [{
-      occurrenceId: 'hermes-1', behaviorFingerprint: 'hermes-b', host: 'hermes',
-      event: 'lifecycle.stop', type: 'argv-subprocess', matcher: '', handler: {}, command: {},
-      timeout: null, sideEffects: [], selected: null,
-      source: { file: '/adapter/hermes.json', sourceKind: 'external-adapter-manifest', owner: 'hermes' },
-      diagnostics: [],
-    }],
-  } } } });
-
-  assert.equal(model.definitionGroups[0].host, 'hermes');
-  assert.equal(model.runtime.state, 'not-recorded');
-  assert.equal(model.summary.executions, 0);
 });
 
 function upstreamModel({ code, dependency, owner, constraint }) {

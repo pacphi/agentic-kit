@@ -28,30 +28,6 @@ function fixture() {
   };
 }
 
-function externalManifest() {
-  return {
-    name: 'hermes', version: '1.0.0', contract: 1,
-    host: {
-      id: 'hermes', label: 'Hermes',
-      install: { bin: 'hermes', externalInstallPolicy: 'detect-never-overwrite' },
-      capabilities: {
-        canDriveSession: true, canBePrimary: false, canRouteActivities: true,
-        commandStatusline: false, transcripts: true, usage: false,
-        nativeMcpConfig: false, nativeGuidance: false,
-      },
-      trust: { approvalPolicy: 'unchanged', changes: [] }, enabledByDefault: false,
-      configProjection: 'ruflo', observability: [],
-    },
-    detection: { bin: 'hermes', versionArgs: ['--version'], versionPattern: '\\d+\\.\\d+\\.\\d+' },
-    driving: { surfaces: ['acp'] },
-    trust: { changes: [{
-      id: 'hermes-hooks', kind: 'third-party-adapter', scope: 'project', owner: 'hermes',
-      value: 'subprocess hooks', effect: 'run consented lifecycle hooks',
-    }] },
-    lifecycle: { detect: { hook: { command: ['hermes', 'detect'], timeoutMs: 5000 } } },
-  };
-}
-
 function aqeShimSource() {
   return `
 const path = require('node:path');
@@ -112,13 +88,10 @@ test('host-neutral audit reports each provider and never proposes automatic trus
     write(path.join(fx.claude, 'settings.json'), { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node stop.cjs', timeout: 3000 }] }] } });
     write(path.join(fx.opencode, 'opencode.json'), { plugin: ['example-plugin@1.0.0'] });
     write(path.join(fx.opencode, 'plugins', 'local.js'), 'export const Local = async () => ({ "tool.execute.before": async () => {} });\n');
-    const manifest = path.join(fx.root, 'hermes.json');
-    write(manifest, externalManifest());
 
     const report = auditHooks({
       hosts: ['all'], projectRoots: [fx.project],
       versions: { codex: '0.151.0', claude: '2.1.258', opencode: '1.18.25' },
-      config: { hostAdapters: [{ name: 'hermes', source: manifest, contract: 1 }] },
       codex: { codexHome: fx.codex, pluginCacheDir: path.join(fx.codex, 'plugins', 'cache') },
       claude: { claudeRoot: fx.claude, managedSettingsFile: null },
       opencode: { opencodeRoot: fx.opencode },
@@ -126,11 +99,10 @@ test('host-neutral audit reports each provider and never proposes automatic trus
       upstream: { now: () => new Date(`${JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8')).lastCheckedAt}T12:00:00Z`) },
     });
 
-    assert.deepEqual(report.hosts, ['codex', 'claude', 'opencode', 'external']);
+    assert.deepEqual(report.hosts, ['codex', 'claude', 'opencode']);
     assert.equal(report.reports.codex.records.length, 1);
     assert.equal(report.reports.claude.records.length, 1);
     assert.equal(report.reports.opencode.records.length, 2);
-    assert.equal(report.reports.external.records.length, 1);
     assert.equal(report.summary.automaticActions, 0);
     assert.ok(Object.values(report.reports).every((host) => host.mode === 'read-only'));
     assert.ok(Object.values(report.reports).flatMap((host) => host.records).every((record) => record.trust.observedState === 'unknown'));
@@ -409,7 +381,7 @@ test('Codex does not apply the Stop output contract to another lifecycle event',
 
 test('structured argv boundaries remain material to occurrence identity', () => {
   const source = {
-    file: '/fixture/adapter.json', digest: 'a'.repeat(64), sourceKind: 'external-adapter-manifest',
+    file: '/fixture/adapter.json', digest: 'a'.repeat(64), sourceKind: 'project',
     authority: 'operator-configured', generatedStatus: 'direct', owner: 'fixture', baseDir: '/fixture',
   };
   const first = normalizedOccurrence({
@@ -507,55 +479,54 @@ test('Codex-only command isolates version and config probes to the selected prov
   }
 });
 
-test('external audit loads adapter configuration without probing unrelated host binaries', async () => {
-  const binaries = [];
-  let configLoads = 0;
+async function runQuietly(options) {
   const originalLog = console.log;
   const originalError = console.error;
+  const errors = [];
   console.log = () => {};
-  console.error = () => {};
+  console.error = (line) => { errors.push(String(line)); };
   try {
-    const status = await runAuditCommand({
-      flags: { host: ['external'], project: [] },
-      positionals: ['hooks'],
-      detectVersionFn(binary) { binaries.push(binary); return 'unknown'; },
-      loadConfigFn() { configLoads += 1; return { hostAdapters: [] }; },
-    });
-    assert.equal(status, 0);
-    assert.deepEqual(binaries, []);
-    assert.equal(configLoads, 1);
+    return { status: await runAuditCommand(options), errors };
   } finally {
     console.log = originalLog;
     console.error = originalError;
   }
+}
+
+test('--host external is rejected as an unknown host', async () => {
+  const { status, errors } = await runQuietly({
+    flags: { host: ['external'], project: [] },
+    positionals: ['hooks'],
+    detectVersionFn() { throw new Error('no host binary may be probed for a rejected host'); },
+    loadConfigFn() { throw new Error('no kit config may be loaded for a rejected host'); },
+  });
+  assert.equal(status, 2);
+  assert.match(errors.join('\n'), /unknown --host value\(s\): external/);
 });
 
-test('external audit refuses contract drift, name mismatch, and built-in shadowing before records', () => {
+test('a single named host never loads the kit config, and --host all loads it once', async () => {
+  const loads = { opencode: 0, all: 0 };
+  const quiet = (key) => ({
+    detectVersionFn() { return 'unknown'; },
+    loadConfigFn() { loads[key] += 1; return {}; },
+  });
+  await runQuietly({ flags: { host: ['opencode'], project: [] }, positionals: ['hooks'], ...quiet('opencode') });
+  await runQuietly({ flags: { host: ['all'], project: [] }, positionals: ['hooks'], ...quiet('all') });
+  assert.equal(loads.opencode, 0);
+  assert.equal(loads.all, 1);
+});
+
+test('the OpenCode report takes its ownership receipt from the kit config', () => {
   const fx = fixture();
   try {
-    const contractFile = path.join(fx.root, 'contract.json');
-    const nameFile = path.join(fx.root, 'name.json');
-    const builtinFile = path.join(fx.root, 'builtin.json');
-    write(contractFile, externalManifest());
-    write(nameFile, externalManifest());
-    const builtin = externalManifest();
-    builtin.name = 'codex';
-    builtin.host.id = 'codex';
-    write(builtinFile, builtin);
-    const report = auditHooks({
-      hosts: ['external'], projectRoots: [],
-      config: { hostAdapters: [
-        { name: 'hermes', source: contractFile, contract: 2 },
-        { name: 'other', source: nameFile, contract: 1 },
-        { name: 'codex', source: builtinFile, contract: 1 },
-      ] },
-    }).reports.external;
-    assert.equal(report.records.length, 0);
-    assert.equal(report.plan.length, 0);
-    assert.equal(report.sources.filter((source) => source.status === 'inadmissible').length, 3);
-    assert.match(report.issues.join('\n'), /contract-mismatch/);
-    assert.match(report.issues.join('\n'), /name-mismatch/);
-    assert.match(report.issues.join('\n'), /builtin-shadow/);
+    write(path.join(fx.opencode, 'opencode.json'), { plugin: ['example-plugin@1.0.0'] });
+    const authorityFor = (ownership) => auditHooks({
+      hosts: ['opencode'], projectRoots: [],
+      config: { integrations: { ownership: { opencode: ownership } } },
+      opencode: { opencodeRoot: fx.opencode },
+    }).reports.opencode.sources.map((source) => source.authority);
+    assert.deepEqual(authorityFor(null), ['user-owned']);
+    assert.deepEqual(authorityFor({ mcp: 'ak' }), ['mixed-user-and-receipt-evidence']);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }

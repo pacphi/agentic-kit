@@ -137,7 +137,7 @@ audit as `ak audit hooks` once, and files every hook by its source:
 | Source | Scope |
 | --- | --- |
 | Claude's administrator-managed settings | System |
-| Your own settings, plugin caches, user-level OpenCode configuration and plugins, external adapter manifests | User |
+| Your own settings, plugin caches, user-level OpenCode configuration and plugins | User |
 | A repository's `.claude/settings.json` and `settings.local.json`, `.codex/hooks.json` and `.codex/config.toml`, `opencode.json` and `.opencode/plugins` | Projects, inside that repository |
 
 A repository hook whose repository cannot be resolved stays under User and carries the **Project

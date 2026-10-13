@@ -154,10 +154,6 @@ function codexMcpConfig(text) {
  * unrelated preferences, project history, and caches must not inflate this
  * number. Tool schema bytes are not present in these host config documents. */
 export function inspectMcpConfig(host, raw) {
-  if (host === 'external') return {
-    status: 'unsupported', registrations: null, configBytes: null, schemaBytes: null,
-    reason: 'external-contract-v1-no-mcp-observability',
-  };
   if (raw == null || raw === '') return {
     status: 'not-recorded', registrations: null, configBytes: null, schemaBytes: null,
     reason: 'mcp-config-not-recorded',
@@ -258,9 +254,6 @@ function targetFile(host) {
 }
 
 async function guidanceEvidence(host, { cfg, pkgRoot, cwd }) {
-  if (host === 'external') return {
-    status: 'unsupported', reason: 'external-contract-v1-no-native-guidance',
-  };
   const target = GUIDANCE_TARGET[host];
   const superpowers = boundedNamedDirectory({
     root: path.join(paths.claudeDir(), 'plugins', 'cache'), name: 'superpowers',
@@ -292,9 +285,6 @@ async function guidanceEvidence(host, { cfg, pkgRoot, cwd }) {
 }
 
 function modelEvidence(host, environment) {
-  if (host === 'external') return {
-    status: 'unsupported', reason: 'external-contract-v1-no-context-observability',
-  };
   if (host === 'opencode') return {
     status: 'not-recorded', reason: 'bounded-local-model-window-cache-not-recorded',
   };
@@ -338,10 +328,7 @@ export async function collectContextEvidence({
   for (const host of hosts) {
     guidance[host] = await guidanceEvidence(host, { cfg, pkgRoot, cwd });
     windows[host] = modelEvidence(host, environment);
-    skills[host] = host === 'external' ? {
-      status: 'unsupported', count: null, metadataBytes: null, omitted: 0,
-      reason: 'external-contract-v1-no-skill-observability',
-    } : boundedSkillMetadata({ roots: skillRoots(host, cwd) });
+    skills[host] = boundedSkillMetadata({ roots: skillRoots(host, cwd) });
     mcp[host] = inspectMcpConfig(host, mcpRaw(host));
   }
   return { guidance, windows, skills, mcp, hookAudit };

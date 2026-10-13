@@ -296,7 +296,7 @@ filter on `repair`.
 Warnings that ask you to act now carry that step as a manual fix instead of inside the message. This
 covers the Brain plugin's unreviewed hooks and a refused Brain refresh, a missing AQE semantic
 backend, Codex context and plugin issues, an unreadable model inventory, Ruflo memory
-configuration and backups, unavailable external AQE intent, an invalid qe-court panel,
+configuration and backups, an invalid qe-court panel,
 agent-browser's external installs and browser payload, and Ruflo components waiting on a host
 restart. They are tagged `manual` on the dashboard and counted by `ak sync` and the bare `ak` hint.
 A script that read the instruction from `message` should read `fix`.

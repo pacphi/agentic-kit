@@ -6,8 +6,8 @@
 //
 // The rows exercised through their own section's existing tests (the Brain
 // plugin and held refresh, Codex plugins, qe-court, the Ruflo memory
-// configuration and backup rows, external AQE intent, an out-of-range external
-// agent-browser) assert the same contract there. This file covers the rest.
+// configuration and backup rows, an out-of-range external agent-browser)
+// assert the same contract there. This file covers the rest.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {

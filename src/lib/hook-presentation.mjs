@@ -15,10 +15,6 @@ const FINDINGS = Object.freeze({
     title: 'Claude-oriented hook is configured in Codex',
     explanation: 'The definition calls a Claude-oriented project helper from Codex. Its generator and intended host need to be established before changing it.',
   }),
-  'consent-and-grants-not-inferred': Object.freeze({
-    title: 'Adapter authority is not established',
-    explanation: 'A valid adapter manifest does not prove consent, capability grants, reachability, or target-host compatibility.',
-  }),
   'dynamic-shell': Object.freeze({
     title: 'Shell expansion needs review',
     explanation: 'This definition uses a shell wrapper, so expansion, working directory, and environment behavior need source-owner review.',
@@ -56,10 +52,6 @@ const FINDINGS = Object.freeze({
     title: 'Declared timeout exceeds the host limit',
     explanation: 'Claude applies a lower effective timeout than this SessionEnd definition declares.',
   }),
-  'target-host-compatibility-unproven': Object.freeze({
-    title: 'Target-host compatibility is not proven',
-    explanation: 'The external adapter contract does not establish a compatible target host and version for this definition.',
-  }),
   'trust-independent': Object.freeze({
     title: 'Runtime selection and trust are not established',
     explanation: 'Static configuration inspection does not prove that the host selected, trusted, or executed this definition.',
@@ -91,7 +83,6 @@ export function hookSourceLabel(source = {}) {
   if (kind === 'managed') return 'Managed configuration';
   if (kind.startsWith('project')) return 'Project configuration';
   if (kind.startsWith('plugin')) return source.pluginRef ? `Plugin ${String(source.pluginRef).slice(0, 64)}` : 'Plugin configuration';
-  if (kind === 'external-adapter-manifest') return 'Adapter manifest';
   return 'Configuration source';
 }
 

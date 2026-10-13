@@ -12,7 +12,7 @@ import {
   bothHostsEnabled, DUAL_ROLE_TIP, JUDGE_BIAS_TIP, QE_COURT_TIP, suggestedFallbackFor,
   seedActivityRoutesIfMultiHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, reportRetiredRouteChanges, undoCodexMcp,
   undoRufloMcpInCodex, detectAqeProviders, aqeProviderCredential, credentialGaps, fallbackSource,
-  collectIntegrationFacts, aqeSelectableProviderTypes, aqeSelectableChainProviderTypes,
+  collectIntegrationFacts, AQE_CHAIN_PROVIDER_TYPES,
 } from '../../lib/providers.mjs';
 import { parseRouteSpecs, formatModelHelp, PRIMARY_HOSTS, DEFAULT_PRIMARY_HOST, divergedRoutes, refreshSeededRoutes, pruneRoutesForHosts, modelNote, ACTIVITIES } from '../../lib/routing.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
@@ -226,8 +226,8 @@ function printHostsSection({ cfg, hosts, scope }) {
  *  flagging any rung with no discoverable credential. */
 function printAqeProviderSection({ cfg }) {
   const ap = cfg.providers.aqeProvider;
-  console.log(bold('\nagentic-qe LLM provider') + dim('  (built-ins: env; external: project llm-config)'));
-  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${aqeSelectableProviderTypes().join(', ')}`)}`);
+  console.log(bold('\nagentic-qe LLM provider') + dim('  (credentials read from env)'));
+  console.log(`  ${(ap ?? dim('aqe default (unset)')).padEnd(24)} ${dim(`supported: ${AQE_PROVIDER_TYPES.join(', ')}`)}`);
   console.log(`  ${dim(AQE_BILLING_HINT)}`);
   const chain = cfg.providers.aqeFallback ?? [];
   if (chain.length) {
@@ -252,12 +252,10 @@ function printAqeProviderSection({ cfg }) {
 function printAqeCredentialsSection() {
   const creds = detectAqeProviders();
   console.log(bold('\naqe provider credentials') + dim('  (keys read from env; never persisted)'));
-  for (const p of aqeSelectableProviderTypes()) {
+  for (const p of AQE_PROVIDER_TYPES) {
     const c = creds[p];
-    const state = !c.known
-      ? `admitted · credential not introspectable · billing ${c.billing} (declared/unverified)`
-      : c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
-        : `no key ${dim(`(${c.missing.join(', ')})`)}`;
+    const state = c.present ? (c.billing === 'local' ? 'local' : c.billing === 'subscription' ? 'subscription' : 'key present')
+      : `no key ${dim(`(${c.missing.join(', ')})`)}`;
     console.log(`  ${p.padEnd(14)} ${state}${c.source && c.present && c.billing === 'metered' ? dim(`  · ${c.source}`) : ''}`);
   }
 }
@@ -1095,8 +1093,8 @@ async function resolvePickIntentAndPreview({
 }
 
 export async function pick({ flags, cwd, pkgRoot, deps = { hostLifecycle: undefined }, migrateRoutes = migrateRetiredRoutesInConfig }) {
-  const aqeProviderTypes = aqeSelectableProviderTypes();
-  const aqeChainProviderTypes = aqeSelectableChainProviderTypes();
+  const aqeProviderTypes = AQE_PROVIDER_TYPES;
+  const aqeChainProviderTypes = AQE_CHAIN_PROVIDER_TYPES;
   const cfg = loadKitConfig();
   const trustBaseline = structuredClone(cfg);
   // A dry run never records host-setup evidence either — it is a read
