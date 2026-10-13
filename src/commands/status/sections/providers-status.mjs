@@ -3,8 +3,8 @@
 // The CORE "is provider config synced" signal: env drift, aqe fallback-chain
 // order drift, and chain credential viability. Split out from the ~8-concern
 // monolith (ADR-complexity-program #4) so a probe failure here doesn't also
-// swallow the external-intent, external-projection, ruflo-models, and
-// local-bindings rows in the sibling sections below.
+// swallow the ruflo-models and local-bindings rows in the sibling sections
+// below.
 //
 // Drift itself is judged by src/lib/providers.mjs's own comparators
 // (providerEnvDrift, aqeRouterDrift) — the same dry-run computation the
@@ -12,7 +12,7 @@
 // silently diverge from what `ak sync` would actually do (#129).
 import { have } from '../../../lib/exec.mjs';
 import {
-  HOSTS, settingsTarget, isDefault, providerEnvDrift, aqeRouterDrift, credentialGaps, providerExternalState,
+  HOSTS, settingsTarget, isDefault, providerEnvDrift, aqeRouterDrift, credentialGaps,
 } from '../../../lib/providers.mjs';
 import { readJson } from '../../../lib/settings.mjs';
 import { hostManagement, hostEnableCommand, NOT_PARTICIPATING } from '../../../lib/host-management.mjs';
@@ -59,9 +59,8 @@ function driftRow(cfg, cwd, env, scope) {
 // order whose rungs have no credential fails over into nothing (#54). Warn,
 // not fail — the primary rung still works — and no `fix`, since only the
 // user can supply a key.
-function credentialChainRow(cfg, unavailableExternalSet) {
-  const chain = cfg.providers.aqeFallback ?? [];
-  const credentialChain = chain.filter((entry) => !unavailableExternalSet.has(entry?.provider));
+function credentialChainRow(cfg) {
+  const credentialChain = cfg.providers.aqeFallback ?? [];
   if (!credentialChain.length) return null;
   const gaps = credentialGaps(credentialChain);
   if (gaps.length) {
@@ -79,11 +78,10 @@ export default {
     try {
       const { file, scope } = settingsTarget(cwd);
       const env = readJson(file, {})?.env ?? {};
-      const { unavailableIntentSet } = providerExternalState(cfg, cwd);
       const dflt = isDefault(cfg);
       if (!dflt) {
         rows.push(driftRow(cfg, cwd, env, scope));
-        const credRow = credentialChainRow(cfg, unavailableIntentSet);
+        const credRow = credentialChainRow(cfg);
         if (credRow) rows.push(credRow);
       }
       rows.push(...(await hostManagementRows(cfg, dflt, integrationFacts)));

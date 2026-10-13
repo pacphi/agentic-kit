@@ -370,6 +370,19 @@ test('a provider retune is not blocked by a leftover external host key in kit.js
   }
 });
 
+test('pick rejects an AQE provider that is not built in and lists the built-ins', () => {
+  const sb = pickSandbox({ hosts: { claude: true, codex: false, opencode: false } });
+  try {
+    const r = akPick(['x', 'host', 'pick', '--aqe-provider', 'hermes', '--yes'], sb);
+    const out = `${r.stdout}\n${r.stderr}`;
+    assert.match(out, /unknown aqe provider 'hermes'/);
+    assert.match(out, /valid: claude-code, codex, claude, openai, gemini, openrouter, azure-openai, bedrock, cognitum, ollama, onnx/);
+    assert.equal(kitJson(sb.home).providers.aqeProvider ?? null, null, 'no unknown provider is recorded');
+  } finally {
+    rm(sb.home, sb.project);
+  }
+});
+
 test('host off clears the OpenCode catalog override after a successful teardown', () => {
   const sb = pickSandbox({
     hosts: { claude: true, codex: false, opencode: false },

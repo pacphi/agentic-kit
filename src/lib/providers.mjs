@@ -43,7 +43,6 @@ import {
 import { CURRENT_INTEGRATIONS_VERSION, validateEndpoint } from './adapters/config.mjs';
 import { opencodeMcpStatus } from './opencode.mjs';
 import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
-import { projectedAqeExternalProviders } from './adapters/aqe-provider.mjs';
 import { applyAqeRouter, aqeRouterDrift, undoAqeRouter } from './aqe-router.mjs';
 import { installGlobalCli } from './npm-global-install.mjs';
 import { guardRufloMemoryRoot, MEMORY_ROOT_UPSTREAM } from './ruflo-memory-config.mjs';
@@ -98,26 +97,8 @@ export const AQE_PROVIDER_TYPES = [
 // via the codex binary — no env key), and provider REACHABILITY requires a
 // fallbackChain entry: aqe's FALLBACK_PRIORITY contains neither codex nor
 // claude-code, so an enabled codex provider is inert unless chained (#108
-// phase 3). AQE 3.13.12 also admits external ids registered from llm-config;
-// those are exposed lazily by aqeSelectableProviderTypes().
+// phase 3).
 export const AQE_CHAIN_PROVIDER_TYPES = [...AQE_PROVIDER_TYPES];
-
-/** Admitted external provider declarations currently projected by the runtime.
- * Re-read on each call so providers registered after this module loaded become
- * immediately selectable. */
-export function aqeExternalProviders({ projectRoot = path.resolve(process.cwd()) } = {}) {
-  return projectedAqeExternalProviders({ projectRoot }) ?? {};
-}
-
-/** Provider ids accepted by the interactive/non-interactive CLI right now. */
-export function aqeSelectableProviderTypes() {
-  return [...new Set([...AQE_PROVIDER_TYPES, ...Object.keys(aqeExternalProviders())])];
-}
-
-/** Provider ids accepted in fallback chains right now. */
-export function aqeSelectableChainProviderTypes() {
-  return aqeSelectableProviderTypes();
-}
 
 /** Credential descriptor per AQE_PROVIDER_TYPES member — the missing half of the
  *  chain validation: a rung whose provider has no usable credential is inert, and
@@ -158,19 +139,7 @@ export const AQE_PROVIDER_CREDENTIALS = {
  *  except for the injected env. */
 export function aqeProviderCredential(provider, { env = process.env, hostAuth = hostAuthState } = {}) {
   const d = AQE_PROVIDER_CREDENTIALS[provider];
-  if (!d) {
-    const declaration = aqeExternalProviders()[provider];
-    if (!declaration) return { known: false, present: false, billing: 'unknown', source: null, missing: [] };
-    // Admission proves the executable declaration was trusted and is current;
-    // it does not prove the provider's downstream login/account is usable.
-    return {
-      known: false,
-      present: false,
-      billing: declaration.billingMode ?? 'metered-api',
-      source: 'admitted external adapter (credential not introspectable)',
-      missing: [],
-    };
-  }
+  if (!d) return { known: false, present: false, billing: 'unknown', source: null, missing: [] };
   if (d.host) {
     const auth = hostAuth(d.host, { env });
     return { known: true, present: auth.mode !== 'none', billing: d.billing, source: auth.source, missing: auth.mode === 'none' ? [`${d.host} login`] : [] };
@@ -208,7 +177,7 @@ export function credentialGaps(chain = [], { env = process.env, hostAuth } = {})
 /** Credential state for every aqe provider type — what `ak x host status`
  *  renders, so a credentialed provider (e.g. openrouter) is never invisible. */
 export function detectAqeProviders({ env = process.env } = {}) {
-  return Object.fromEntries(aqeSelectableProviderTypes().map((p) => [p, aqeProviderCredential(p, { env })]));
+  return Object.fromEntries(AQE_PROVIDER_TYPES.map((p) => [p, aqeProviderCredential(p, { env })]));
 }
 
 /** Provenance for an aqeFallback entry. A legacy entry written before stamping
@@ -527,8 +496,8 @@ export const suggestedFallbackFor = (enabledHosts) => (enabledHosts.includes('co
 
 // ── agentic-qe router config (.agentic-qe/llm-config.json) ──────────────────
 // Grounded in aqe's router config-store + types (ADR-123). The convergence
-// pipeline itself (fallback chain, default provider, external provider
-// declarations/activations, agentOverrides projection) lives in
+// pipeline itself (fallback chain, default provider, agentOverrides
+// projection) lives in
 // aqe-router.mjs (ADR-0037); this module keeps the version gates and the
 // hash/ownership primitives aqe-router.mjs's surfaces are built from.
 
@@ -540,19 +509,10 @@ export function aqeSupportsAgentOverrides() {
   return !!v && cmpVersions(v, AGENT_OVERRIDES_MIN_AQE) >= 0;
 }
 
-// agentic-qe #628 shipped external CLI providers in 3.13.12. Earlier versions
-// ignore/reject this surface, so never write a declaration that cannot run.
-export const EXTERNAL_PROVIDERS_MIN_AQE = '3.13.12';
-export function aqeSupportsExternalProviders(version = installedVersion('agentic-qe')) {
-  return !!version && cmpVersions(version, EXTERNAL_PROVIDERS_MIN_AQE) >= 0;
-}
-
 // Ownership/hash primitives shared with aqe-router.mjs: this key/these
 // functions decide whether a value on disk is still EXACTLY what ak wrote
 // (never trusted input — a null/array/primitive receipt proves nothing).
-// Exported for aqe-router.mjs's own reconcilers and ownership receipts; kept
-// here (not there) because aqeExternalProviderState below needs them too and
-// this is the direction that avoids a cycle between the two modules.
+// Exported for aqe-router.mjs's own reconcilers and ownership receipts.
 export const AQE_OWNERSHIP_KEY = '_agenticKit';
 
 export function stableValue(value) {
@@ -569,85 +529,8 @@ export function plainRecord(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
-/** Honest, non-mutating projection state for status/verify. */
-export function aqeExternalProviderState(disk = {}, { projectRoot = path.resolve(process.cwd()) } = {}) {
-  const desired = aqeExternalProviders({ projectRoot });
-  const receipts = disk[AQE_OWNERSHIP_KEY]?.externalProviders ?? {};
-  const missing = [];
-  const drifted = [];
-  const stale = [];
-  for (const [id, declaration] of Object.entries(desired)) {
-    if (!(id in (disk.externalProviders ?? {}))) missing.push(id);
-    else if (declarationHash(disk.externalProviders[id]) !== declarationHash(declaration)
-      || receipts[id]?.writtenHash !== declarationHash(declaration)) drifted.push(id);
-    const activation = disk.providers?.[id];
-    if (activation === undefined) missing.push(`${id} activation`);
-    else if (activation.enabled !== true
-      || (receipts[id]?.providerWrittenHash
-        && declarationHash(activation) !== receipts[id].providerWrittenHash)) {
-      drifted.push(`${id} activation`);
-    }
-  }
-  for (const id of Object.keys(receipts)) if (!(id in desired)) stale.push(id);
-  return {
-    supported: aqeSupportsExternalProviders(), desired: Object.keys(desired), missing, drifted, stale,
-    ok: aqeSupportsExternalProviders() && missing.length === 0 && drifted.length === 0 && stale.length === 0,
-  };
-}
-
 export function aqeRouterFile(cwd = process.cwd()) {
   return path.join(paths.projectAqeDir(cwd), 'llm-config.json');
-}
-
-/** Host-adapter ids kit.json configures — either declared in `hostAdapters`, or
- *  named in `integrations.hosts` without being one of the built-in HOSTS. The
- *  status/verify surface that needs to know which non-builtin ids a config
- *  intends to be an aqe-external provider (relocated from status/sections —
- *  #129-shaped: this must read the config the same way the config is written,
- *  never a re-guessed shape). */
-export function configuredAdapterIds(cfg) {
-  const ids = new Set((cfg.hostAdapters ?? [])
-    .map((entry) => entry?.name).filter((name) => typeof name === 'string' && name));
-  const builtinHostIds = new Set(HOSTS.map((host) => host.id));
-  for (const id of Object.keys(cfg.integrations?.hosts ?? {})) {
-    if (!builtinHostIds.has(id)) ids.add(id);
-  }
-  return ids;
-}
-
-/** Which configured-adapter ids are actually REFERENCED by provider/routing
- *  intent (aqeProvider, aqeFallback, or a routing route/escalation host) —
- *  regardless of whether that id is currently admitted/live. */
-export function externalProviderIntent(cfg, adapterIds = configuredAdapterIds(cfg)) {
-  const intent = new Set();
-  if (adapterIds.has(cfg.providers?.aqeProvider)) intent.add(cfg.providers.aqeProvider);
-  for (const entry of cfg.providers?.aqeFallback ?? []) {
-    if (adapterIds.has(entry?.provider)) intent.add(entry.provider);
-  }
-  for (const route of Object.values(cfg.routing?.routes ?? {})) {
-    if (adapterIds.has(route?.host)) intent.add(route.host);
-    for (const rung of route?.escalation ?? []) {
-      if (adapterIds.has(rung?.host)) intent.add(rung.host);
-    }
-  }
-  return intent;
-}
-
-/** One honest read of the external-AQE-provider world for status/verify: the
- *  live projection state (aqeExternalProviderState) plus which configured
- *  intent (aqeProvider/aqeFallback/routing) names an id that isn't actually
- *  live right now. The single home for this derivation (#129) — every status
- *  section that needs it consumes this instead of re-deriving its own view. */
-export function providerExternalState(cfg, cwd = process.cwd()) {
-  const root = paths.repoRoot(cwd);
-  const disk = root ? (readJson(aqeRouterFile(root), {}) ?? {}) : {};
-  const state = root ? aqeExternalProviderState(disk, { projectRoot: root }) : null;
-  const intent = externalProviderIntent(cfg);
-  const live = new Set(state?.desired ?? []);
-  const unavailableIntent = [...intent].filter((id) => !live.has(id));
-  return {
-    root, disk, state, unavailableIntent, unavailableIntentSet: new Set(unavailableIntent),
-  };
 }
 
 // ── per-activity host routing (kit.json routing.routes) ─────────────────────
