@@ -1,0 +1,264 @@
+{
+  "_about": "Current user-level writes, each a named exception (P0-08). Vocabulary: src/lib/scope-gate.mjs. Entries may only be deleted; a new write fails tests/kit/scope-contract-*.test.mjs. Paths are relative to HOME; `*` stands for a timestamp or UUID.",
+  "writes": [
+    {
+      "name": "claude-md",
+      "what": "user CLAUDE.md managed blocks",
+      "path": ".claude/CLAUDE.md",
+      "scenarios": [
+        "sync",
+        "uninstall"
+      ]
+    },
+    {
+      "name": "claude-md-backup",
+      "what": "timestamped backup before uninstall strips the blocks",
+      "path": ".claude/CLAUDE.md.bak.*",
+      "scenarios": [
+        "uninstall"
+      ]
+    },
+    {
+      "name": "claude-settings",
+      "what": "user settings.json (ruflo component env)",
+      "path": ".claude/settings.json",
+      "scenarios": [
+        "setup",
+        "uninstall"
+      ]
+    },
+    {
+      "name": "claude-ruflo-components-ledger",
+      "what": "ruflo component ledger beside settings.json",
+      "path": ".claude/settings.json.agentic-kit-ruflo-components.json",
+      "scenarios": [
+        "setup",
+        "uninstall"
+      ]
+    },
+    {
+      "name": "claude-settings-backup",
+      "what": "settings.json backup before component changes",
+      "path": ".claude/settings.json.ak-ruflo-components-backup.*",
+      "scenarios": [
+        "uninstall"
+      ]
+    },
+    {
+      "name": "agent-browser-config",
+      "what": "managed agent-browser MCP config",
+      "path": ".config/agentic-kit/agent-browser.json",
+      "scenarios": [
+        "setup",
+        "uninstall"
+      ]
+    },
+    {
+      "name": "kit-json",
+      "what": "kit.json machine config",
+      "path": ".config/agentic-kit/kit.json",
+      "scenarios": [
+        "setup",
+        "sync",
+        "sync --no-upgrade",
+        "uninstall"
+      ]
+    },
+    {
+      "name": "evidence-ak-launcher",
+      "what": "evidence record: ak launcher",
+      "path": ".local/state/agentic-kit/evidence/ak-launcher/machine.json",
+      "scenarios": [
+        "sync"
+      ]
+    },
+    {
+      "name": "evidence-daemon-sweep",
+      "what": "evidence record: daemon sweep",
+      "path": ".local/state/agentic-kit/evidence/daemon-sweep/machine.json",
+      "scenarios": [
+        "sync"
+      ]
+    },
+    {
+      "name": "evidence-host-install-method",
+      "what": "evidence record: host install method",
+      "path": ".local/state/agentic-kit/evidence/host-install-method/claude.json",
+      "scenarios": [
+        "setup",
+        "sync",
+        "sync --no-upgrade"
+      ]
+    },
+    {
+      "name": "evidence-host-setup-claude",
+      "what": "evidence record: host setup (claude)",
+      "path": ".local/state/agentic-kit/evidence/host-setup/claude.json",
+      "scenarios": [
+        "sync",
+        "sync --no-upgrade"
+      ]
+    },
+    {
+      "name": "evidence-host-setup-codex",
+      "what": "evidence record: host setup (codex)",
+      "path": ".local/state/agentic-kit/evidence/host-setup/codex.json",
+      "scenarios": [
+        "sync",
+        "sync --no-upgrade"
+      ]
+    },
+    {
+      "name": "evidence-host-setup-opencode",
+      "what": "evidence record: host setup (opencode)",
+      "path": ".local/state/agentic-kit/evidence/host-setup/opencode.json",
+      "scenarios": [
+        "sync",
+        "sync --no-upgrade"
+      ]
+    },
+    {
+      "name": "evidence-live-check-aqe-embedding",
+      "what": "evidence record: AQE embedding live check",
+      "path": ".local/state/agentic-kit/evidence/live-check/aqe-embedding.json",
+      "scenarios": [
+        "sync",
+        "sync --no-upgrade"
+      ]
+    },
+    {
+      "name": "evidence-native-runtime-cli",
+      "what": "evidence record: native runtime (cli)",
+      "path": ".local/state/agentic-kit/evidence/native-runtime/cli.json",
+      "scenarios": [
+        "setup"
+      ]
+    },
+    {
+      "name": "evidence-native-runtime-memory",
+      "what": "evidence record: native runtime (memory)",
+      "path": ".local/state/agentic-kit/evidence/native-runtime/memory.json",
+      "scenarios": [
+        "setup"
+      ]
+    }
+  ],
+  "dashboard": [
+    {
+      "name": "kit-json",
+      "what": "kit.json created by a GET",
+      "path": ".config/agentic-kit/kit.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "model-scope-key",
+      "what": "model scope key created by a GET",
+      "path": ".config/agentic-kit/model-scope.key",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "usage-index",
+      "what": "usage index written by a GET",
+      "path": ".config/agentic-kit/usage-index.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-ak-launcher",
+      "what": "evidence record: ak launcher",
+      "path": ".local/state/agentic-kit/evidence/ak-launcher/machine.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-daemon-sweep",
+      "what": "evidence record: daemon sweep",
+      "path": ".local/state/agentic-kit/evidence/daemon-sweep/machine.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-host-setup-claude",
+      "what": "evidence record: host setup (claude)",
+      "path": ".local/state/agentic-kit/evidence/host-setup/claude.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-host-setup-codex",
+      "what": "evidence record: host setup (codex)",
+      "path": ".local/state/agentic-kit/evidence/host-setup/codex.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-host-setup-opencode",
+      "what": "evidence record: host setup (opencode)",
+      "path": ".local/state/agentic-kit/evidence/host-setup/opencode.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-native-runtime-cli",
+      "what": "evidence record: native runtime (cli)",
+      "path": ".local/state/agentic-kit/evidence/native-runtime/cli.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-native-runtime-memory",
+      "what": "evidence record: native runtime (memory)",
+      "path": ".local/state/agentic-kit/evidence/native-runtime/memory.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "evidence-npm-global-root",
+      "what": "evidence record: npm global root",
+      "path": ".local/state/agentic-kit/evidence/npm-global-root/machine.json",
+      "scenarios": [
+        "dashboard"
+      ]
+    },
+    {
+      "name": "maintenance-checkpoints-folder",
+      "what": "empty maintenance checkpoints folder",
+      "path": ".local/state/agentic-kit/maintenance/management/checkpoints/",
+      "scenarios": [
+        "dashboard"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "npm-install-global",
+      "what": "npm install -g of ruflo, agentic-qe, claude-code and the other managed packages",
+      "rule": "npm-install-global",
+      "scenarios": [
+        "setup",
+        "sync",
+        "sync --no-upgrade"
+      ]
+    },
+    {
+      "name": "claude-mcp-user-scope",
+      "what": "claude mcp remove -s user (ruflo and claude-flow registrations)",
+      "rule": "claude-mcp-user-scope",
+      "scenarios": [
+        "uninstall"
+      ]
+    }
+  ]
+}

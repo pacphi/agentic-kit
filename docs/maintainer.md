@@ -368,6 +368,13 @@ with `violations()` and clears it with `clearViolations()`; wrap the code under 
 `withWriteScope({ root }, fn)` to set the project root. `pnpm run lint` shows the writers that
 bypass `file-write.mjs` as warnings that mention ADR-0064.
 
+`tests/kit/fixtures/user-level-write-baseline.json` lists every user-level write that exists today,
+each as a named exception. `tests/kit/scope-contract-cli.test.mjs` runs `setup`, `sync`,
+`sync --no-upgrade` and `uninstall` against a disposable `HOME`, and
+`tests/kit/scope-contract-dashboard.test.mjs` serves every dashboard GET and SSE route from a
+folder that has not opted in. A write that is not in the list fails the test, and so does a listed
+write that no longer happens: delete its entry in the same change. Never add an entry.
+
 ## 5. Branching methodology
 
 - **Default branch:** `main`. CI runs on every push; release readiness still requires the relevant
