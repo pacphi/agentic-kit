@@ -12,8 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   registerBuiltinLifecycle, registerAdmittedLifecycle, lifecycleAdapterFor,
-  hostsWithLifecycle, builtinHostsWithLifecycle, isBuiltinHost,
-  lifecycleExecutionEnabled, detectionBinFor, buildAdmittedLifecycleAdapter,
+  hostsWithLifecycle, lifecycleExecutionEnabled, buildAdmittedLifecycleAdapter,
   resetAdmittedLifecycle,
 } from '../../src/lib/adapters/lifecycle-registry.mjs';
 import { OPENCODE_LIFECYCLE_ADAPTER } from '../../src/lib/opencode.mjs';
@@ -49,11 +48,6 @@ test('hostsWithLifecycle() returns only registered ids, in HOST_REGISTRY order',
     assert.ok(idx > cursor, `${id} out of HOST_REGISTRY order`);
     cursor = idx;
   }
-});
-
-test('hostsWithLifecycle() equals builtinHostsWithLifecycle() when nothing is admitted (ADR-0031 P3 freeze criterion 4)', () => {
-  assert.deepEqual(hostsWithLifecycle(), builtinHostsWithLifecycle(),
-    'flag-off / nothing-admitted must be byte-identical to the pre-P3 built-ins-only behavior');
 });
 
 test('registering an unknown host id throws at registration (construction-time invariant)', () => {
@@ -104,23 +98,23 @@ for (const rel of [
 // admitted) safely, gated per-host by lifecycleExecutionEnabled — an admitted
 // host is never exercised without BOTH cfg enablement and the experimental
 // flag, so this never auto-enables anything.
-for (const rel of ['commands/sync.mjs', 'commands/setup.mjs', 'commands/uninstall.mjs']) {
-  test(`${rel} loops hostsWithLifecycle() gated by lifecycleExecutionEnabled (ADR-0031 P3)`, () => {
+for (const [rel, gated] of [['commands/sync.mjs', true], ['commands/setup.mjs', true], ['commands/uninstall.mjs', false]]) {
+  test(`${rel} loops hostsWithLifecycle()${gated ? ' gated by lifecycleExecutionEnabled' : ' without a config gate'}`, () => {
     const text = src(rel);
     assert.ok(text.includes('hostsWithLifecycle()'),
       `${rel}'s lifecycle loop must iterate hostsWithLifecycle() now that the loop body is shape-agnostic`);
-    assert.ok(text.includes('lifecycleExecutionEnabled'),
-      `${rel} must gate lifecycle execution through lifecycleExecutionEnabled (flag + explicit enablement for an admitted host)`);
+    assert.equal(text.includes('lifecycleExecutionEnabled'), gated,
+      gated
+        ? `${rel} must gate lifecycle execution through lifecycleExecutionEnabled`
+        : `${rel} tears down every lifecycle host, enabled in config or not, so it must not gate on lifecycleExecutionEnabled`);
   });
 }
 
-// ── builtinHostsWithLifecycle() stays a pure, built-ins-only registry query ─
-// No longer the setup/sync/uninstall-facing function (P3 above), but its own
-// invariant is unaffected: it must never include an admitted external, even
-// once that host's lifecycle adapter is registered — e.g. an install-hint
-// lookup that only makes sense against HOSTS' own built-in package metadata
-// must never be handed an admitted host id.
-test('builtinHostsWithLifecycle() excludes an admitted external host even after its lifecycle is registered', () => {
+// ── the lifecycle loops see built-in hosts only ────────────────────────────
+// setup, sync and uninstall iterate hostsWithLifecycle(). An admitted host's
+// lifecycle adapter can still be registered until the adapter modules are
+// deleted, but it must never reach those loops.
+test('hostsWithLifecycle() ignores a registered admitted lifecycle host, and opencode keeps its own adapter', () => {
   const hostId = 'hermes-lifecycle-probe';
   const host = {
     id: hostId,
@@ -151,26 +145,14 @@ test('builtinHostsWithLifecycle() excludes an admitted external host even after 
       }],
     },
   });
-
-  // Baseline BEFORE admitting anything — not a literal ['opencode'], because
-  // an earlier test in this same file (registerBuiltinLifecycle('claude', ...))
-  // mutates the real, process-shared LIFECYCLE_ADAPTERS map too. The
-  // invariant under test is "unaffected by registering an external", so
-  // compare against a live before/after snapshot instead of a hardcoded list.
-  const before = builtinHostsWithLifecycle();
+  const before = hostsWithLifecycle();
 
   applyAdmitted([{ entry: host }]);
   try {
     registerAdmittedLifecycle(manifest, { runHook: async () => ({ ok: true, stdout: '{}', exitCode: 0 }) });
-
-    assert.ok(hostsWithLifecycle().includes(hostId),
-      'sanity: the pure registry query DOES see the admitted, lifecycle-registered host');
-    assert.ok(
-      !builtinHostsWithLifecycle().includes(hostId),
-      'the setup/sync/uninstall-facing function must never include an admitted external, even once its lifecycle is registered',
-    );
-    assert.deepEqual(builtinHostsWithLifecycle(), before,
-      'builtinHostsWithLifecycle() must be unaffected by registering an external lifecycle adapter');
+    assert.ok(lifecycleAdapterFor(hostId), 'sanity: the admitted adapter is registered');
+    assert.deepEqual(hostsWithLifecycle(), before, 'the loops still see only the built-in lifecycle hosts');
+    assert.equal(lifecycleAdapterFor('opencode'), OPENCODE_LIFECYCLE_ADAPTER, "opencode's own adapter is untouched");
   } finally {
     resetAdmitted();
   }
@@ -219,43 +201,10 @@ function hermesManifest(overrides = {}) {
   });
 }
 
-test('isBuiltinHost distinguishes HOST_REGISTRY ids from an admitted external', () => {
-  assert.equal(isBuiltinHost('opencode'), true);
-  assert.equal(isBuiltinHost('hermes-gate-probe'), false);
-});
-
-test('lifecycleExecutionEnabled: a built-in only needs cfg enablement (no flag required)', () => {
-  assert.equal(lifecycleExecutionEnabled('opencode', { integrations: { hosts: { opencode: true } } }, {}), true);
-  assert.equal(lifecycleExecutionEnabled('opencode', { integrations: { hosts: { opencode: false } } }, {}), false);
-  assert.equal(lifecycleExecutionEnabled('opencode', {}, {}), false, 'no cfg enablement at all');
-});
-
-test('lifecycleExecutionEnabled: an admitted host needs BOTH cfg enablement AND the experimental flag', () => {
-  const cfgEnabled = { integrations: { hosts: { 'hermes-gate-probe': true } } };
-  assert.equal(lifecycleExecutionEnabled('hermes-gate-probe', cfgEnabled, {}), false, 'flag unset');
-  assert.equal(
-    lifecycleExecutionEnabled('hermes-gate-probe', cfgEnabled, { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' }),
-    true,
-    'flag set AND cfg enabled',
-  );
-  assert.equal(
-    lifecycleExecutionEnabled('hermes-gate-probe', {}, { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' }),
-    false,
-    'flag alone never auto-enables — cfg enablement is still required',
-  );
-});
-
-test('detectionBinFor: a built-in uses its own host id; an admitted host uses manifest.detection.bin', () => {
-  applyAdmitted([{ entry: hermesHost() }]);
-  try {
-    const manifest = hermesManifest();
-    registerAdmittedLifecycle(manifest, { runHook: async () => ({ ok: true, stdout: '{}', exitCode: 0 }) });
-    assert.equal(detectionBinFor('opencode'), 'opencode');
-    assert.equal(detectionBinFor('hermes-gate-probe'), 'hermes-bin',
-      'must read the manifest\'s own detection.bin, not the host id');
-  } finally {
-    resetAdmitted();
-  }
+test('lifecycleExecutionEnabled follows cfg enablement alone', () => {
+  assert.equal(lifecycleExecutionEnabled('opencode', { integrations: { hosts: { opencode: true } } }), true);
+  assert.equal(lifecycleExecutionEnabled('opencode', { integrations: { hosts: { opencode: false } } }), false);
+  assert.equal(lifecycleExecutionEnabled('opencode', {}), false, 'no cfg enablement at all');
 });
 
 test('buildAdmittedLifecycleAdapter stashes detectionBin from manifest.detection.bin', () => {

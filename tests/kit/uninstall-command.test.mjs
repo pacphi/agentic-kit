@@ -320,6 +320,23 @@ test('default uninstall strips ak opencode wiring + artifacts and restores user 
   assert.equal(cfg.integrations.ownership.opencode.mcp, null, 'ownership markers nulled (kit.json kept without --purge)');
 });
 
+test('uninstall still strips ak opencode wiring when kit.json has the host switched off', async () => {
+  seedHome();
+  seedManagedOpencode();
+  const file = paths.kitConfigPath();
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.integrations.hosts.opencode = false;
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const { result } = await captureLog(() => uninstall.run({ flags: { yes: true } }));
+  assert.equal(result, 0);
+  const doc = JSON.parse(fs.readFileSync(path.join(ocHome(), 'opencode.json'), 'utf8'));
+  assert.ok(!doc.mcp?.['claude-flow'], 'ak MCP entry stripped although the host is disabled');
+  assert.deepEqual(doc.mcp?.['my-server'], { type: 'local', command: ['x'] }, 'user MCP server survives');
+  assert.ok(!fs.existsSync(path.join(ocHome(), 'plugins', 'ruflo-hooks.js')), 'ak plugin removed');
+  const cfg = JSON.parse(fs.readFileSync(paths.kitConfigPath(), 'utf8'));
+  assert.equal(cfg.integrations.ownership.opencode.mcp, null, 'ownership markers nulled');
+});
+
 test('a quiet-success undo still persists the nulled ownership markers (save is not gated on file changes)', async () => {
   // The stale-marker case the save-gate bug stranded forever: ownership says
   // mcp:'ak' but the tracked entries are ALREADY absent from opencode.json and

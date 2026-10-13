@@ -14,7 +14,7 @@ import { loadKitConfig } from '../lib/config.mjs';
 import { collectIntegrationFacts } from '../lib/providers.mjs';
 import { globalRoot } from '../lib/paths.mjs';
 import { row } from './status/row.mjs';
-import { renderHostDetailRows, admittedLifecycleFallbackRows } from './status/host-detail.mjs';
+import { renderHostDetailRows } from './status/host-detail.mjs';
 import { SECTIONS_BEFORE_HOST_DETAIL, SECTIONS_AFTER_HOST_DETAIL } from './status/sections/index.mjs';
 
 export { renderHostDetailRows };
@@ -183,7 +183,6 @@ export async function collect({
   // absent is the CLI-presence branch inside its own renderer, sourced from
   // the shared facts snapshot — no extra probing here or in the loop).
   rows.push(...(await renderHostDetailRows({ cfg, pkgRoot, facts: integrationFacts })));
-  rows.push(...admittedLifecycleFallbackRows(cfg));
 
   await runSections(SECTIONS_AFTER_HOST_DETAIL, ctx, rows);
 

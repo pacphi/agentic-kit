@@ -74,7 +74,6 @@ test('real run_machine passes injected lifecycle to the host installation loop',
       export const hostsWithLifecycle = () => [];
       export const lifecycleAdapterFor = () => { throw Error('host lifecycle reached'); };
       export const lifecycleExecutionEnabled = () => false;
-      export const detectionBinFor = () => { throw Error('host lifecycle reached'); };
     `],
     ['../lib/ruflo-components/apply.mjs', "export const reconcileRufloComponents = async () => { throw Error('components reached'); };"],
     ['./status/sections/ruflo-components.mjs', "export const componentResultReport = () => [];"],

@@ -1,10 +1,9 @@
 // The ordered registries `collect()` walks. Each section exports
 // `{ id, collect: async (ctx) => Row[] }` — ctx is `{ cfg, cwd, pkgRoot,
 // integrationFacts }`. Splitting collect() into two registries (rather than
-// one) only reflects that two calls in between (renderHostDetailRows,
-// admittedLifecycleFallbackRows) already have their own bespoke signatures
-// and error contracts and are called directly by collect() instead of going
-// through this generic dispatch.
+// one) only reflects that the call in between (renderHostDetailRows) already
+// has its own bespoke signature and error contract and is called directly by
+// collect() instead of going through this generic dispatch.
 import models from './models.mjs';
 import codexContext from './codex-context.mjs';
 import context from './context.mjs';

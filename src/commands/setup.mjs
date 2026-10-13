@@ -22,7 +22,7 @@ import { reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
 import { alignHosts } from './x/host-align.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
-import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
+import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled } from '../lib/adapters/lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, hostInstallState, installHost, collectIntegrationFacts, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
@@ -267,26 +267,20 @@ export async function installEnabledAbsentHosts(cfg, flags, lifecycle = {}) {
 
 /** Step 6b: host lifecycle wiring — connected MCPs, compact lazy gateway,
  *  lifecycle plugin, converted agents, specialist dispatcher, and platform
- *  skill (each adapter owns its own surfaces — opencode.mjs for opencode; a
- *  subprocess hook for an admitted external, see lifecycle-registry.mjs's
- *  buildAdmittedLifecycleAdapter). Registry-driven: loops
- *  hostsWithLifecycle() (built-ins + admitted, ADR-0031 P3) rather than
- *  naming opencode, so a second lifecycle host — built-in or admitted —
- *  needs no new branch here. lifecycleExecutionEnabled gates each host: a
- *  built-in only needs cfg enablement (unchanged); an admitted external
- *  ALSO needs the experimental flag — an admitted host is opt-in exactly
- *  like opencode, and this never auto-enables anything. Only when the CLI
- *  is actually present: a declined/failed install must not leave a
- *  freshly-created config home behind (codex-review #4).
- *  lifecycle-render.mjs's renderApplyReport dispatches on the runLifecycle
- *  result's own shape (opencode's rich per-surface shape — including the
- *  compact gateway — vs. an admitted host's generic lifecycleResult), so
- *  this loop body never destructures a host-specific result directly.
+ *  skill (each adapter owns its own surfaces — opencode.mjs for opencode).
+ *  Registry-driven: loops hostsWithLifecycle() rather than naming opencode,
+ *  so a second lifecycle host needs no new branch here.
+ *  lifecycleExecutionEnabled gates each host on cfg enablement and never
+ *  auto-enables anything. Only when the CLI is actually present: a
+ *  declined/failed install must not leave a freshly-created config home
+ *  behind (codex-review #4). lifecycle-render.mjs's renderApplyReport
+ *  dispatches on the runLifecycle result's own shape, so this loop body
+ *  never destructures a host-specific result directly.
  *  Returns false only when a report demands run_machine abort. */
 async function applyMachineHostLifecycles(cfg, pkgRoot) {
   for (const hostId of hostsWithLifecycle()) {
     if (!lifecycleExecutionEnabled(hostId, cfg)) continue;
-    if (!(await have(detectionBinFor(hostId)))) {
+    if (!(await have(hostId))) {
       const pkg = HOSTS.find((h) => h.id === hostId)?.pkg ?? hostId;
       warn(`${hostId}: enabled but CLI not installed — wiring skipped (re-run \`ak sync\` after installing ${pkg})`);
       continue;
