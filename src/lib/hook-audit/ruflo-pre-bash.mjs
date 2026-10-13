@@ -11,22 +11,29 @@ export const RUFLO_HELPER_REFRESH = 'ruflo init upgrade';
 export const RUFLO_PRE_BASH_CODE = 'ruflo-pre-bash-exit-not-blocking';
 
 const HELPER_RELATIVE = path.join('.claude', 'helpers', 'hook-handler.cjs');
-const PRE_BASH_HANDLER = /['"]pre-bash['"]\s*:/;
+const PRE_BASH_HANDLER = /['"]pre-bash['"]\s*:\s*(?:async\s*)?(?:\(|function|\w+\s*=>)/;
+const COMMENTS = /\/\*[\s\S]*?\*\/|(?:^|\s)\/\/[^\n]*/g;
 const NEXT_HANDLER = /\n {2}['"][\w-]+['"]\s*:/;
 
-/** The exit code of the first process.exit after [BLOCKED] in the pre-bash
- *  handler, or null when the handler has no such path. */
-export function preBashBlockedExit(text) {
+/** The exit code that follows [BLOCKED] in the pre-bash handler: the first one
+ *  that is not 2 when any [BLOCKED] path misses it, else 2. Null when the
+ *  handler has no [BLOCKED] path with a literal process.exit. Comments are
+ *  ignored. */
+export function preBashBlockedExit(source) {
+  const text = source.replace(COMMENTS, (match) => match.replace(/[^\n]/g, ' '));
   const start = PRE_BASH_HANDLER.exec(text);
   if (!start) return null;
   const rest = text.slice(start.index + start[0].length);
   const body = rest.slice(0, NEXT_HANDLER.exec(rest)?.index ?? rest.length);
-  const blocked = body.indexOf('[BLOCKED]');
-  if (blocked < 0) return null;
-  // The first closing brace on its own line ends the `if` that prints [BLOCKED].
-  const branch = body.slice(blocked).split(/\n\s*\}/, 1)[0];
-  const exit = /process\.exit\((\d+)\)/.exec(branch);
-  return exit ? Number(exit[1]) : null;
+  const exits = [];
+  for (let at = body.indexOf('[BLOCKED]'); at >= 0; at = body.indexOf('[BLOCKED]', at + 1)) {
+    // The first closing brace on its own line ends the `if` that prints [BLOCKED].
+    const branch = body.slice(at).split(/\n\s*\}/, 1)[0];
+    const exit = /process\.exit\(\s*(\d+)\s*\)/.exec(branch);
+    if (exit) exits.push(Number(exit[1]));
+  }
+  if (!exits.length) return null;
+  return exits.find((code) => code !== 2) ?? 2;
 }
 
 export function auditRufloPreBash(projectRoots) {
@@ -43,7 +50,7 @@ export function auditRufloPreBash(projectRoots) {
     if (exitCode === null || exitCode === 2) continue;
     plan.push({ id: `ruflo-pre-bash-${sha256(file).slice(0, 16)}`, host: 'claude', target: file,
       diagnostic: RUFLO_PRE_BASH_CODE, classification: 'upstream-required',
-      reason: `Ruflo helper prints [BLOCKED] but exits ${exitCode}, so Claude Code still runs the command; only exit 2 blocks. `
+      reason: `Ruflo helper prints [BLOCKED] but exits ${exitCode}, so Claude Code still runs the command unless the helper also prints a JSON deny; only exit 2 blocks. `
         + `Ruflo ${RUFLO_FIRST_BLOCKING_RELEASE} is the first release that blocks: update Ruflo, then run \`${RUFLO_HELPER_REFRESH}\` in the project`,
       evidence: { exitCode, firstBlockingRelease: RUFLO_FIRST_BLOCKING_RELEASE, fix: RUFLO_HELPER_REFRESH } });
   }

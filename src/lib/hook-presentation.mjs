@@ -46,7 +46,7 @@ const FINDINGS = Object.freeze({
   }),
   'ruflo-pre-bash-exit-not-blocking': Object.freeze({
     title: 'Dangerous-command check does not block',
-    explanation: 'This project\'s Ruflo helper prints [BLOCKED] but exits 1, which Claude Code treats as a non-blocking error, so the command still runs. Ruflo 3.51.1 is the first release that exits 2; update Ruflo and run ruflo init upgrade in the project.',
+    explanation: 'This project\'s Ruflo helper prints [BLOCKED] but does not exit 2, which Claude Code treats as a non-blocking error, so the command still runs. Ruflo 3.51.1 is the first release that exits 2; update Ruflo and run ruflo init upgrade in the project.',
   }),
   'session-end-timeout-clamped': Object.freeze({
     title: 'Declared timeout exceeds the host limit',

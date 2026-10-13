@@ -24,6 +24,7 @@ export default [
       '.agentic-qe/**',
       '.agents/**',
       'docs/archive/**',
+      'tests/fixtures/ruflo-helpers/**',
       'coverage/**',
       // Gitignored tool output, same category as coverage/: tests/ui writes
       // screenshots here and debugging sessions leave browser-context scratch

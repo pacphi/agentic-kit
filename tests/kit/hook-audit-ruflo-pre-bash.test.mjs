@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { run as runAuditCommand } from '../../src/commands/audit.mjs';
+import { preBashBlockedExit } from '../../src/lib/hook-audit/ruflo-pre-bash.mjs';
 import { auditClaudeHooks } from '../../src/lib/hook-audit/providers/claude.mjs';
 import { presentHookFinding } from '../../src/lib/hook-presentation.mjs';
 import { captureLog, spawnEnv } from './helpers/home-sandbox.mjs';
@@ -139,4 +140,32 @@ test('the finding has dashboard copy that names the release', () => {
   const copy = presentHookFinding(CODE);
   assert.notEqual(copy.title, 'Unclassified configuration finding');
   assert.match(copy.explanation, /3\.51\.1/);
+});
+
+// The parser reads text and never runs it, so these shapes are checked directly.
+const handler = (branch) => `const handlers = {\n  'pre-bash': () => {\n    if (danger) {\n      console.log('[BLOCKED] no');\n${branch}\n    }\n  },\n  'post-edit': () => {},\n};\n`;
+
+test('any exit other than 2 after [BLOCKED] is reported, with its own code', () => {
+  assert.equal(preBashBlockedExit(handler('      process.exit(0);')), 0);
+  assert.equal(preBashBlockedExit(handler('      process.exit(3);')), 3);
+  assert.equal(preBashBlockedExit(handler('      process.exit( 2 );')), 2);
+});
+
+test('a commented-out exit does not count, and a comment cannot hide the real one', () => {
+  assert.equal(preBashBlockedExit(handler('      // was process.exit(1)\n      process.exit(2);')), 2);
+  assert.equal(preBashBlockedExit(handler('      /* process.exit(2) */\n      process.exit(1);')), 1);
+});
+
+test('every [BLOCKED] path is checked, not only the first', () => {
+  const two = `const handlers = {\n  'pre-bash': () => {\n    if (a) {\n      console.log('[BLOCKED] a');\n      process.exit(2);\n    }\n    if (b) {\n      console.log('[BLOCKED] b');\n      process.exit(1);\n    }\n  },\n};\n`;
+  assert.equal(preBashBlockedExit(two), 1);
+});
+
+test('a config map named pre-bash before the handlers is not mistaken for the handler', () => {
+  const text = `const timeouts = { 'pre-bash': 1000 };\n${handler('      process.exit(1);')}`;
+  assert.equal(preBashBlockedExit(text), 1);
+});
+
+test('CRLF line endings parse like LF', () => {
+  assert.equal(preBashBlockedExit(handler('      process.exit(1);').replace(/\n/g, '\r\n')), 1);
 });
