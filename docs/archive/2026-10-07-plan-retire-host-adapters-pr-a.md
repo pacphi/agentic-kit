@@ -6,9 +6,9 @@
 
 ## Status
 
-**Active** (2026-10-07). Plan for pull request A of three for card P0-04, issue
-[#324](https://github.com/pacphi/agentic-kit/issues/324). Nothing is merged. Plans for pull requests B and
-C are written when each starts, because their edit sites depend on what A leaves behind.
+**Executed** in [#468](https://github.com/pacphi/agentic-kit/pull/468) (2026-10-07). Plan for pull request A
+of three for card P0-04, issue [#324](https://github.com/pacphi/agentic-kit/issues/324). Plans for pull
+requests B and C are written when each starts, because their edit sites depend on what A leaves behind.
 
 **Goal:** Remove `ak host adapters`, `ak x aqe-provider` and the `AK_EXPERIMENTAL_HOST_ADAPTERS`
 bootstrap, detach routing, hosts and `ak run` from the admitted-host overlay, fix the unknown-host error
@@ -21,7 +21,7 @@ the now-dead modules stay until pull request C deletes the modules.
 **Tech Stack:** Node 22+ ES modules (`.mjs`), `node:test`, ESLint 10, markdownlint, lychee. Zero runtime
 dependencies.
 
-**Spec:** [2026-10-07-retire-host-adapters-design.md](2026-10-07-retire-host-adapters-design.md)
+**Spec:** [2026-10-07-retire-host-adapters-design.md](../plans/2026-10-07-retire-host-adapters-design.md)
 
 **How this plan was checked.** Every edit below comes from one machine-readable edit script. I replayed
 that script in a fresh worktree from `main`, task by task, and ran each task's focused tests. The replayed

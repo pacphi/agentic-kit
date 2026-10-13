@@ -9,7 +9,7 @@
     "schemaVersion": { "const": "hook-heal-plan/v1" },
     "auditId": { "type": "string", "minLength": 1 },
     "planDigest": { "$ref": "#/$defs/sha256" },
-    "hosts": { "type": "array", "uniqueItems": true, "items": { "enum": ["codex", "claude", "opencode", "external"] } },
+    "hosts": { "type": "array", "uniqueItems": true, "items": { "enum": ["codex", "claude", "opencode"] } },
     "runtimeVersions": { "type": "object", "additionalProperties": { "type": "string" } },
     "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
     "summary": {
