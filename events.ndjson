@@ -111,3 +111,5 @@
 {"line":"UPSTREAM-WATCH ruflo-3.38.21-init-suppression-flags retest-due 2026-10-11","id":"ruflo-3.38.21-init-suppression-flags","event":"retest-due","date":"2026-10-11","fields":{},"recordedAt":"2026-10-12T14:37:47Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3509 reply 2026-10-12 by=ruvnet at=19:11:12Z","id":"ruvnet/ruflo#3509","event":"reply","date":"2026-10-12","fields":{"by":"ruvnet","at":"19:11:12Z"},"recordedAt":"2026-10-13T14:33:24Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3509 closed 2026-10-12 reason=completed","id":"ruvnet/ruflo#3509","event":"closed","date":"2026-10-12","fields":{"reason":"completed"},"recordedAt":"2026-10-13T14:33:24Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#3416 closed 2026-10-17 reason=completed","id":"ruvnet/ruflo#3416","event":"closed","date":"2026-10-17","fields":{"reason":"completed"},"recordedAt":"2026-10-18T14:24:01Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#3416 released 2026-10-17 version=3.57.0 pr=4228","id":"ruvnet/ruflo#3416","event":"released","date":"2026-10-17","fields":{"version":"3.57.0","pr":4228},"recordedAt":"2026-10-18T14:24:01Z"}
