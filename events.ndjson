@@ -113,3 +113,6 @@
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3509 closed 2026-10-12 reason=completed","id":"ruvnet/ruflo#3509","event":"closed","date":"2026-10-12","fields":{"reason":"completed"},"recordedAt":"2026-10-13T14:33:24Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3416 closed 2026-10-17 reason=completed","id":"ruvnet/ruflo#3416","event":"closed","date":"2026-10-17","fields":{"reason":"completed"},"recordedAt":"2026-10-18T14:24:01Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3416 released 2026-10-17 version=3.57.0 pr=4228","id":"ruvnet/ruflo#3416","event":"released","date":"2026-10-17","fields":{"version":"3.57.0","pr":4228},"recordedAt":"2026-10-18T14:24:01Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#3143 reply 2026-10-19 by=sparkling at=09:35:27Z","id":"ruvnet/ruflo#3143","event":"reply","date":"2026-10-19","fields":{"by":"sparkling","at":"09:35:27Z"},"recordedAt":"2026-10-19T14:28:28Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#3143 reply 2026-10-19 by=sparkling at=12:40:54Z","id":"ruvnet/ruflo#3143","event":"reply","date":"2026-10-19","fields":{"by":"sparkling","at":"12:40:54Z"},"recordedAt":"2026-10-19T14:28:28Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#3143 closed 2026-10-19 reason=completed","id":"ruvnet/ruflo#3143","event":"closed","date":"2026-10-19","fields":{"reason":"completed"},"recordedAt":"2026-10-19T14:28:28Z"}
