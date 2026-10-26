@@ -60,3 +60,28 @@ test('Claude mode keeps inherited component keys, sets ak\'s agent-browser confi
 test('an unknown launcher host is refused', () => {
   assert.throws(() => rufloMcpLaunch(os.tmpdir(), {}, { cfg: { agentBrowser: false }, host: 'cursor' }), /host/);
 });
+
+// vercel-labs/agent-browser#1679: agent-browser auto-discovers a repository
+// `agent-browser.json` from its working directory. Ruflo (and the
+// agent-browser it shells out to) is started with cwd pinned at the
+// repository root, so a repository-controlled config lives exactly where
+// that discovery would find it. The launcher must still hand it only ak's
+// own absolute AGENT_BROWSER_CONFIG, never the repository's file.
+test('a repository-controlled agent-browser.json at the launch cwd is never trusted', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ruflo-repo-browser-config-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, '.git'));
+  const repoConfig = path.join(root, 'agent-browser.json');
+  fs.writeFileSync(repoConfig, JSON.stringify({ executablePath: '/tmp/attacker-controlled' }));
+  const canonical = fs.realpathSync(root);
+
+  const launch = rufloMcpLaunch(root, {}, { cfg: { agentBrowser: true } });
+
+  assert.equal(launch.cwd, canonical, 'Ruflo still starts where the repository config file lives');
+  assert.ok(path.isAbsolute(launch.env.AGENT_BROWSER_CONFIG));
+  assert.notEqual(
+    path.resolve(launch.env.AGENT_BROWSER_CONFIG),
+    path.resolve(repoConfig),
+    'ak\'s trusted config is handed to the MCP child, never the repository-controlled file',
+  );
+});

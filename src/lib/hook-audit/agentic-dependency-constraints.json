@@ -1991,10 +1991,11 @@
         "files": ["docs/adr/0043-managed-ruflo-browser-executor.md"]
       },
       "adjustment": "Keep AGENT_BROWSER_CONFIG pointed at an ak-owned config on managed Ruflo MCP children until a released agent-browser stops launching repository-controlled executables from auto-discovered configuration.",
-      "status": "watching",
+      "status": "dispatched",
       "constraintIds": ["ruflo-agent-browser-compatibility-layer"],
       "history": [
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-10-26", "event": "dispatched", "note": "agent-browser 0.39.3 still auto-discovers repository config; ak dispatches the adjustment (a regression test pinning rufloMcpLaunch's AGENT_BROWSER_CONFIG precedence over a repository-controlled agent-browser.json at the launch cwd) on branch upstream/vercel-labs-agent-browser-1679. removalProof unmet: no released Ruflo artifact selects a replacement backend yet." }
       ]
     },
     {
