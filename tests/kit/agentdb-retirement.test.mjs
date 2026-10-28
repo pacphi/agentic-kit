@@ -95,6 +95,19 @@ test('a legacy agentdb key is tolerated silently and preserved on save', async (
   assert.equal('agentdb' in loadKitConfig(), false, 'fresh configs carry no agentdb default');
 });
 
+// ruvnet/ruflo#3444 and ruvnet/ruflo#3445 track the two upstream gaps that
+// retired the skill step (see harvest.mjs). @claude-flow/cli 3.48.0 closes
+// #3445 — SkillLibrary.createSkill() replaces the missing promote() — but
+// #3444 is unresolved: agentdb_consolidate still documents itself as a no-op
+// stub. So harvest's record-outcome step must still send no quality score
+// and no patterns; there is nothing yet for Ruflo to promote.
+test('harvest sends no quality or patterns — the skill step stays retired pending ruflo#3444', () => {
+  const [record] = harvest.planHarvest({ cwd: PROJECT });
+  assert.deepEqual(record.args, ['hooks', 'post-task', '--task-id', 'ak-harvest', '--success', 'true']);
+  assert.ok(!record.args.includes('--quality'), 'no quality score to gate skill creation on');
+  assert.ok(!record.args.includes('--patterns'), 'no patterns to promote');
+});
+
 test('the harvest plan runs only Ruflo verbs; distillation is an explicit opt-in', () => {
   const plain = harvest.planHarvest({ cwd: PROJECT });
   assert.deepEqual(plain.map((s) => s.cmd), ['ruflo']);

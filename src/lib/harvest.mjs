@@ -18,6 +18,19 @@
 // (#237 §3). It was retired with the standalone install (decision A in
 // docs/archive/2026-09-26-plan-issues-237-238-239-verification-and-decisions.md).
 //
+// ruvnet/ruflo#3445 and ruvnet/ruflo#3444 track whether a released Ruflo lets
+// this step promote skills again. @claude-flow/cli 3.48.0 (sha512-wClBcSuga09H
+// vU/+Ipn07ejQVz8swJuNHoVfTKOwID/lUbXWEBq+CwCY0CDo+8iMSVZKEf4Accpc/CJYxRjv3w==)
+// closes #3445: hooks post-task's feedback bridge now calls
+// SkillLibrary.createSkill() instead of the nonexistent promote()
+// (dist/src/memory/memory-bridge.js, gated on success && quality >= 0.9 &&
+// patterns.length). But #3444 is still open in that same release:
+// agentdb_consolidate's own description now says it "returns unsupported when
+// the installed controller is a no-op stub; no entries are promoted or
+// compressed in that case." Harvest supplies neither a quality score nor
+// patterns, and the paired consolidation step remains a no-op, so the skill
+// step stays retired until #3444 closes too.
+//
 // NEVER starts a daemon, NEVER backgrounds anything. `runner` is injectable so
 // `ak status --refresh=live --only harvest` can drive it against an isolated
 // temporary store.

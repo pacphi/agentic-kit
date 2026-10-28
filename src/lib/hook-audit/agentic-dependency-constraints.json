@@ -1546,12 +1546,13 @@
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane B1: harvest skill step retired"], "files": [] },
       "adjustment": "If a released Ruflo promotes skills after tasks, reconsider the retired harvest skill step; until then it stays retired.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "closed", "note": "completed by PR 3462; not in 3.47.1" }
+        { "date": "2026-09-27", "event": "closed", "note": "completed by PR 3462; not in 3.47.1" },
+        { "date": "2026-10-28", "event": "dispatched", "note": "verified against @claude-flow/cli 3.48.0 (sha512-wClBcSuga09HvU/+Ipn07ejQVz8swJuNHoVfTKOwID/lUbXWEBq+CwCY0CDo+8iMSVZKEf4Accpc/CJYxRjv3w==): hooks post-task's feedback bridge now calls SkillLibrary.createSkill() instead of the missing promote() (dist/src/memory/memory-bridge.js, gated on success && quality>=0.9 && patterns.length), closing this thread. The paired ruvnet/ruflo#3444 is still open in the same release (agentdb_consolidate still documents itself as a no-op stub), so the retired harvest skill step stays retired; ak dispatches this evidence plus a characterization test on branch upstream/ruvnet-ruflo-3445" }
       ]
     },
     {
