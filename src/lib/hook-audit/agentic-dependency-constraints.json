@@ -1527,12 +1527,13 @@
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane B1: harvest skill step retired"], "files": [] },
       "adjustment": "If a released Ruflo makes agentdb_consolidate do real work, reconsider the retired harvest step; until then it stays retired.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "closed", "note": "completed by PR 3453; not in 3.47.1" }
+        { "date": "2026-09-27", "event": "closed", "note": "completed by PR 3453; not in 3.47.1" },
+        { "date": "2026-10-28", "event": "dispatched", "note": "fix released in ruflo 3.48.0; PR #3453 (@claude-flow/cli src/mcp-tools/agentdb-tools.ts) made agentdb_consolidate report success:false/status:'unsupported' for a stub controller instead of a false success:true, but the controller is still a no-op — confirmed in the published @claude-flow/cli@3.48.0 tarball (dist/src/mcp-tools/agentdb-tools.js:791: 'Currently returns unsupported when the installed controller is a no-op stub; no entries are promoted or compressed in that case.'). agentdb_consolidate still does not do real work, so the adjustment's condition is not met and the retired harvest step stays retired, as tests/kit/agentdb-retirement.test.mjs already covers (12/12 pass on this branch); ak dispatches the adjustment on branch upstream/ruvnet-ruflo-3444" }
       ]
     },
     {
