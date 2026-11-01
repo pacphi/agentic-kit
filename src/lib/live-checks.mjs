@@ -211,7 +211,8 @@ export async function verifyMemory({
 /**
  * The verdict `ruflo security defend -o json` prints after its banner: the last
  * complete top-level JSON object with a boolean `safe`, else null (no verdict,
- * e.g. the text-mode crash after a detection, ruvnet/ruflo#3473).
+ * e.g. the text-mode crash after a detection seen through Ruflo 3.46.1, fixed
+ * upstream in 3.48.0 as ruvnet/ruflo#3473).
  * @param {string} stdout
  * @returns {{ safe: boolean, threats: number } | null}
  */
@@ -251,8 +252,9 @@ export async function verifySecurity({ runner = runCmd, cwd = process.cwd() } = 
   else if (rufloBuiltinDefence()) {
     warn("aidefence missing: defend uses Ruflo's built-in engine; adaptive learning and the aidefence_* MCP tools are unavailable. Fix: ak sync");
   } else { fail('aidefence missing — defend is silently non-functional (ruvnet/ruflo#2670). Fix: ak sync'); return false; }
-  // `-o json` because text-mode defend crashes after printing its detection
-  // count (ruvnet/ruflo#3473, still in 3.46.1); the JSON verdict does not.
+  // `-o json` regardless of host version: through 3.46.1, text-mode defend
+  // crashed after printing its detection count (ruvnet/ruflo#3473, fixed
+  // upstream in 3.48.0); the JSON verdict never did.
   const defend = (input) => runner('ruflo', ['security', 'defend', '-i', input, '-o', 'json']);
   const inj = await defend(DEFEND_INJECTION);
   const cln = await defend(DEFEND_CLEAN);
@@ -260,8 +262,10 @@ export async function verifySecurity({ runner = runCmd, cwd = process.cwd() } = 
   const clnVerdict = parseDefendVerdict(cln.stdout);
   if (!injVerdict || !clnVerdict) {
     const crashed = [inj, cln].some((r) => /\[ERROR\]/.test(`${r.stdout ?? ''}${r.stderr ?? ''}`));
+    // The historical fix is ruvnet/ruflo#3473 (closed, released in 3.48.0); a
+    // crash seen here on a current host is a different bug, so it is not named.
     fail(crashed
-      ? 'defend crashed before reporting a verdict (ruvnet/ruflo#3473)'
+      ? 'defend crashed before reporting a verdict'
       : `defend returned no verdict (injection exit=${inj.code}, clean exit=${cln.code})`);
     good = false;
   } else if (!injVerdict.safe && injVerdict.threats > 0 && clnVerdict.safe) {
