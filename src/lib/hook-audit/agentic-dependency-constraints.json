@@ -1670,13 +1670,14 @@
       "mapping": "mapped",
       "kitImpact": { "refs": ["plan Branch 3 item 4: defend reporting tells a detection from the post-detection crash"], "files": ["src/lib/live-checks.mjs"] },
       "adjustment": "verify reads `-o json`; text-mode crash is reported as a crash. Once a released Ruflo prints every detected threat and exits with its own verdict in text mode, nothing further is needed in ak.",
-      "status": "fixed-unreleased",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-27", "event": "watching", "note": "re-checked: still reproduces on 3.46.1 (text mode: 2 threat(s) detected, then [ERROR] Cannot read properties of undefined (reading 'color'), exit 1); ak x verify security now reads the -o json verdict" },
-        { "date": "2026-09-27", "event": "closed", "note": "completed by PR 3477; not in 3.47.1" }
+        { "date": "2026-09-27", "event": "closed", "note": "completed by PR 3477; not in 3.47.1" },
+        { "date": "2026-11-01", "event": "dispatched", "note": "released in Ruflo 3.48.0; opened a draft PR on upstream/ruvnet-ruflo-3473 that stops naming the closed issue in the live `-o json` crash message, since a crash seen on 3.48.0+ would be a different bug" }
       ]
     },
     {

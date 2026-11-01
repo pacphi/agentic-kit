@@ -280,10 +280,12 @@ test('the security check calls out the aidefence gap by name and stops early', a
   } finally { rmrf(secDir); }
 });
 
-// Ruflo 3.32.2+ ships a built-in defend engine (ruvnet/ruflo#2670), and in
-// 3.46.1 text-mode defend still crashes after it detects a threat
-// (ruvnet/ruflo#3473). The check reads the `-o json` verdict, so a detection is
-// reported from the verdict and a crash as a crash, never a pass.
+// Ruflo 3.32.2+ ships a built-in defend engine (ruvnet/ruflo#2670). Through
+// 3.46.1, text-mode defend crashed after detecting a threat; fixed upstream
+// in 3.48.0 (ruvnet/ruflo#3473). The check reads the `-o json` verdict
+// regardless of host version, so a detection is reported from the verdict and
+// a crash as a crash, never a pass; the runtime message no longer names the
+// closed issue, since a future crash under `-o json` would be a different bug.
 const DEFEND_FIXTURES = new URL('../fixtures/ruflo-defend/', import.meta.url);
 const fixture = (name) => fs.readFileSync(new URL(name, DEFEND_FIXTURES), 'utf8');
 
@@ -346,7 +348,7 @@ test('verifySecurity reports a detection from the JSON verdict when only the bui
   } finally { cleanup(); }
 });
 
-test('verifySecurity reports the post-detection crash (ruvnet/ruflo#3473) as a crash and fails', async () => {
+test('verifySecurity reports a post-detection crash as a crash and fails, without naming the closed ruvnet/ruflo#3473', async () => {
   seedHome();
   const cleanup = securityTree({ aidefence: true, builtin: true });
   try {
@@ -356,7 +358,9 @@ test('verifySecurity reports the post-detection crash (ruvnet/ruflo#3473) as a c
     });
     const { result, out } = await captureLog(() => live.verifySecurity({ runner }));
     assert.equal(result, false);
-    assert.match(out, /defend crashed before reporting a verdict \(ruvnet\/ruflo#3473\)/);
+    assert.match(out, /defend crashed before reporting a verdict/);
+    assert.doesNotMatch(out, /ruvnet\/ruflo#3473/,
+      'the issue is fixed upstream (3.48.0); a future crash under -o json would be a different bug');
     assert.doesNotMatch(out, /defend: flags injection/);
   } finally { cleanup(); }
 });
