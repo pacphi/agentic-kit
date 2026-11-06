@@ -1389,11 +1389,12 @@
         "files": []
       },
       "adjustment": "Drop the managed daemon.idleSecs 0 setting once a released Ruflo stops shutting the daemon down on restored lastRun/lastStartedAt timestamps.",
-      "status": "watching",
+      "status": "dispatched",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-10-25", "event": "dispatched", "note": "fix released in ruflo 3.46.0 (PR #3421: worker-daemon.js:1019-1024 now counts idle from process start); ak already drops daemon.idleSecs for rufloVersion >= IDLE_FIX_VERSION (src/lib/ruflo-daemon-config.mjs desiredDaemonKeys), covered by tests/kit/ruflo-daemon-config.test.mjs; ak dispatches the adjustment on branch upstream/ruvnet-ruflo-3194" }
       ]
     },
     {
