@@ -178,3 +178,4 @@
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2640 released 2026-11-10 version=3.75.0 pr=4925","id":"ruvnet/ruflo#2640","event":"released","date":"2026-11-10","fields":{"version":"3.75.0","pr":4925},"recordedAt":"2026-11-10T14:19:47Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2854 closed 2026-11-09 reason=completed","id":"ruvnet/ruflo#2854","event":"closed","date":"2026-11-09","fields":{"reason":"completed"},"recordedAt":"2026-11-10T14:19:47Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2854 released 2026-11-10 version=3.75.0 pr=4921","id":"ruvnet/ruflo#2854","event":"released","date":"2026-11-10","fields":{"version":"3.75.0","pr":4921},"recordedAt":"2026-11-10T14:19:47Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#2935 stale 2026-08-13","id":"ruvnet/ruflo#2935","event":"stale","date":"2026-08-13","fields":{},"recordedAt":"2026-11-11T14:19:58Z"}
