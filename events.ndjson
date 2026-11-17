@@ -180,3 +180,4 @@
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2854 released 2026-11-10 version=3.75.0 pr=4921","id":"ruvnet/ruflo#2854","event":"released","date":"2026-11-10","fields":{"version":"3.75.0","pr":4921},"recordedAt":"2026-11-10T14:19:47Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2935 stale 2026-08-13","id":"ruvnet/ruflo#2935","event":"stale","date":"2026-08-13","fields":{},"recordedAt":"2026-11-11T14:19:58Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#2935 reply 2026-11-12 by=ObiWanKenobi at=08:48:48Z","id":"ruvnet/ruflo#2935","event":"reply","date":"2026-11-12","fields":{"by":"ObiWanKenobi","at":"08:48:48Z"},"recordedAt":"2026-11-12T14:21:02Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#3508 released 2026-10-20 version=3.58.0 pr=3620 branch=upstream/ruvnet-ruflo-3508","id":"ruvnet/ruflo#3508","event":"released","date":"2026-10-20","fields":{"version":"3.58.0","pr":3620,"branch":"upstream/ruvnet-ruflo-3508"},"recordedAt":"2026-11-17T14:20:07Z"}
