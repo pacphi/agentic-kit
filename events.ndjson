@@ -185,3 +185,4 @@
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3446 released 2026-10-21 version=3.59.5 pr=4339 branch=upstream/ruvnet-ruflo-3446","id":"ruvnet/ruflo#3446","event":"released","date":"2026-10-21","fields":{"version":"3.59.5","pr":4339,"branch":"upstream/ruvnet-ruflo-3446"},"recordedAt":"2026-11-19T14:20:30Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3163 closed 2026-11-19 reason=completed","id":"ruvnet/ruflo#3163","event":"closed","date":"2026-11-19","fields":{"reason":"completed"},"recordedAt":"2026-11-20T14:19:22Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3163 released 2026-11-19 version=3.79.0 pr=5049","id":"ruvnet/ruflo#3163","event":"released","date":"2026-11-19","fields":{"version":"3.79.0","pr":5049},"recordedAt":"2026-11-20T14:19:22Z"}
+{"line":"UPSTREAM-WATCH openai/codex#17827 closed 2026-11-21 reason=completed","id":"openai/codex#17827","event":"closed","date":"2026-11-21","fields":{"reason":"completed"},"recordedAt":"2026-11-21T14:19:25Z"}
