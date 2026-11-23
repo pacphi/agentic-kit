@@ -186,3 +186,6 @@
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3163 closed 2026-11-19 reason=completed","id":"ruvnet/ruflo#3163","event":"closed","date":"2026-11-19","fields":{"reason":"completed"},"recordedAt":"2026-11-20T14:19:22Z"}
 {"line":"UPSTREAM-WATCH ruvnet/ruflo#3163 released 2026-11-19 version=3.79.0 pr=5049","id":"ruvnet/ruflo#3163","event":"released","date":"2026-11-19","fields":{"version":"3.79.0","pr":5049},"recordedAt":"2026-11-20T14:19:22Z"}
 {"line":"UPSTREAM-WATCH openai/codex#17827 closed 2026-11-21 reason=completed","id":"openai/codex#17827","event":"closed","date":"2026-11-21","fields":{"reason":"completed"},"recordedAt":"2026-11-21T14:19:25Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#2935 closed 2026-11-22 reason=completed","id":"ruvnet/ruflo#2935","event":"closed","date":"2026-11-22","fields":{"reason":"completed"},"recordedAt":"2026-11-23T14:21:36Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#2935 released 2026-11-22 version=3.80.1 pr=5064","id":"ruvnet/ruflo#2935","event":"released","date":"2026-11-22","fields":{"version":"3.80.1","pr":5064},"recordedAt":"2026-11-23T14:21:36Z"}
+{"line":"UPSTREAM-WATCH ruvnet/ruflo#3046 stale 2026-08-16","id":"ruvnet/ruflo#3046","event":"stale","date":"2026-08-16","fields":{},"recordedAt":"2026-11-23T14:21:36Z"}
